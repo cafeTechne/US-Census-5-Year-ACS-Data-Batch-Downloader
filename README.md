@@ -8,6 +8,62 @@ Easily fetch and process census data with this Python script.
 3. 📈 Efficiently processes and melts data for easier use.
 4. 💾 Saves data locally in CSV format.
 
+
+# 🐍 Setting Up Python and Using the Command Line 🖥️
+
+If you're new to Python or haven't used the command line (terminal on macOS/Linux, Command Prompt or PowerShell on Windows) before, here's a quick guide to get you started:
+
+## 🛠️ Installing Python:
+
+1. **Windows/Mac**: 
+    - Go to [Python's official website](https://www.python.org/downloads/).
+    - Download the latest version for your operating system.
+    - Run the downloaded installer. Ensure the "Add Python to PATH" option is checked and then complete the installation.
+
+2. **Linux**: 
+    - Most Linux distributions come with Python pre-installed. You can check by typing `python3 --version` in the terminal. If it's not installed:
+      ```bash
+      sudo apt-get update
+      sudo apt-get install python3.8
+      ```
+
+## 🚀 Using the Command Line:
+
+1. **Opening the Command Line**:
+    - **Windows**: Press `Windows + R`, type `cmd`, and press Enter.
+    - **Mac**: Press `Cmd + Space`, type `terminal`, and press Enter.
+    - **Linux**: Usually `Ctrl + Alt + T` or search for `terminal` in the app menu.
+
+2. **Navigating Directories**:
+    - `cd [Directory Name]`: Change to a specific directory.
+    - `cd ..`: Go up one directory.
+    - `ls` (macOS/Linux) or `dir` (Windows): List all files in the current directory.
+
+3. **Running Python Scripts**:
+    - After navigating to the directory containing your Python script, use:
+      ```bash
+      python [script_name].py
+      ```
+    - If you encounter issues on some systems, try using `python3` instead of `python`.
+
+4. **Installing Python Libraries**:
+    - Use pip (Python's package installer) to install libraries. For example:
+      ```bash
+      pip install requests
+      ```
+    - If `pip` doesn't work, try using `pip3` instead.
+
+## 📚 Additional Resources:
+
+- [Python for Beginners](https://docs.python.org/3/tutorial/index.html)
+- [Command Line Basics](https://tutorial.djangogirls.org/en/intro_to_command_line/)
+
+---
+
+Now you're ready to run the Census Data Fetcher script! Next, read the [How to Use](#-how-to-use) section for instructions.
+
+
+
 ## 🚀 How to Use:
 
 1. **Clone the Repository**
