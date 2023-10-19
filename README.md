@@ -3,7 +3,7 @@
 Easily fetch and process census data with this Python script.
 
 ## 🌟 Features:
-1. 🌍 Fetches data from the US Census Bureau.
+1. 🌍 Fetches batches of data from the US Census Bureau from 2010-2019.
 2. 🎨 Aesthetically pleasing GUI with color schemes.
 3. 📈 Efficiently processes and melts data for easier use.
 4. 💾 Saves data locally in CSV format.
