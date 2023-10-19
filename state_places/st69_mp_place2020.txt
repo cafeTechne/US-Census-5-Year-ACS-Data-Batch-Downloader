@@ -1,0 +1,137 @@
+STATE|STATEFP|PLACEFP|PLACENS|PLACENAME|TYPE|CLASSFP|FUNCSTAT|COUNTIES
+MP|69|00300|02631658|Achugao village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|00400|02631659|Afatung village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|00450|02631660|Afetnas village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|00500|02631661|Agatasi (Payapai) village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|00600|02631662|Agingan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01100|02631663|Agrihan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|01150|02631664|Aguijan village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|01170|02631665|Agusan village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01200|02631666|Alaguan village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01220|02631667|Alamagan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|01250|02631668|American Memorial Park village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01280|02631669|Anatahan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|01300|02631670|Annex F village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01350|02631671|Apanon village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01400|02631672|As Akina village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01450|02631673|As Akoddo village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01500|02631674|As Dudo village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01600|02631675|As Falipe village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01650|02631676|As Gonna village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01700|02631677|As Lito village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01750|02631678|As Mahetog village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01800|02631679|As Matuis village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01850|02631680|As Niebes (Nieves) village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|01900|02631681|As Palacios village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|01950|02631682|As Perdido village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|02000|02631683|As Rabagau village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|02500|02631684|As Teo village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|03000|02631685|As Terlaje village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|03100|02631686|Asuncion village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|03500|02631687|Banaderu village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|04000|02631688|Bird Island village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|06000|02631689|Capitol Hill village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|06500|02631690|Carolinas village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|07000|02631691|Carolinas Heights village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|07500|02631692|Chacha village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|08000|02631693|Chalan Galaide village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|11820|02631694|Chalan Kanoa I village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|11850|02631695|Chalan Kanoa II village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|11860|02631696|Chalan Kanoa III village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|11870|02631697|Chalan Kanoa IV village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|12000|02631698|Chalan Kiya village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13000|02631699|Chalan Laulau village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13500|02631700|Chalan Piao village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13600|02631701|Chalan Rueda village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13610|02631702|China Town village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13620|02631703|Dagu village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|13690|02631704|Dandan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|14550|02631705|Duge village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|14650|02631706|Eastern Tinian (Marpo Valley) village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|14700|02631707|Fananganan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|14750|02631708|Fanlagon village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|14800|02631709|Fanonchuluyan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|14850|02631710|Farallon de Medinilla village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|14900|02631711|Finasisu village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|14950|02631712|Finata village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|15000|02631713|Forbidden Island village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|15500|02631714|Gagani village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|15550|02631715|Gampapa village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|16000|02631716|Gaonan village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|17750|02631717|Garapan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|17800|02631718|Gayaugan (Kaan) village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|17850|02631719|Ginalangan (Chudan) village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|17900|02631720|Gualo Rai village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|17950|02631721|Guguan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|18000|02631722|Hilaihai village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18020|02631723|I Akgak village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18050|02631724|I Chenchon village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|18100|02631725|I Denni village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18150|02631726|I Fadang village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18200|02631727|I Koridot village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|18250|02631728|I Liyang village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18300|02631729|I Maddok village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18350|02631730|I Naftan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|18400|02631731|I Pitot village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19510|02631732|Kagman village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19520|02631733|Kagman I village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19530|02631734|Kagman II village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19540|02631735|Kagman III village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19550|02631736|Kagman IV village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19560|02631737|Kalabera village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19570|02631738|Kannat Tabla village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19580|02631739|Koblerville village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19650|02631740|Laulau Bay village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19700|02631741|Lempanai village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|19750|02631742|Liyu village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|19800|02631743|Lower Base village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19850|02631744|Makmak village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|19900|02631745|Managaha village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|19950|02631746|Mananana village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|22430|02631747|Marpi village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|22440|02631748|Marpo Heights village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|22450|02631749|Matansa village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|22460|02631750|Matpo village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|22470|02631751|Maturana Hill village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|22500|02631752|Maug village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|22530|02631753|Mochong village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|22550|02631754|Mount Sabana (Minachage) village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|22575|02631755|Mount Taipingot village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|22600|02631756|Nanasu village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|22650|02631757|Navy Hill village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|23100|02631758|Northern Tinian village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|23900|02631759|Opyan village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|23950|02631760|Pagan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|23980|02631761|Papago village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|23990|02631762|Pekngasu village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|24000|02631763|Pidos Kahalo village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|24100|02631764|Puerto Rico village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|25100|02631765|Sabaneta village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|25200|02631766|Sadog Tasi village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|25300|02631767|Sailigai Papa village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|42000|02631768|San Antonio village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|47205|02631769|San Jose (Oleai) village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|47210|02631770|San Jose (Tinian Municipality) village|INCORPORATED PLACE|C9|N|Tinian Municipality
+MP|69|53100|02631771|San Roque village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|59000|02631772|San Vicente village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|60500|02633594|Sarigan village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|61000|02631773|Sayan Gigani village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|62000|02631774|Sinapalo village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|64900|02631775|Songsong village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|70800|02631776|Susupe village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|70900|02631777|Tagolo Ogso village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|71000|02631778|Taimama village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|72000|02631779|Talafofo village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|73000|02631780|Talakhaya village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|74000|02631781|Talo village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|76700|02631782|Tanapag village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|76900|02631783|Tangke village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|77000|02631784|Tapochao village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|77100|02631785|Tatachok village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|77200|02631786|Tatgua village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|77300|02631787|Tenetu village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|89000|02631788|Tottotville village|INCORPORATED PLACE|C9|N|Saipan Municipality
+MP|69|89100|02631789|Ugis village|INCORPORATED PLACE|C9|N|Rota Municipality
+MP|69|89200|02631790|Uracus (Farallon de Pajaros) village|INCORPORATED PLACE|C9|N|Northern Islands Municipality
+MP|69|89300|02631791|Western Tinian village|INCORPORATED PLACE|C9|N|Tinian Municipality
+
