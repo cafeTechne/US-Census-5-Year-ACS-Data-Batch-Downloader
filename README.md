@@ -12,7 +12,9 @@ Easily fetch and process census data with this Python script.
 
 1. **Clone the Repository**
 ```bash
+
 git clone https://github.com/cafeTechne/acs5year_place_downloader
+
 cd acs5year_place_downloader
 
 pip install requests pandas tkinter
