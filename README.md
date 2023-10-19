@@ -41,8 +41,7 @@ You can adjust the following configurations:
 
     State Files and Mapping: The list STATE_FILES and dictionary STATE_MAPPING can be updated to add or modify the existing state files or mappings.
 
-💡 Note:
+💡 Note: Please star if this is useful and add feature requests as bugs and I'll see what I can do to extend this app to work for your research.
 
-The script uses a local variables.json file to help map variable names. Ensure this file is present in the correct path before running the script.
 🔐 License:
 Why?
