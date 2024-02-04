@@ -1,4 +1,4 @@
-# 📊 ACS 5-Year Place Census Data Fetcher 📊
+# 📊 US Census 5-Year ACS Data Batch Downloader 📊
 
 Easily fetch and process census data with this Python script.
 
