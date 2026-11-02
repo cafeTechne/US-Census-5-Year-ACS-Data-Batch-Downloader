@@ -109,3 +109,4 @@ Once connected in Claude Code or Claude Desktop, you can ask questions directly:
 - *"Show me the variables inside table B19013."*
 - *"Fetch population by age (table B01001) for New York city for 2021 and 2022."*
 - *"Download table B01001 for Austin, Texas from 2018 to 2022 and export it as an Excel spreadsheet."*
+
