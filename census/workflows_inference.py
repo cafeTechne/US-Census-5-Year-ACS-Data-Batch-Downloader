@@ -259,7 +259,7 @@ def minimum_detectable_difference(
         confidence: Test confidence level. power: Desired power.
         year1, year2: Releases, to account for overlapping 5-year periods.
 
-    Example: minimum_detectable_difference(2.1, 2.4) -> about 4.4 points.
+    Example: minimum_detectable_difference(2.1, 2.4) -> about 4.8 points (90% confidence, 80% power).
     """
     from census.planning import minimum_detectable_difference as _mdd
 
@@ -294,10 +294,26 @@ def trend_test(years: List[int], estimates: List[float], moes: List[float],
     """
     from census.trends import linear_trend_test
 
+    from census.trends import overlap_design_check
+
+    try:
+        design = overlap_design_check(years)
+    except ValueError as exc:
+        return _fail(errors.INVALID_INPUT, str(exc))
+    if design.get("overlapping"):
+        latest = max(int(y) for y in years)
+        example = [latest - 10, latest - 5, latest]
+        return _fail(
+            errors.INVALID_INPUT,
+            f"Releases {sorted(years)} overlap: 5-year releases less than 5 years apart share sample "
+            f"years, so a trend test across them overstates precision. Use releases at least 5 years "
+            f"apart, e.g. {example}.",
+            f"download releases {example} and call trend_test again",
+        )
     try:
         res = linear_trend_test(years, estimates, moes=moes, confidence_level=confidence_level)
     except ValueError as exc:
-        return _fail(errors.INVALID_INPUT, str(exc), "use the suggested non-overlapping releases")
+        return _fail(errors.INVALID_INPUT, str(exc))
     sig = res.get("significant")
     return _ok(f"Trend slope {res.get('slope')} per year; significant: {sig}.",
                "make_figure(kind='trend') to plot it", **res)
