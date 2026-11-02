@@ -27,6 +27,7 @@ Examples:
         --drafted-by agent:model/session --rationale TEXT --source-url https://www.census.gov/...
     python -m census record-rule draft.json --reviewed-by agent:model/other-session
     python -m census validate --offline --json
+    python -m census tool fit_model '{"input_path": "frame.parquet", "formula": "y ~ x"}' --json
     python -m census cache stats
 """
 
@@ -342,6 +343,24 @@ def cmd_validate_census(args: argparse.Namespace) -> int:
     return EXIT_OK if result["success"] else EXIT_FAILURE
 
 
+def cmd_tool(args: argparse.Namespace) -> int:
+    """Run any shared workflow tool by name with JSON arguments."""
+    from census import workflows_inference
+
+    fn = getattr(workflows_inference, args.name, None) or getattr(workflows, args.name, None)
+    if fn is None or args.name.startswith("_") or not callable(fn):
+        return _emit(errors.error_result(errors.INVALID_INPUT, f"Unknown tool '{args.name}'."), args.json)
+    try:
+        kwargs = json.loads(args.arguments) if args.arguments else {}
+    except json.JSONDecodeError as exc:
+        return _emit(errors.error_result(errors.INVALID_INPUT, f"Arguments are not valid JSON: {exc}"), args.json)
+    try:
+        result = fn(**kwargs)
+    except TypeError as exc:
+        result = errors.error_result(errors.INVALID_INPUT, str(exc))
+    return _emit(result, args.json)
+
+
 def cmd_cache(args: argparse.Namespace) -> int:
     cache = get_default_cache()
     if cache is None:
@@ -493,6 +512,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir", help="also write validation_report.md/.json here")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_validate_census)
+
+    p = sub.add_parser("tool", help="run any MCP workflow tool by name, e.g. tool fit_model '{\"input_path\": ...}'")
+    p.add_argument("name", help="tool name, e.g. fit_model, small_area_estimates, make_figure")
+    p.add_argument("arguments", nargs="?", help="JSON object of keyword arguments")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_tool)
 
     p = sub.add_parser("cache", help="query cache maintenance")
     p.add_argument("action", choices=("stats", "clear"))

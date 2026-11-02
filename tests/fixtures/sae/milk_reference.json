@@ -1,0 +1,32 @@
+{
+  "dataset": "milk.csv",
+  "description": "Fresh-milk expenditure, 43 small areas (Arora & Lahiri 1997, JASA 92:1555-1562; You & Chapman 2006). Fay-Herriot model yi ~ as.factor(MajorArea) with vardir = SD^2.",
+  "data_source": {
+    "url": "https://raw.githubusercontent.com/cran/sae/master/data/milk.rda",
+    "note": "Read-only GitHub mirror of the CRAN sae package data/milk.rda, converted to CSV (columns unchanged, values exact as stored). Example call published in Molina & Marhuenda (2015), The R Journal 7(1):81-98, Example 1, https://journal.r-project.org/archive/2015/RJ-2015-007/RJ-2015-007.pdf"
+  },
+  "published_source": {
+    "url": "https://archives.rstats.dev/lists/r-sig-mixed-models/msg/msg-be3acd1849b3",
+    "title": "r-sig-mixed-models thread comparing sae::eblupFH with nlme, metafor and SAS on the milk data (posted output)",
+    "note": "The R Journal paper shows the milk example only as a figure; the numerical output below is the printed output posted to the R mailing list archive. sae uses Fisher scoring with PRECISION = 1e-4, so its last digits differ slightly from the exact optimum; metafor::rma and PROC MIXED agree."
+  },
+  "REML": {
+    "sae_eblupFH": {
+      "refvar": 0.01855022,
+      "estcoef": {
+        "(Intercept)": {"beta": 0.9681890, "std.error": 0.06936208, "pvalue": 2.793443e-44},
+        "as.factor(MajorArea)2": {"beta": 0.1327801, "std.error": 0.10300072, "pvalue": 1.973569e-01},
+        "as.factor(MajorArea)3": {"beta": 0.2269462, "std.error": 0.09232981, "pvalue": 1.397151e-02},
+        "as.factor(MajorArea)4": {"beta": -0.2413011, "std.error": 0.08161707, "pvalue": 3.111496e-03}
+      },
+      "goodness": {"loglike": 12.677478, "AIC": -15.354956, "BIC": -6.548956}
+    },
+    "metafor_rma_tau2": 0.01854996,
+    "splus_lme_variance": 0.01855028,
+    "sas_proc_mixed_covparm": 0.01855
+  },
+  "ML": {
+    "metafor_rma_tau2": 0.0155174,
+    "nlme_lme_variance": 0.01551751
+  }
+}

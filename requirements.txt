@@ -4,3 +4,6 @@ openpyxl>=3.1.0
 python-dotenv>=1.0.0
 mcp>=1.2.0,<2  # FastMCP added in 1.2; 2.x renamed FastMCP to MCPServer; migrate before lifting
 pyarrow>=14.0.0
+scipy>=1.10
+statsmodels>=0.14.2
+matplotlib>=3.7

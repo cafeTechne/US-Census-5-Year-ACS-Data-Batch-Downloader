@@ -60,7 +60,7 @@ from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs5_overlap_years
-from census import workflows
+from census import workflows, workflows_inference
 
 load_dotenv()
 
@@ -1022,6 +1022,15 @@ for _tool in (
     workflows.draft_rule_override,
     workflows.record_rule_review,
     workflows.run_validation,
+    workflows_inference.build_analysis_frame,
+    workflows_inference.fit_model,
+    workflows_inference.small_area_estimates,
+    workflows_inference.correlation_matrix,
+    workflows_inference.minimum_detectable_difference,
+    workflows_inference.reliability_profile,
+    workflows_inference.trend_test,
+    workflows_inference.make_figure,
+    workflows_inference.make_table,
 ):
     mcp.tool()(_tool)
 
@@ -1036,6 +1045,15 @@ replay_extraction = workflows.replay_extraction
 draft_rule_override = workflows.draft_rule_override
 record_rule_review = workflows.record_rule_review
 run_validation = workflows.run_validation
+build_analysis_frame = workflows_inference.build_analysis_frame
+fit_model = workflows_inference.fit_model
+small_area_estimates = workflows_inference.small_area_estimates
+correlation_matrix = workflows_inference.correlation_matrix
+minimum_detectable_difference = workflows_inference.minimum_detectable_difference
+reliability_profile = workflows_inference.reliability_profile
+trend_test = workflows_inference.trend_test
+make_figure = workflows_inference.make_figure
+make_table = workflows_inference.make_table
 
 
 def main() -> None:
