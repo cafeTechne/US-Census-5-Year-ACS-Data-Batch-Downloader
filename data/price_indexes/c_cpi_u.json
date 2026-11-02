@@ -1,0 +1,24 @@
+{
+  "name": "C-CPI-U",
+  "series_id": "SUUR0000SA0",
+  "description": "Chained CPI for All Urban Consumers, U.S. city average, all items, not seasonally adjusted (used by the Census Bureau for CPS ASEC income from 2000 onward)",
+  "base_period": "December 1999=100",
+  "source": "https://api.bls.gov/publicAPI/v1/timeseries/data/SUUR0000SA0",
+  "method": "annual average = mean of 12 monthly indexes, rounded to 3 decimals",
+  "retrieved_at": "2026-11-02T13:31:55+00:00",
+  "raw_sha256": [
+    "6cdc1e6e1f346e2683a0f9bf7b232302dc71bcef8ed069d0bac8655b1cfeea99",
+    "d7c1a171561b26fba68c930e64dca2cb8d7cc04bb1b2064f7c85741dedccfaa0",
+    "402b89bb58565bfc020cb9af1f515e33400477828d5be32e5da4d47bcd59decb"
+  ],
+  "unpublished_months": [],
+  "note": "Years with an unpublished month have no annual average in the CSV; see provisional.",
+  "provisional": {},
+  "preliminary_years": [],
+  "revision_note": "C-CPI-U values are preliminary when first published and are revised for about 10-12 months; years listed in preliminary_years contain preliminary months and will change.",
+  "csv_sha256": "7cb1be182657b2effc3fcfb803e91b5e406825b5b42f2d84b02d91c02c0d923c",
+  "years": [
+    2000,
+    2024
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "2020 Census Tract to 2010 Census Tract Relationship File (national), compact extract",
+  "publisher": "U.S. Census Bureau, Geography Division",
+  "source_url": "https://www2.census.gov/geo/docs/maps-data/data/rel2020/tract/tab20_tract20_tract10_natl.txt",
+  "documentation": [
+    "https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2020.html",
+    "https://www.census.gov/programs-surveys/geography/technical-documentation/records-layout/2020-comp-record-layout.html",
+    "https://www2.census.gov/geo/pdfs/maps-data/data/rel2020/tract/explanation_tab20_tract20_tract10.pdf"
+  ],
+  "retrieved_at": "2026-11-02T13:35:31+00:00",
+  "retrieved_from": "https://www2.census.gov/geo/docs/maps-data/data/rel2020/tract/tab20_tract20_tract10_natl.txt",
+  "source_last_modified": "Tue, 25 Jan 2022 18:16:26 GMT",
+  "source_bytes": 18686287,
+  "source_sha256": "3c2ea8e13bf359349cc6ee042980e539d0a8032328ce8c5ae10679b9000e3d17",
+  "source_format": "pipe-delimited UTF-8 text, one row per 2020-tract x 2010-tract intersection",
+  "extract_file": "tract_2010_2020.csv.gz",
+  "extract_columns": {
+    "geoid_2010": "GEOID_TRACT_10",
+    "geoid_2020": "GEOID_TRACT_20",
+    "arealand_part": "AREALAND_PART",
+    "areawater_part": "AREAWATER_PART",
+    "arealand_2010": "AREALAND_TRACT_10",
+    "areawater_2010": "AREAWATER_TRACT_10",
+    "arealand_2020": "AREALAND_TRACT_20",
+    "areawater_2020": "AREAWATER_TRACT_20"
+  },
+  "area_units": "square meters",
+  "rows": 126450,
+  "tracts_2010": 74134,
+  "tracts_2020": 85528,
+  "csv_sha256": "dbffebce7c24c91360c142d6189068f91321877d0a0f89c1420347c0a34234b8",
+  "notes": [
+    "2020 Connecticut tract GEOIDs use the former 8 counties (09001-09015); see ct_tract_2020_2022.csv for the planning-region GEOIDs used by ACS 2022+ releases.",
+    "Rows are sorted by geoid_2010, geoid_2020; the gzip header has mtime=0 and no filename."
+  ]
+}

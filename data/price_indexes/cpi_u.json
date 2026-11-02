@@ -5,16 +5,18 @@
   "base_period": "1982-84=100",
   "source": "https://api.bls.gov/publicAPI/v1/timeseries/data/CUUR0000SA0",
   "method": "annual average = mean of 12 monthly indexes, rounded to 3 decimals",
-  "retrieved_at": "2026-11-02T13:17:49+00:00",
+  "retrieved_at": "2026-11-02T13:31:54+00:00",
   "raw_sha256": [
-    "7d881c77c07507ebff1eacb64fb264bb671da923969e7bd1849171a9bd470eea",
+    "e2dc093e25628d164558a80bfc9da5041f8edb7ffc6014fe6bba862b835f7b1d",
     "416a169424baf1e01cf42d66181d415a08728d621684e9c94573c87c9491117f",
-    "4aba75f7a919ddb756dfa4e9ed5f4700142f857c7f4e690b431877569f905a03"
+    "763dc68d185e9f584978611a030f85e254ac08ea6cd91bf8cef5141f1a7b97d4"
   ],
   "unpublished_months": [
     "2025-M10"
   ],
-  "note": "Years with an unpublished month have no computed annual average here.",
+  "note": "Years with an unpublished month have no annual average in the CSV; see provisional.",
+  "provisional": {},
+  "preliminary_years": [],
   "csv_sha256": "f5b4e5bfde81046855e800c653c818d4572db03d0896ec7967de55d8333c6b7f",
   "years": [
     2000,

@@ -35,3 +35,5 @@ docs/audits/*.csv
 # Versioned data that must be committed despite *.csv above
 !data/price_indexes/*.csv
 !crosswalks/**/*.csv
+!data/geo_crosswalks/*.csv
+!tests/fixtures/**/*.csv
