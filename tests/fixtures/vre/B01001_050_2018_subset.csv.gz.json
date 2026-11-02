@@ -1,0 +1,11 @@
+{
+  "source_url": "https://www2.census.gov/programs-surveys/acs/replicate_estimates/2018/data/5-year/050/B01001.csv.gz",
+  "source_sha256": "66958a9d09f593db7e81787e70456c3ef9f5caad372218fb7c41e2dd003e764b",
+  "source_size_bytes": 22142531,
+  "downloaded_at": "2026-11-02",
+  "fixture_sha256": "c946668e66fc61cbe841d8b94e62b5f42dbf6ecce7be9f93ad95caba4214a68b",
+  "selection": "header, the two table title/universe rows, and every row whose GEOID ends with US + one of: 48087, 48017, 48301",
+  "data_rows": 147,
+  "transformation": "selected lines copied byte-for-byte from the decompressed source CSV; gzip-compressed with mtime=0",
+  "notes": "2014-2018 ACS 5-year VRE, B01001 at the county level: Collingsworth (48087), Bailey (48017), and Loving (48301) counties, TX. B01001_001 is a controlled estimate (CME '*****', published MOE 0) in 48087 and 48017 but not in 48301; in 48087 its replicates differ from the estimate (weight rounding, VRE documentation p. 12). Several zero-count rows carry model-based published MOEs."
+}

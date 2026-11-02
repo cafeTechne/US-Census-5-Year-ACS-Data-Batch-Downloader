@@ -1,0 +1,12 @@
+{
+  "data_rows": 247,
+  "kind": "vre_subset",
+  "retrieved": "2026-11-02",
+  "selection": "summary level 040: header, the table title/universe rows, and the rows of states 06,36,48,17,56",
+  "sha256": "883480cfdf9ce60fe7194eab0736782ab63f8e3f9f7756ef9d2bbf27f7cd8c73",
+  "size_bytes": 59341,
+  "source_sha256": "55c09e98dce63074b64a37a8d81b871928f4172f667f8e52f62afc893a75a347",
+  "source_size_bytes": 583494,
+  "source_url": "https://www2.census.gov/programs-surveys/acs/replicate_estimates/2023/data/5-year/040/B01001.csv.zip",
+  "transformation": "selected lines copied byte-for-byte from the decompressed source CSV; gzip-compressed with mtime=0"
+}

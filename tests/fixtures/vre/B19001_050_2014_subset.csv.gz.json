@@ -1,0 +1,11 @@
+{
+  "source_url": "https://www2.census.gov/programs-surveys/acs/replicate_estimates/2014/data/5-year/050/B19001.csv.gz",
+  "source_sha256": "ebb04a2f060f8acd17a9c4b8631d34f068d69e0fd2df701d6d9dc3959c8f2759",
+  "source_size_bytes": 8563880,
+  "downloaded_at": "2026-11-02",
+  "fixture_sha256": "248440ae5eb9eba6cb4a44951ca3f50c3600d225023696b8351d2ebbaf2f6299",
+  "selection": "header, the two table title/universe rows, and every row whose GEOID ends with US + one of: 35013, 72011, 05117",
+  "data_rows": 51,
+  "transformation": "selected lines copied byte-for-byte from the decompressed source CSV; gzip-compressed with mtime=0",
+  "notes": "2010-2014 ACS 5-year VRE, B19001 at the county level (gzip release; lowercase estimate/moe; 7-character GEOID prefix 05000US; Latin-1 names: Dona Ana County NM with n-tilde, Anasco Municipio PR). Prairie County AR has a zero-count row (B19001_017) with a model-based published MOE."
+}

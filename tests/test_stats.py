@@ -122,8 +122,14 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(total, 300)
         self.assertAlmostEqual(moe, 50.0)
 
-    def test_aggregate_zero_estimates_use_largest_moe_once(self):
+    def test_aggregate_zero_estimates_include_all_moes_by_default(self):
+        # ACS General Handbook 2020 ch. 8, formula 1: every component's MOE counts.
         total, moe = aggregate_estimates([100, 0, 0], [30, 20, 40])
+        self.assertEqual(total, 100)
+        self.assertAlmostEqual(moe, (30**2 + 20**2 + 40**2) ** 0.5)
+
+    def test_aggregate_zero_estimates_legacy_largest_rule(self):
+        total, moe = aggregate_estimates([100, 0, 0], [30, 20, 40], zero_estimate_rule="largest")
         self.assertEqual(total, 100)
         self.assertAlmostEqual(moe, 50.0)  # sqrt(30^2 + 40^2)
 

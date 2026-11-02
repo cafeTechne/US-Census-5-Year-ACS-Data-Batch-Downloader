@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Headless Census ACS data client and processing library."""
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from census.api import (
     DATASETS,
@@ -113,6 +113,67 @@ from census.pipeline import (
     run_batch,
 )
 
+from census.pipeline import (
+    REPLAY_SCHEMA_VERSION,
+    diff_frames,
+    expand_states,
+    file_sha256,
+    is_nationwide,
+    replay_extraction,
+)
+from census.inflation import C_CPI_U, provisional_advisory, provisional_years
+from census.concordance import RULE_COLUMNS, build_rule_evidence, load_rules, rules_path, validate_rule_row
+from census.review import draft_rule_override, record_rule_review
+from census.variance import (
+    DerivedEstimate,
+    REPLICATE_COLUMNS,
+    REPLICATE_COUNT,
+    Z90,
+    derived_from_replicates,
+    moe_to_se,
+    replicate_moe,
+    replicate_se,
+    replicate_variance,
+    se_to_moe,
+)
+from census.derived import (
+    METHOD_SCALE,
+    derive_columns,
+    difference,
+    percent_change,
+    product,
+    proportion,
+    ratio,
+    scale,
+    subset_relationship,
+    sum_estimates,
+)
+from census.multitest import adjust_pvalues, batch_z_test
+from census.aggregate import NonAdditiveError, aggregate_geographies, aggregate_then_derive
+from census.replicate import (
+    VREDownloadError,
+    fetch_vre,
+    read_vre_csv,
+    replicate_apply,
+    replicate_difference,
+    replicate_proportion,
+    replicate_ratio,
+    replicate_sum,
+    verify_published_moe,
+    vre_availability,
+    vre_available,
+    vre_tables,
+)
+from census.medians import (
+    distribution_brackets,
+    median_for_group,
+    median_for_rows,
+    median_from_distribution,
+    median_moe_approximate,
+    median_moe_replicates,
+)
+from census.geo_crosswalk import apportion, harmonize_panel, tract_crosswalk, tract_vintage
+
 __all__ = [
     # api
     "CensusAPIClient",
@@ -216,4 +277,76 @@ __all__ = [
     "prepare_frame",
     "resolve_metadata",
     "run_batch",
+    # pipeline: nationwide and replay
+    "REPLAY_SCHEMA_VERSION",
+    "diff_frames",
+    "expand_states",
+    "file_sha256",
+    "is_nationwide",
+    "replay_extraction",
+    # price indexes
+    "C_CPI_U",
+    "provisional_advisory",
+    "provisional_years",
+    # concordance rules
+    "RULE_COLUMNS",
+    "build_rule_evidence",
+    "load_rules",
+    "rules_path",
+    "validate_rule_row",
+    "draft_rule_override",
+    "record_rule_review",
+    # variance and derived estimates
+    "DerivedEstimate",
+    "REPLICATE_COLUMNS",
+    "REPLICATE_COUNT",
+    "Z90",
+    "derived_from_replicates",
+    "moe_to_se",
+    "replicate_moe",
+    "replicate_se",
+    "replicate_variance",
+    "se_to_moe",
+    "METHOD_SCALE",
+    "derive_columns",
+    "difference",
+    "percent_change",
+    "product",
+    "proportion",
+    "ratio",
+    "scale",
+    "subset_relationship",
+    "sum_estimates",
+    # multiple comparisons
+    "adjust_pvalues",
+    "batch_z_test",
+    # aggregation
+    "NonAdditiveError",
+    "aggregate_geographies",
+    "aggregate_then_derive",
+    # replicate tables
+    "VREDownloadError",
+    "fetch_vre",
+    "read_vre_csv",
+    "replicate_apply",
+    "replicate_difference",
+    "replicate_proportion",
+    "replicate_ratio",
+    "replicate_sum",
+    "verify_published_moe",
+    "vre_availability",
+    "vre_available",
+    "vre_tables",
+    # medians
+    "distribution_brackets",
+    "median_for_group",
+    "median_for_rows",
+    "median_from_distribution",
+    "median_moe_approximate",
+    "median_moe_replicates",
+    # tract crosswalk
+    "apportion",
+    "harmonize_panel",
+    "tract_crosswalk",
+    "tract_vintage",
 ]

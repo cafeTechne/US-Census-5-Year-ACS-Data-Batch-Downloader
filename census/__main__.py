@@ -13,6 +13,20 @@ Examples:
     python -m census describe --code DP02_0002PE --year 2018
     python -m census vintages --dataset subject
     python -m census validate-crosswalks
+    python -m census plan --table B19013 --geo county --state all --years 2022 --json
+    python -m census replay out/B19013_extraction_metadata.json --json
+    python -m census derive proportion --estimates 400,1000 --moes 50,80 --json
+    python -m census aggregate --input out/B17001_tract_panel_2023.csv --groups groups.csv --year 2023 \\
+        --derive '[{"name": "poverty_rate", "op": "proportion", "num": "B17001_002E", "den": "B17001_001E"}]'
+    python -m census median --table B25063 --year 2023 --input out/rent.csv --geoids 36061000100,36061000200
+    python -m census significance --input wide.csv --est1 e2018 --moe1 m2018 --est2 e2023 --moe2 m2023 \\
+        --year1 2018 --year2 2023 --correction holm
+    python -m census harmonize --input tract_panel.csv --target 2020
+    python -m census replicates --table B19001 --year 2023 --geo county
+    python -m census draft-rule --table S1701 --from-year 2016 --to-year 2017 --pattern P --replacement R \\
+        --drafted-by agent:model/session --rationale TEXT --source-url https://www.census.gov/...
+    python -m census record-rule draft.json --reviewed-by agent:model/other-session
+    python -m census validate --offline --json
     python -m census cache stats
 """
 
@@ -22,6 +36,7 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 from census import errors
+from census import workflows
 from census.api import CensusAPIClient, infer_dataset
 from census.cache import get_default_cache
 from census.concordance import BLOCKING_KINDS, apply_overrides, build_concordance, validate_all_crosswalks
@@ -33,6 +48,7 @@ from census.pipeline import (
     build_entities,
     plan_extraction,
     public_plan,
+    replay_extraction,
     run_batch,
 )
 
@@ -102,6 +118,8 @@ def _options(args: argparse.Namespace) -> ResearchOptions:
         concordance_mode=args.concordance_mode,
         continuity_check=not args.no_continuity,
         allow_unverified_concordance=args.allow_unverified_concordance,
+        allow_provisional_index=args.allow_provisional_index,
+        harmonize_tracts_to=args.harmonize_tracts_to,
     )
 
 
@@ -109,7 +127,8 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--table", required=True)
     p.add_argument("--years", required=True, help="e.g. 2015-2022 or 2018,2020")
     p.add_argument("--geo", default="state", help="us, state, county, tract, place, zcta, msa")
-    p.add_argument("--state", help="2-digit state FIPS")
+    p.add_argument("--state", help="2-digit state FIPS, or 'all' (50 states + DC)")
+    p.add_argument("--include-pr", action="store_true", help="with --state all, add Puerto Rico")
     p.add_argument("--codes", help="comma-separated place/county/ZCTA/CBSA codes")
     p.add_argument("--variables", help="comma-separated codes, YEAR:CODE, or concept IDs")
     p.add_argument("--dataset", help="acs5, profile, subject, cprofile (inferred)")
@@ -120,16 +139,24 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--reliability", action="store_true", help="add SE/CV/reliability columns")
     p.add_argument("--keep-sentinels", action="store_true")
     p.add_argument("--inflation-base-year", type=int)
-    p.add_argument("--price-index", default="r-cpi-u-rs", choices=("r-cpi-u-rs", "cpi-u"))
+    p.add_argument("--price-index", default="r-cpi-u-rs", choices=("r-cpi-u-rs", "cpi-u", "c-cpi-u"))
+    p.add_argument("--allow-provisional-index", action="store_true",
+                   help="allow index years with unpublished months (2025); adds an advisory")
+    p.add_argument("--harmonize-tracts-to", type=int, choices=(2010, 2020),
+                   help="apportion a tract panel to one tract vintage")
     p.add_argument("--codebook", action="store_true")
     p.add_argument("--slug-style", default="label", choices=("label", "code"))
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--json", action="store_true")
 
 
+def _entities(args: argparse.Namespace) -> Any:
+    return build_entities(args.geo, args.state, _list(args.codes), include_pr=args.include_pr)
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     try:
-        entities = build_entities(args.geo, args.state, _list(args.codes))
+        entities = _entities(args)
     except ValueError as exc:
         return _emit(errors.error_result(errors.INVALID_GEO_LEVEL, str(exc)), args.json)
     plan = plan_extraction(
@@ -141,7 +168,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 def cmd_extract(args: argparse.Namespace) -> int:
     try:
-        entities = build_entities(args.geo, args.state, _list(args.codes))
+        entities = _entities(args)
     except ValueError as exc:
         return _emit(errors.error_result(errors.INVALID_GEO_LEVEL, str(exc)), args.json)
 
@@ -151,6 +178,21 @@ def cmd_extract(args: argparse.Namespace) -> int:
     result = run_batch(
         args.table, entities, _years(args.years), args.out, args.format, _options(args),
         args.dataset, _client(args.no_cache), log=log, variables=_list(args.variables),
+    )
+    return _emit(result, args.json)
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    def log(msg: str) -> None:
+        print(msg, file=sys.stderr)
+
+    result = replay_extraction(
+        args.metadata,
+        output_dir=args.output_dir,
+        verify=not args.no_verify,
+        client=None if not args.no_cache else _client(True),
+        refresh=args.refresh,
+        log=log,
     )
     return _emit(result, args.json)
 
@@ -196,6 +238,110 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return _emit(result, args.json)
 
 
+def _floats(text: str) -> List[float]:
+    return [float(x) for x in text.split(",") if x.strip()]
+
+
+def _groups(text: str) -> Dict[str, str]:
+    """GEOID -> group mapping from a JSON object or a two-column CSV (GEOID, group)."""
+    text = text.strip()
+    if text.startswith("{"):
+        return {str(k): str(v) for k, v in json.loads(text).items()}
+    import pandas as pd
+
+    df = pd.read_csv(text, dtype=str)
+    return dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
+
+
+def cmd_derive(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.derive_estimate(
+            args.operation, _floats(args.estimates), _floats(args.moes), args.percent,
+            args.year_current, args.year_prior,
+        ),
+        args.json,
+    )
+
+
+def cmd_aggregate(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.aggregate_geographies(
+            args.input, _groups(args.groups), _list(args.variables),
+            json.loads(args.derive) if args.derive else None, args.year, args.method,
+            args.replicates, args.table, args.out,
+        ),
+        args.json,
+    )
+
+
+def cmd_median(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.median_from_distribution(
+            args.table, args.year, args.input, _list(args.geoids),
+            _floats(args.counts) if args.counts else None, args.per_row, args.replicates,
+            args.design_factor,
+        ),
+        args.json,
+    )
+
+
+def cmd_significance(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.batch_significance(
+            args.input, args.est1, args.moe1, args.est2, args.moe2, args.year1, args.year2,
+            args.confidence, args.correction, args.out,
+        ),
+        args.json,
+    )
+
+
+def cmd_harmonize(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.apportion_tracts(args.input, args.target, args.weight, args.weights_file, args.out),
+        args.json,
+    )
+
+
+def cmd_replicates(args: argparse.Namespace) -> int:
+    return _emit(workflows.check_replicate_availability(args.table, args.year, args.geo), args.json)
+
+
+def cmd_draft_rule(args: argparse.Namespace) -> int:
+    return _emit(
+        workflows.draft_rule_override(
+            args.table, args.from_year, args.to_year, args.pattern, args.replacement,
+            args.drafted_by, args.rationale, args.source_url or "", args.dataset or "",
+        ),
+        args.json,
+    )
+
+
+def cmd_record_rule(args: argparse.Namespace) -> int:
+    with open(args.row, encoding="utf-8") as f:
+        row = json.load(f)
+    row = row.get("draft_row", row)
+    return _emit(workflows.record_rule_review(row, args.reviewed_by, args.dataset or ""), args.json)
+
+
+def cmd_validate_census(args: argparse.Namespace) -> int:
+    import os
+
+    live = args.live or (not args.offline and os.getenv("CENSUS_LIVE_TESTS") == "1")
+    result = workflows.run_validation(args.checks, live, args.output_dir)
+    if not args.json and result.get("results"):
+        for r in result["results"]:
+            print(f"{r['check_id']:>4}  {str(r['status']).upper():<7}  compared={r['n_compared']:<7} failed={r['n_failed']}",
+                  file=sys.stderr)
+    if result.get("error_code"):
+        return _emit(result, args.json)
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print("Overall:", "PASS" if result["success"] else "FAIL " + ", ".join(
+            result["summary"]["failed"] + result["summary"]["errors"]))
+    return EXIT_OK if result["success"] else EXIT_FAILURE
+
+
 def cmd_cache(args: argparse.Namespace) -> int:
     cache = get_default_cache()
     if cache is None:
@@ -217,6 +363,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_extract_args(p)
     p.add_argument("--out", required=True, help="output directory")
     p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("replay", help="re-run an extraction from its metadata JSON and verify outputs")
+    p.add_argument("metadata", help="<table>_extraction_metadata.json")
+    p.add_argument("--output-dir", help="default: <original dir>/replays/<timestamp>")
+    p.add_argument("--no-verify", action="store_true", help="skip hash and cell comparison")
+    p.add_argument("--refresh", action="store_true", help="bypass the query cache (detect revisions)")
+    p.add_argument("--no-cache", action="store_true", help="do not read or write the query cache")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("concordance", help="cross-release concordance report (offline)")
     p.add_argument("--table", required=True)
@@ -246,6 +401,98 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate-crosswalks", help="check all override files")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("derive", help="derived estimate and MOE (Census approximation formulas)")
+    p.add_argument("operation", choices=("proportion", "ratio", "product", "difference", "percent_change", "sum"))
+    p.add_argument("--estimates", required=True, help="comma-separated, e.g. numerator,denominator")
+    p.add_argument("--moes", required=True, help="comma-separated 90%% MOEs")
+    p.add_argument("--percent", action="store_true", help="0-100 scale for proportion/ratio")
+    p.add_argument("--year-current", type=int)
+    p.add_argument("--year-prior", type=int)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_derive)
+
+    p = sub.add_parser("aggregate", help="combine geographies into custom areas, then derive rates")
+    p.add_argument("--input", required=True, help="CSV/Parquet from extract")
+    p.add_argument("--groups", required=True, help="JSON {GEOID: group} or CSV (GEOID,group)")
+    p.add_argument("--variables", help="estimate columns to sum (default: all additive)")
+    p.add_argument("--derive", help="JSON derive spec applied after aggregation")
+    p.add_argument("--year", type=int)
+    p.add_argument("--method", default="auto", choices=("auto", "replicate", "approximate"))
+    p.add_argument("--replicates", action="store_true", help="download Census replicate estimates")
+    p.add_argument("--table", help="detailed table for replicate lookups")
+    p.add_argument("--out", help="output CSV/Parquet path")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_aggregate)
+
+    p = sub.add_parser("median", help="median and MOE from a distribution table")
+    p.add_argument("--table", required=True)
+    p.add_argument("--year", type=int, required=True)
+    p.add_argument("--input", help="CSV/Parquet with the table's columns")
+    p.add_argument("--geoids", help="GEOIDs to combine (default: all rows)")
+    p.add_argument("--counts", help="bracket counts instead of --input")
+    p.add_argument("--per-row", action="store_true")
+    p.add_argument("--replicates", action="store_true")
+    p.add_argument("--design-factor", type=float)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_median)
+
+    p = sub.add_parser("significance", help="many-geography difference tests with correction")
+    p.add_argument("--input", required=True)
+    for name in ("est1", "moe1", "est2", "moe2"):
+        p.add_argument(f"--{name}", required=True)
+    p.add_argument("--year1", type=int)
+    p.add_argument("--year2", type=int)
+    p.add_argument("--confidence", type=float, default=0.90)
+    p.add_argument("--correction", default="holm", choices=("holm", "bonferroni", "bh", "by"))
+    p.add_argument("--out")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_significance)
+
+    p = sub.add_parser("harmonize", help="apportion a tract panel across the 2010/2020 tract change")
+    p.add_argument("--input", required=True)
+    p.add_argument("--target", type=int, default=2020, choices=(2010, 2020))
+    p.add_argument("--weight", default="land_area", choices=("land_area", "total_area", "population"))
+    p.add_argument("--weights-file", help="NHGIS-style source_geoid,target_geoid,weight CSV")
+    p.add_argument("--out")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_harmonize)
+
+    p = sub.add_parser("replicates", help="is a Census replicate (VRE) table published?")
+    p.add_argument("--table", required=True)
+    p.add_argument("--year", type=int, required=True)
+    p.add_argument("--geo", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_replicates)
+
+    p = sub.add_parser("draft-rule", help="draft a table-scoped concordance rule (step 1 of 2)")
+    p.add_argument("--table", required=True)
+    p.add_argument("--from-year", type=int, required=True)
+    p.add_argument("--to-year", type=int, required=True)
+    p.add_argument("--pattern", required=True)
+    p.add_argument("--replacement", required=True)
+    p.add_argument("--drafted-by", required=True)
+    p.add_argument("--rationale", required=True)
+    p.add_argument("--source-url")
+    p.add_argument("--dataset")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_draft_rule)
+
+    p = sub.add_parser("record-rule", help="record an independent review of a drafted rule (step 2 of 2)")
+    p.add_argument("row", help="JSON file with the draft row (or the whole draft-rule output)")
+    p.add_argument("--reviewed-by", required=True)
+    p.add_argument("--dataset")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_record_rule)
+
+    p = sub.add_parser("validate", help="check calculations against Census-published values")
+    p.add_argument("--checks", help="comma-separated subset of F1-F10")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--live", action="store_true", help="query live Census services")
+    mode.add_argument("--offline", action="store_true", help="use frozen fixtures (default unless CENSUS_LIVE_TESTS=1)")
+    p.add_argument("--output-dir", help="also write validation_report.md/.json here")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_validate_census)
 
     p = sub.add_parser("cache", help="query cache maintenance")
     p.add_argument("action", choices=("stats", "clear"))

@@ -240,16 +240,23 @@ def z_test(
 
 
 def aggregate_estimates(
-    estimates: Sequence[float], moes: Sequence[float]
+    estimates: Sequence[float], moes: Sequence[float], zero_estimate_rule: str = "all"
 ) -> Tuple[float, float]:
     """Sum estimates and propagate MOEs in quadrature: sqrt(sum(MOE_i^2)).
 
-    Census guidance: when several component estimates are zero, include only the
-    largest of their MOEs in the sum.
+    zero_estimate_rule="all" (default) includes every component's MOE, as in the
+    ACS General Handbook 2018/2020 ch. 8 formula 1 and the 2025 worked examples.
+    "largest" reproduces older Census training guidance (2016) that included only
+    the largest MOE among zero estimates. See census.derived.sum_estimates for
+    the method-tracking version.
     """
     if len(estimates) != len(moes):
         raise ValueError("estimates and moes must be the same length")
+    if zero_estimate_rule not in ("all", "largest"):
+        raise ValueError("zero_estimate_rule must be 'all' or 'largest'")
     total = float(sum(estimates))
+    if zero_estimate_rule == "all":
+        return total, math.sqrt(sum(float(m) ** 2 for m in moes))
     zero_moes = [abs(m) for e, m in zip(estimates, moes) if e == 0]
     nonzero_moes = [abs(m) for e, m in zip(estimates, moes) if e != 0]
     if zero_moes:

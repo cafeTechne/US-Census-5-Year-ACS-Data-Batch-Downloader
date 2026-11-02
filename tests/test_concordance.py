@@ -323,3 +323,20 @@ class TestContinuityThresholds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestContinuityThresholds(unittest.TestCase):
+    def test_thresholds_scale_with_year_gap(self):
+        from census.continuity import implausibility_thresholds
+
+        rel1, pp1 = implausibility_thresholds(1)
+        self.assertAlmostEqual(rel1, 0.25)
+        self.assertAlmostEqual(pp1, 10.0)
+        rel4, pp4 = implausibility_thresholds(4)
+        self.assertAlmostEqual(rel4, 1.25**4 - 1)
+        self.assertAlmostEqual(pp4, 40.0)
+        # Validation F9: B19001_017 rose 73% nationally 2019 -> 2023 with an
+        # unchanged definition; that must not exceed the 4-year threshold,
+        # while the same jump between adjacent releases still would.
+        self.assertLess(0.73, rel4)
+        self.assertGreater(0.73, rel1)

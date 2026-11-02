@@ -93,6 +93,37 @@ class TestVendoredCPIU(unittest.TestCase):
         self.assertEqual(values, {2024: 460.0})
         self.assertEqual(missing, ["2025-M10"])
 
+    def test_c_cpi_u_vendored(self):
+        path = os.path.join(price_index_dir(), "c_cpi_u.csv")
+        with open(path, "rb") as f:
+            raw = f.read()
+        with open(os.path.join(price_index_dir(), "c_cpi_u.json"), encoding="utf-8") as f:
+            sidecar = json.load(f)
+        self.assertNotIn(b"\r\n", raw)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), sidecar["csv_sha256"])
+        self.assertEqual(sidecar["series_id"], "SUUR0000SA0")
+        index = load_price_index(inflation.C_CPI_U)
+        years = sorted(index)
+        self.assertEqual(years, list(range(years[0], years[-1] + 1)))
+        # December 1999 = 100, so the 2000 annual average is just above 100.
+        self.assertTrue(100 < index[2000] < 104)
+        self.assertNotIn(2025, index)
+
+    def test_provisional_year_requires_opt_in(self):
+        prov = inflation.provisional_years(R_CPI_U_RS)
+        self.assertIn(2025, prov)
+        self.assertEqual(prov[2025]["unpublished_months"], ["2025-M10"])
+        with self.assertRaises(PriceIndexUnavailable) as ctx:
+            inflation_factor(2024, 2025)
+        self.assertIn("allow_provisional", str(ctx.exception))
+        factor = inflation_factor(2024, 2025, allow_provisional=True)
+        self.assertAlmostEqual(factor, prov[2025]["value"] / load_price_index(R_CPI_U_RS)[2024])
+        advisory = inflation.provisional_advisory(R_CPI_U_RS, [2023, 2025])
+        self.assertIn("2025", advisory)
+        self.assertIn("11 of 12", advisory)
+        self.assertIsNone(inflation.provisional_advisory(R_CPI_U_RS, [2023, 2024]))
+        self.assertNotIn(2025, load_price_index(R_CPI_U_RS))
+
     def test_cpi_u_conversion(self):
         cpi = load_price_index(CPI_U)
         adjusted = adjust_inflation(50000, 2010, 2022, index=CPI_U)

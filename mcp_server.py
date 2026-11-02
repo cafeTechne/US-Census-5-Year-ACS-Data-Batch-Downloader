@@ -35,7 +35,9 @@ from census import (
     infer_dataset,
     latest_vintage,
     load_places_from_local,
+    is_nationwide,
     load_price_index,
+    provisional_advisory,
     load_table_catalog,
     plan_extraction as _plan_extraction,
     price_index_info,
@@ -58,6 +60,7 @@ from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs5_overlap_years
+from census import workflows
 
 load_dotenv()
 
@@ -87,8 +90,26 @@ Review (overrides in crosswalks/<dataset>/<table>.csv):
 - merge rows need census.gov sources, generated evidence, and a passing continuity
   check (or a written continuity_exception). Validation enforces all of this.
 
-Inflation: default index is R-CPI-U-RS (the Census Bureau's ACS index); never
-pass guessed values via cpi_table. Branch on error_code in failed results.
+Table-wide redesigns: draft_rule_override / record_rule_review (same two-identity
+review; rules never change numbers in labels and never exempt continuity).
+
+Derived statistics (every result records its `method`):
+- Rates: derive_estimate('proportion') only when the numerator is a subset of the
+  denominator; otherwise 'ratio'. Combine areas with aggregate_geographies (sum
+  counts first, then derive); never average rates or medians.
+- Exact MOEs: check_replicate_availability; when available, use replicates
+  (use_replicates=True) for any derived estimate that feeds a hypothesis test.
+- Medians for custom areas: median_from_distribution (brackets summed first).
+- Many comparisons: batch_significance with a correction (default holm); report
+  significant_adjusted.
+- Tract panels across 2010/2020: batch_download(harmonize_tracts_to=2020) or
+  apportion_tracts.
+- Nationwide: state_code='all'. Reproducibility: replay_extraction.
+- run_validation checks the toolkit against Census-published values.
+
+Inflation: default index is R-CPI-U-RS (the Census Bureau's ACS index); 'c-cpi-u'
+matches CPS ASEC income reports. Never pass guessed values via cpi_table.
+Branch on error_code in failed results.
 Call get_research_protocol for the full protocol.
 """
 
@@ -114,12 +135,13 @@ def _entities_for(
     county_codes: Optional[List[str]],
     zcta_codes: Optional[List[str]],
     msa_codes: Optional[List[str]],
+    include_pr: bool = False,
 ) -> Any:
     codes: Optional[List[str]] = None
     names: Dict[str, str] = {}
     if geo_level == "place":
         codes = place_codes
-        places_file = get_local_places_file(state_code or "")
+        places_file = None if is_nationwide(state_code) else get_local_places_file(state_code or "")
         if places_file and os.path.exists(places_file):
             names = {p[1]: p[2] for p in load_places_from_local(places_file)}
     elif geo_level in ("county", "tract"):
@@ -128,7 +150,7 @@ def _entities_for(
         codes = zcta_codes
     elif geo_level == "msa":
         codes = msa_codes
-    return build_entities(geo_level, state_code, codes, names)
+    return build_entities(geo_level, state_code, codes, names, include_pr=include_pr)
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +161,17 @@ def _entities_for(
 @mcp.tool()
 def get_research_protocol() -> Dict[str, Any]:
     """Return the full agent protocol: extraction workflow, concordance modes,
-    issue kinds, and the draft/independent-review process for overrides."""
+    issue kinds, the draft/independent-review process for overrides and rules,
+    derived statistics (approximate vs replicate MOEs, medians, multiple
+    comparisons), geography changes, and validation against Census values."""
     with open(PROTOCOL_PATH, encoding="utf-8") as f:
-        return {"path": PROTOCOL_PATH, "protocol": f.read()}
+        protocol = f.read()
+    rules_path = os.path.join(ROOT, "docs", "rule_overrides.md")
+    rules = ""
+    if os.path.exists(rules_path):
+        with open(rules_path, encoding="utf-8") as f:
+            rules = f.read()
+    return {"path": PROTOCOL_PATH, "protocol": protocol, "rule_overrides": rules}
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +575,9 @@ def plan_extraction(
     continuity_check: bool = True,
     inflation_base_year: Optional[int] = None,
     price_index: str = "r-cpi-u-rs",
+    include_pr: bool = False,
+    allow_provisional_index: bool = False,
+    harmonize_tracts_to: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Dry run of batch_download: call counts, concordance issues, and whether it
     would block. Downloads no data (at most one cached national call per year for
@@ -556,7 +589,9 @@ def plan_extraction(
     if start_year > end_year:
         return errors.error_result(errors.INVALID_INPUT, "start_year must be <= end_year.")
     try:
-        entities = _entities_for(geo_level, state_code, place_codes, county_codes, zcta_codes, msa_codes)
+        entities = _entities_for(
+            geo_level, state_code, place_codes, county_codes, zcta_codes, msa_codes, include_pr
+        )
     except ValueError as exc:
         return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
     plan = _plan_extraction(
@@ -569,6 +604,8 @@ def plan_extraction(
             continuity_check=continuity_check,
             inflation_base_year=inflation_base_year,
             price_index=price_index,
+            allow_provisional_index=allow_provisional_index,
+            harmonize_tracts_to=harmonize_tracts_to,
         ),
         dataset,
         variables,
@@ -602,6 +639,9 @@ def batch_download(
     include_codebook: bool = False,
     use_cache: bool = True,
     slug_style: str = "label",
+    include_pr: bool = False,
+    allow_provisional_index: bool = False,
+    harmonize_tracts_to: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Batch-download a table across years and geographies to research-ready files.
 
@@ -610,7 +650,9 @@ def batch_download(
     unresolved cross-release issues. Run plan_extraction first.
 
     Args:
-        state_code: 2-digit state FIPS (e.g. '36'); optional for 'us', 'msa', 'zcta'.
+        state_code: 2-digit state FIPS (e.g. '36'), or 'all' for every state + DC
+            (county/place: one request per year; tract: one per state per year;
+            omit codes). Optional for 'us', 'msa', 'zcta'.
         table_code: Table code ('B01001', 'DP03', 'S1701', 'CP03').
         start_year: Starting ACS 5-year end-year (e.g. 2015).
         end_year: Ending year (e.g. 2022).
@@ -631,19 +673,29 @@ def batch_download(
         clean_sentinels: Replace Census jam values (-666666666 etc.) with null.
         compute_reliability: Add SE, CV % and reliability columns per estimate.
         inflation_base_year: Convert dollar variables to constant dollars of this year.
-        price_index: 'r-cpi-u-rs' (Census Bureau standard, default) or 'cpi-u'.
+        price_index: 'r-cpi-u-rs' (Census Bureau standard for ACS, default),
+            'cpi-u', or 'c-cpi-u' (matches CPS ASEC income reports).
         include_codebook: Write <table>_codebook.csv alongside the data.
         use_cache: Use the local SQLite query cache (.cache/census_cache.db).
         slug_style: Panel column names: 'label' (readable) or 'code' (Stata-safe).
+        include_pr: With state_code='all', also include Puerto Rico (72).
+        allow_provisional_index: Allow index years built from fewer than 12
+            published months (2025: October never published); adds an advisory.
+        harmonize_tracts_to: 2010 or 2020: apportion a tract panel spanning the
+            2010/2020 tract change to one tract vintage (panel/parquet only).
     """
     if start_year > end_year:
         return errors.error_result(errors.INVALID_INPUT, "start_year must be <= end_year.")
     base_dir = output_dir or os.path.join(ROOT, "downloads")
     try:
-        entities = _entities_for(geo_level, state_code, place_codes, county_codes, zcta_codes, msa_codes)
+        entities = _entities_for(
+            geo_level, state_code, place_codes, county_codes, zcta_codes, msa_codes, include_pr
+        )
     except ValueError as exc:
         return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
     options = _options(
+        allow_provisional_index=allow_provisional_index,
+        harmonize_tracts_to=harmonize_tracts_to,
         clean_sentinels=clean_sentinels,
         compute_reliability=compute_reliability,
         inflation_base_year=inflation_base_year,
@@ -853,7 +905,11 @@ def calculate_significance(
 
 @mcp.tool()
 def adjust_inflation(
-    value: float, from_year: int, to_year: int, index: str = "r-cpi-u-rs"
+    value: float,
+    from_year: int,
+    to_year: int,
+    index: str = "r-cpi-u-rs",
+    allow_provisional: bool = False,
 ) -> Dict[str, Any]:
     """Convert a dollar value between years with an annual price index.
 
@@ -861,16 +917,20 @@ def adjust_inflation(
         value: Dollar amount in from_year dollars (e.g. 2012 ACS median income).
         from_year: Year of the original dollars (the ACS period end year).
         to_year: Target constant-dollar year.
-        index: 'r-cpi-u-rs' (Census Bureau standard for ACS, default) or 'cpi-u'.
+        index: 'r-cpi-u-rs' (Census Bureau standard for ACS, default), 'cpi-u', or
+            'c-cpi-u' (CPS ASEC income reports).
+        allow_provisional: Use a year whose annual figure rests on fewer than 12
+            published months (2025); the result carries an advisory.
     """
     if index not in PRICE_INDEXES:
         return errors.error_result(errors.INVALID_INPUT, f"index must be one of {PRICE_INDEXES}.")
     try:
-        adjusted = _adjust_inflation(value, from_year, to_year, index=index)
+        adjusted = _adjust_inflation(value, from_year, to_year, index=index, allow_provisional=allow_provisional)
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
-    table = load_price_index(index)
+    table = load_price_index(index, allow_provisional=allow_provisional)
     return {
+        "advisory": provisional_advisory(index, [from_year, to_year]) if allow_provisional else None,
         "success": True,
         "value": value,
         "from_year": from_year,
@@ -943,6 +1003,39 @@ def generate_codebook(
         "output_path": output_path,
         "codebook": codebook.to_dict(orient="records"),
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Round 7: derived statistics, replicate variance, medians, testing, geography
+# (implemented in census.workflows, shared with the CLI)
+# ---------------------------------------------------------------------------
+
+for _tool in (
+    workflows.derive_estimate,
+    workflows.check_replicate_availability,
+    workflows.aggregate_geographies,
+    workflows.median_from_distribution,
+    workflows.batch_significance,
+    workflows.apportion_tracts,
+    workflows.replay_extraction,
+    workflows.draft_rule_override,
+    workflows.record_rule_review,
+    workflows.run_validation,
+):
+    mcp.tool()(_tool)
+
+# Module-level names so tests and callers can use mcp_server.<tool>(...).
+derive_estimate = workflows.derive_estimate
+check_replicate_availability = workflows.check_replicate_availability
+aggregate_geographies = workflows.aggregate_geographies
+median_from_distribution = workflows.median_from_distribution
+batch_significance = workflows.batch_significance
+apportion_tracts = workflows.apportion_tracts
+replay_extraction = workflows.replay_extraction
+draft_rule_override = workflows.draft_rule_override
+record_rule_review = workflows.record_rule_review
+run_validation = workflows.run_validation
 
 
 def main() -> None:

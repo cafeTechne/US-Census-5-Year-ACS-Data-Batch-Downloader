@@ -11,10 +11,11 @@
 See docs/agent_protocol.md for how agents should act on plan results.
 """
 
+import hashlib
 import json
 import os
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set
 
@@ -52,6 +53,7 @@ from census.inflation import (
     dollar_columns,
     get_cpi,
     home_value_advisory,
+    provisional_advisory,
     price_index_info,
 )
 from census.metadata import load_manifest, table_universe, table_variables
@@ -67,7 +69,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.6.0"
+PACKAGE_VERSION = "0.7.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
@@ -80,6 +82,27 @@ GEO_LEVEL_NAMES = ("us", "state", "county", "tract", "place", "zcta", "msa")
 
 # ZCTAs per API request when querying explicit ZCTA lists
 ZCTA_CHUNK_SIZE = 50
+
+# state_code value that expands to every state (+ DC; Puerto Rico opt-in)
+NATIONWIDE = "all"
+PUERTO_RICO = "72"
+# 50 states + DC. Island areas (60, 66, 69, 74, 78) are not in the ACS.
+ACS_STATE_CODES = tuple(c for c in STATE_MAPPING if int(c) <= 56)
+NON_ACS_TERRITORIES = tuple(c for c in STATE_MAPPING if int(c) > 56 and c != PUERTO_RICO)
+NATIONWIDE_LABEL = "All_States"
+
+# Extraction metadata layout version; replay requires these fields.
+REPLAY_SCHEMA_VERSION = 1
+REPLAY_REQUIRED_FIELDS = (
+    "replay_schema_version",
+    "table_code",
+    "dataset",
+    "years",
+    "entities",
+    "output_format",
+    "options",
+    "variables",
+)
 
 LogFn = Callable[[str], None]
 ProgressFn = Callable[[int, int, str, int], None]
@@ -99,6 +122,12 @@ class ResearchOptions:
     cpi_table: Optional[Dict[int, float]] = None
     # R-CPI-U-RS matches the Census Bureau's own ACS adjustments; "cpi-u" also available.
     price_index: str = DEFAULT_PRICE_INDEX
+    # Use index years whose annual figure rests on fewer than 12 published months
+    # (2025: October never published). Adds a PROVISIONAL INDEX advisory.
+    allow_provisional_index: bool = False
+    # Apportion tract panels spanning the 2010/2020 tract boundary to one tract
+    # vintage (2010 or 2020) with census.geo_crosswalk (land-area weights).
+    harmonize_tracts_to: Optional[int] = None
     # "fail": stop when unresolved cross-vintage issues touch selected variables.
     # "strict": keep unresolved items as separate columns and report them.
     # "code": key columns by raw code (single-year, or allow_unverified_concordance).
@@ -143,11 +172,83 @@ def _join(codes: Optional[Sequence[str]]) -> Optional[str]:
     return ",".join(str(c).strip() for c in codes if str(c).strip()) or None
 
 
+def is_nationwide(state_code: Optional[str]) -> bool:
+    """True when ``state_code`` asks for every state ("all")."""
+    return isinstance(state_code, str) and state_code.strip().lower() == NATIONWIDE
+
+
+def expand_states(state_code: Optional[str], include_pr: bool = False) -> List[str]:
+    """Expand a state selection to 2-digit FIPS codes.
+
+    "all" -> the 50 states + DC (+ Puerto Rico "72" when ``include_pr``).
+    A code or comma-separated list is validated and returned in order. Island
+    areas (American Samoa, Guam, Northern Mariana Islands, U.S. Virgin Islands,
+    Minor Outlying Islands) are rejected: the ACS does not cover them.
+    """
+    if state_code is None or not str(state_code).strip():
+        raise ValueError("state_code is required (a 2-digit FIPS code or 'all').")
+    if is_nationwide(state_code):
+        return list(ACS_STATE_CODES) + ([PUERTO_RICO] if include_pr else [])
+    out: List[str] = []
+    for part in str(state_code).split(","):
+        code = part.strip()
+        if not code:
+            continue
+        if code.isdigit() and len(code) == 1:
+            code = code.zfill(2)
+        if code in NON_ACS_TERRITORIES:
+            raise ValueError(
+                f"State FIPS {code} ({STATE_MAPPING[code]}) is not covered by the ACS."
+            )
+        if code not in STATE_MAPPING:
+            raise ValueError(f"Unknown state FIPS code '{code}'. Use a 2-digit code or 'all'.")
+        if code not in out:
+            out.append(code)
+    if not out:
+        raise ValueError("state_code is required (a 2-digit FIPS code or 'all').")
+    return out
+
+
+def _nationwide_entities(
+    geo_level: str, codes: Optional[Sequence[str]], include_pr: bool
+) -> List[Entity]:
+    """Entities for state_code='all'.
+
+    County, place and state levels are one request per year with an explicit
+    state list (``in=state:01,02,...``), which the API accepts for every ACS
+    5-year vintage; ``state:*`` would also return Puerto Rico. Tracts cannot use
+    a state wildcard, so they are one request per state, sharing one group.
+    """
+    states = expand_states(NATIONWIDE, include_pr)
+    joined = ",".join(states)
+    label = NATIONWIDE_LABEL + ("_and_PR" if include_pr else "")
+    if geo_level in ("county", "place", "tract") and codes:
+        raise ValueError(
+            f"{geo_level} codes are only unique within a state; with state_code='all' "
+            "omit the codes (all geographies nationwide) or give a single state."
+        )
+    if geo_level == "state":
+        return [Entity(label, "state", joined)]
+    if geo_level == "county":
+        return [Entity(f"{label}_All_Counties", "county", joined, county_code="*")]
+    if geo_level == "place":
+        return [Entity(f"{label}_All_Places", "place", joined, place_code="*")]
+    if geo_level == "tract":
+        group = f"{label}_All_Tracts"
+        return [
+            Entity(f"{STATE_MAPPING[s]}_All_Tracts", "tract", s, county_code="*", group=group)
+            for s in states
+        ]
+    # us, msa, zcta are national requests already; the state filter does not apply.
+    return build_entities(geo_level, None, codes)
+
+
 def build_entities(
     geo_level: str,
     state_code: Optional[str] = None,
     codes: Optional[Sequence[str]] = None,
     names: Optional[Mapping[str, str]] = None,
+    include_pr: bool = False,
 ) -> List[Entity]:
     """Translate a geography selection into API request entities.
 
@@ -159,13 +260,19 @@ def build_entities(
                   all ZCTAs nationally when no state is given)
         msa    -> CBSA codes (default: all metro/micro areas)
         state, us -> ignored
+
+    state_code="all" selects every state + DC (Puerto Rico with include_pr):
+    one request per year for state, county and place (no codes allowed), one
+    per state per year for tract; us, msa and zcta are national regardless.
     """
     names = names or {}
-    state_name = STATE_MAPPING.get(state_code or "", f"State_{state_code}")
     if geo_level not in GEO_LEVEL_NAMES:
         raise ValueError(
             f"Unsupported geo_level: {geo_level}. Choose from {list(GEO_LEVEL_NAMES)}."
         )
+    if is_nationwide(state_code):
+        return _nationwide_entities(geo_level, codes, include_pr)
+    state_name = STATE_MAPPING.get(state_code or "", f"State_{state_code}")
     if geo_level in ("place", "county", "tract", "state") and not state_code:
         raise ValueError(f"state_code is required for geo_level '{geo_level}'.")
 
@@ -264,7 +371,13 @@ def prepare_frame(
             # Sentinels must never be scaled into plausible-looking values.
             df = clean_census_sentinels(df, columns=cols)
             df = deflate_dataframe(
-                df, year, options.inflation_base_year, cols, options.cpi_table, options.price_index
+                df,
+                year,
+                options.inflation_base_year,
+                cols,
+                options.cpi_table,
+                options.price_index,
+                options.allow_provisional_index,
             )
     if options.compute_reliability:
         df = add_reliability_columns(df)
@@ -338,7 +451,7 @@ def _price_index_error(options: ResearchOptions, years: Sequence[int]) -> Option
         )
     try:
         for year in list(years) + [options.inflation_base_year]:
-            get_cpi(year, options.cpi_table, options.price_index)
+            get_cpi(year, options.cpi_table, options.price_index, options.allow_provisional_index)
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
     return None
@@ -389,6 +502,18 @@ def plan_extraction(
 
     multi_year = len(years) > 1
     geo_level = entities[0].geo_level
+    if options.harmonize_tracts_to is not None:
+        if options.harmonize_tracts_to not in (2010, 2020):
+            return errors.error_result(errors.INVALID_INPUT, "harmonize_tracts_to must be 2010 or 2020.")
+        if geo_level != "tract":
+            return errors.error_result(
+                errors.INVALID_INPUT, "harmonize_tracts_to applies only to geo_level='tract'."
+            )
+        if output_format not in PANEL_FORMATS:
+            return errors.error_result(
+                errors.INVALID_OUTPUT_FORMAT,
+                f"harmonize_tracts_to requires a panel output format {sorted(PANEL_FORMATS)}.",
+            )
 
     conc = build_concordance(table_code, dataset, years, client)
     override_report = apply_overrides(conc, client)
@@ -417,8 +542,19 @@ def plan_extraction(
 
     advisories: List[str] = []
     for adv in (
-        boundary_shift_advisory(years[0], years[-1], geo_level),
+        (
+            f"Tract panel will be harmonized to {options.harmonize_tracts_to} tracts by land-area "
+            "apportionment (census.geo_crosswalk); see tract_harmonization in the extraction metadata. "
+            "Apportioned MOEs assume independent components and exact weights."
+            if options.harmonize_tracts_to and geo_level == "tract"
+            else boundary_shift_advisory(years[0], years[-1], geo_level)
+        ),
         home_value_advisory(table_code, years) if options.inflation_base_year else None,
+        (
+            provisional_advisory(options.price_index, list(years) + [options.inflation_base_year])
+            if options.inflation_base_year and options.allow_provisional_index and options.cpi_table is None
+            else None
+        ),
     ):
         if adv:
             advisories.append(adv)
@@ -469,6 +605,8 @@ def plan_extraction(
         "concordance_mode": options.concordance_mode,
         "api_calls": calls,
         "cached_calls": cached,
+        "request_targets": len(entities),
+        "states_covered": _states_covered(entities),
         "selected_concepts": len(selected),
         "selection": resolution,
         "concordance_summary": conc.summary(),
@@ -487,6 +625,15 @@ def plan_extraction(
         "_selected": selected,
         "_continuity": continuity_report,
     }
+
+
+def _states_covered(entities: Sequence[Entity]) -> int:
+    """Distinct states the request targets cover (0 for national-only levels)."""
+    states: Set[str] = set()
+    for ent in entities:
+        if ent.state_code and ent.geo_level not in ("us", "msa", "zcta"):
+            states.update(c.strip() for c in ent.state_code.split(",") if c.strip())
+    return len(states)
 
 
 def public_plan(plan: Mapping[str, Any]) -> Dict[str, Any]:
@@ -517,6 +664,33 @@ def _vintage_provenance(conc: Concordance) -> Dict[str, Any]:
         entry = files.get(f"{conc.dataset}/{year}/variables.json.gz", {})
         out[str(year)] = {"source": source, "sha256": entry.get("sha256"), "url": entry.get("url")}
     return out
+
+
+def file_sha256(path: str) -> str:
+    """SHA-256 hex digest of a file."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _output_file_hashes(output_dir: str, paths: Sequence[Optional[str]], folders: Sequence[Optional[str]]) -> Dict[str, str]:
+    """Map output paths (relative to output_dir, '/'-separated) to SHA-256."""
+    found: List[str] = [p for p in paths if p and os.path.isfile(p)]
+    for folder in folders:
+        if folder and os.path.isdir(folder):
+            for root, _dirs, names in os.walk(folder):
+                found.extend(os.path.join(root, n) for n in names)
+    out: Dict[str, str] = {}
+    for path in sorted(set(found)):
+        rel = os.path.relpath(path, output_dir).replace(os.sep, "/")
+        out[rel] = file_sha256(path)
+    return out
+
+
+def _replay_command(metadata_path: str) -> str:
+    return f'python -m census replay "{os.path.abspath(metadata_path)}" --json'
 
 
 def _write_json(path: str, payload: Any) -> str:
@@ -717,12 +891,30 @@ def run_batch(
             label_metadata.update(conc.year_metadata.get(year, {}))
 
     panel_path: Optional[str] = None
+    harmonization: Optional[Dict[str, Any]] = None
     duplicates_dropped = 0
     slug_map: Optional[Dict[str, str]] = None
     columns_out: List[str] = list(seen_columns)
 
     if is_panel and panel_frames:
         panel, duplicates_dropped = build_tidy_panel(panel_frames)
+        if options.harmonize_tracts_to and geo_level == "tract":
+            from census.geo_crosswalk import harmonize_panel
+
+            try:
+                panel, harmonization = harmonize_panel(
+                    panel,
+                    target_vintage=options.harmonize_tracts_to,
+                    metadata=label_metadata,
+                    return_record=True,
+                )
+            except ValueError as exc:
+                return errors.error_result(
+                    errors.INVALID_INPUT,
+                    f"Tract harmonization refused: {exc}",
+                    output_dir=output_dir,
+                )
+            emit(f"Harmonized tract panel to {options.harmonize_tracts_to} tracts.")
         columns_out = list(panel.columns)
         slug_map = make_slug_map(columns_out, label_metadata, options.slug_style)
         panel = panel.rename(columns=slug_map)
@@ -766,7 +958,11 @@ def run_batch(
         codebook.to_csv(codebook_path, index=False, encoding="utf-8")
         emit(f"Codebook saved: {codebook_path} ({len(codebook)} variables)")
 
+    overrides_file = crosswalk_path(dataset, table_code) if conc.overrides_applied else None
+    metadata_path = os.path.join(output_dir, f"{table_code}_extraction_metadata.json")
     metadata_doc = {
+        "tract_harmonization": harmonization,
+        "replay_schema_version": REPLAY_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "package_version": PACKAGE_VERSION,
         "git_commit": _git_commit(),
@@ -778,7 +974,15 @@ def run_batch(
         "entities": [asdict(e) for e in entities],
         "output_format": output_format,
         "variables_requested": list(variables) if variables else None,
+        "variables": list(variables) if variables else None,
+        "selected_concept_ids": sorted(selected),
         "options": {k: v for k, v in asdict(options).items() if k != "cpi_table"},
+        # A caller-supplied price index table, so replay deflates identically.
+        "cpi_table": (
+            {str(y): v for y, v in sorted(options.cpi_table.items())}
+            if options.cpi_table is not None
+            else None
+        ),
         "inflation": (
             {
                 "base_year": options.inflation_base_year,
@@ -793,8 +997,14 @@ def run_batch(
             "normalization_version": NORMALIZATION_VERSION,
             "summary": conc.summary(),
             "selected_concepts": len(selected),
-            "overrides_file": crosswalk_path(dataset, table_code) if conc.overrides_applied else None,
+            "overrides_file": overrides_file,
+            "overrides_sha256": (
+                file_sha256(overrides_file)
+                if overrides_file and os.path.isfile(overrides_file)
+                else None
+            ),
             "overrides_applied": conc.overrides_applied,
+            "rules_applied": getattr(conc, "rules_applied", []),
             "metadata_vintages": _vintage_provenance(conc),
         },
         "moe_confidence_level": 0.90,
@@ -807,10 +1017,16 @@ def run_batch(
             "concordance": concordance_path,
             "issues": issues_path,
         },
+        # Every file this run wrote (except this metadata file) -> SHA-256,
+        # keyed by path relative to the output directory; used by replay.
+        "output_files": _output_file_hashes(
+            output_dir,
+            [panel_path, codebook_path, concordance_path, issues_path],
+            [e["folder"] for e in saved_entities],
+        ),
+        "replay_command": _replay_command(metadata_path),
     }
-    metadata_path = _write_json(
-        os.path.join(output_dir, f"{table_code}_extraction_metadata.json"), metadata_doc
-    )
+    _write_json(metadata_path, metadata_doc)
 
     return {
         "success": True,
@@ -828,7 +1044,364 @@ def run_batch(
         "issues_path": issues_path,
         "metadata_path": metadata_path,
         "duplicates_dropped": duplicates_dropped,
+        "cached_calls": plan["cached_calls"],
+        "resume_hint": (
+            None
+            if not failed_calls
+            else "Re-run the same extraction to retry failed_calls; successful requests are "
+            "served from the query cache."
+            if client.cache is not None
+            else "Re-run with use_cache=True so a retry only re-requests failed_calls."
+        ),
+        "replay_command": metadata_doc["replay_command"],
         "advisories": plan["advisories"],
         "concordance_issues": all_issues[:MAX_ISSUES_IN_RESULT],
         "concordance_issue_count": len(all_issues),
     }
+
+
+# ---------------------------------------------------------------------------
+# Replay
+# ---------------------------------------------------------------------------
+
+DIFFABLE_EXTENSIONS = (".csv", ".parquet", ".xlsx")
+MAX_DIFF_SAMPLES = 20
+
+REVISION_EXPLANATION = (
+    "Replay outputs differ from the original. The Census Bureau occasionally revises "
+    "published ACS values and geography names, and the package or metadata archive may "
+    "have changed (see provenance_differences); the changes are listed cell by cell so "
+    "they can be judged, not treated as an error."
+)
+
+
+def _load_table(path: str) -> Dict[str, pd.DataFrame]:
+    """Read an output as all-string frame(s) so comparison is exact."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        return {"": pd.read_csv(path, dtype=str, keep_default_na=False)}
+    if ext == ".parquet":
+        df = pd.read_parquet(path)
+        return {"": df.astype(object).where(df.notna(), "").astype(str)}
+    sheets = pd.read_excel(path, sheet_name=None, dtype=str, keep_default_na=False)
+    return {str(k): v for k, v in sheets.items()}
+
+
+def _key_columns(old: pd.DataFrame, new: pd.DataFrame) -> List[str]:
+    keys = [c for c in old.columns if str(c).lower() in ("geoid", "year") and c in new.columns]
+    if not keys or old.duplicated(keys).any() or new.duplicated(keys).any():
+        return []
+    return keys
+
+
+def _row_ids(frame: pd.DataFrame, row: Any, keys: List[str]) -> Dict[str, Any]:
+    if keys:
+        values = row if isinstance(row, tuple) else (row,)
+        ids = dict(zip(keys, values))
+    else:
+        ids = {"row": int(row)}
+        for col in frame.columns:
+            if str(col).lower() in ("geoid", "year"):
+                ids[col] = frame.at[row, col]
+    out: Dict[str, Any] = {}
+    for k, v in ids.items():
+        lk = str(k).lower()
+        out["GEOID" if lk == "geoid" else "year" if lk == "year" else k] = v
+    return out
+
+
+def diff_frames(
+    old: pd.DataFrame, new: pd.DataFrame, max_samples: int = MAX_DIFF_SAMPLES
+) -> Dict[str, Any]:
+    """Cell-level comparison of two output tables (values compared as strings).
+
+    Rows are matched on (GEOID, Year) when those identify rows uniquely,
+    otherwise by position.
+    """
+    keys = _key_columns(old, new)
+    o = old.set_index(keys) if keys else old.reset_index(drop=True)
+    n = new.set_index(keys) if keys else new.reset_index(drop=True)
+    cols = [c for c in o.columns if c in n.columns]
+    rows = o.index.intersection(n.index)
+    oc = o.loc[rows, cols].astype(str)
+    nc = n.loc[rows, cols].astype(str)
+    changed = oc.ne(nc)
+    n_changed = int(changed.values.sum())
+    samples: List[Dict[str, Any]] = []
+    if n_changed:
+        positions = list(zip(*changed.values.nonzero()))[:max_samples]
+        source = o if keys else old.reset_index(drop=True)
+        for r, c in positions:
+            sample = _row_ids(source, changed.index[r], keys)
+            sample.update({"column": str(cols[c]), "old": oc.iat[r, c], "new": nc.iat[r, c]})
+            samples.append(sample)
+    by_column = changed.sum()
+    removed = o.index.difference(n.index)
+    added = n.index.difference(o.index)
+
+    def _labels(index: Any) -> List[Any]:
+        return [list(x) if isinstance(x, tuple) else x for x in list(index[:max_samples])]
+
+    return {
+        "matched_on": keys or "row_position",
+        "n_cells_compared": int(changed.size),
+        "n_cells_changed": n_changed,
+        "changed_by_column": {str(k): int(v) for k, v in by_column[by_column > 0].items()},
+        "changes_sample": samples,
+        "rows_removed": int(len(removed)),
+        "rows_added": int(len(added)),
+        "rows_removed_sample": _labels(removed),
+        "rows_added_sample": _labels(added),
+        "columns_removed": [str(c) for c in o.columns if c not in n.columns],
+        "columns_added": [str(c) for c in n.columns if c not in o.columns],
+    }
+
+
+def _diff_files(old_path: str, new_path: str) -> Dict[str, Any]:
+    old_sheets, new_sheets = _load_table(old_path), _load_table(new_path)
+    sheets: Dict[str, Any] = {}
+    for name in sorted(set(old_sheets) | set(new_sheets)):
+        if name not in old_sheets or name not in new_sheets:
+            sheets[name] = {"sheet_added" if name in new_sheets else "sheet_removed": True}
+            continue
+        sheets[name] = diff_frames(old_sheets[name], new_sheets[name])
+    if list(sheets) == [""]:
+        return sheets[""]
+    return {
+        "n_cells_changed": sum(d.get("n_cells_changed", 0) for d in sheets.values()),
+        "sheets": sheets,
+    }
+
+
+_DIFF_FLAGS = (
+    "n_cells_changed", "rows_removed", "rows_added", "columns_removed",
+    "columns_added", "sheet_added", "sheet_removed",
+)
+
+
+def _data_identical(diff: Mapping[str, Any]) -> bool:
+    parts = list(diff["sheets"].values()) if "sheets" in diff else [diff]
+    return all(not any(p.get(k) for k in _DIFF_FLAGS) for p in parts)
+
+
+def _verify_outputs(
+    original: Mapping[str, Any], replay: Mapping[str, Any], original_dir: str, replay_dir: str
+) -> Dict[str, Any]:
+    old_files: Mapping[str, str] = original.get("output_files") or {}
+    new_files: Mapping[str, str] = replay.get("output_files") or {}
+    files: Dict[str, Dict[str, Any]] = {}
+    for rel in sorted(set(old_files) | set(new_files)):
+        entry: Dict[str, Any] = {
+            "original_sha256": old_files.get(rel),
+            "replay_sha256": new_files.get(rel),
+        }
+        if rel not in new_files:
+            entry["status"] = "missing_in_replay"
+        elif rel not in old_files:
+            entry["status"] = "new_in_replay"
+        elif old_files[rel] == new_files[rel]:
+            entry["status"] = "identical"
+        else:
+            entry["status"] = "changed"
+            old_path = os.path.join(original_dir, *rel.split("/"))
+            new_path = os.path.join(replay_dir, *rel.split("/"))
+            if not rel.lower().endswith(DIFFABLE_EXTENSIONS):
+                entry["diff"] = None
+            elif not os.path.isfile(old_path):
+                entry["diff_unavailable"] = "original file no longer exists; hashes only"
+            elif file_sha256(old_path) != old_files[rel]:
+                entry["diff_unavailable"] = "original file was modified after extraction"
+            else:
+                try:
+                    entry["diff"] = _diff_files(old_path, new_path)
+                except Exception as exc:  # unreadable file: report, do not fail the replay
+                    entry["diff_unavailable"] = f"could not compare: {exc}"
+                else:
+                    if _data_identical(entry["diff"]):
+                        # Same cells, different bytes (e.g. workbook timestamps).
+                        entry["status"] = "equivalent"
+        files[rel] = entry
+    counts: Dict[str, int] = {}
+    for entry in files.values():
+        counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+    verified = bool(files) and all(
+        e["status"] in ("identical", "equivalent") for e in files.values()
+    )
+    if not old_files:
+        explanation = "The original metadata records no output files; nothing to verify."
+        verified = False
+    elif verified:
+        explanation = "Every output file matches the original (byte-identical or identical cells)."
+    else:
+        explanation = REVISION_EXPLANATION
+    return {
+        "verified": verified,
+        "file_status_counts": counts,
+        "n_cells_changed": sum(
+            (e.get("diff") or {}).get("n_cells_changed", 0) for e in files.values()
+        ),
+        "files": files,
+        "explanation": explanation,
+    }
+
+
+def _provenance_differences(original: Mapping[str, Any], replay: Mapping[str, Any]) -> List[str]:
+    out: List[str] = []
+    if original.get("package_version") != replay.get("package_version"):
+        out.append(
+            f"package_version {original.get('package_version')} -> {replay.get('package_version')}"
+        )
+    old_v = (original.get("concordance") or {}).get("metadata_vintages") or {}
+    new_v = (replay.get("concordance") or {}).get("metadata_vintages") or {}
+    for year in sorted(set(old_v) | set(new_v)):
+        a, b = old_v.get(year) or {}, new_v.get(year) or {}
+        if a.get("sha256") != b.get("sha256") or a.get("source") != b.get("source"):
+            out.append(
+                f"{year} metadata: {a.get('source')}/{a.get('sha256')} -> "
+                f"{b.get('source')}/{b.get('sha256')}"
+            )
+    a_c, b_c = original.get("concordance") or {}, replay.get("concordance") or {}
+    if a_c.get("overrides_sha256") != b_c.get("overrides_sha256"):
+        out.append(
+            f"overrides file {a_c.get('overrides_sha256')} -> {b_c.get('overrides_sha256')}"
+        )
+    if original.get("selected_concept_ids") != replay.get("selected_concept_ids"):
+        out.append("variables resolved to a different concept selection")
+    return out
+
+
+def _entity_from_dict(d: Mapping[str, Any]) -> Entity:
+    names = {f.name for f in fields(Entity)}
+    return Entity(**{k: v for k, v in d.items() if k in names})
+
+
+def _options_from_metadata(meta: Mapping[str, Any]) -> ResearchOptions:
+    names = {f.name for f in fields(ResearchOptions)}
+    recorded = meta.get("options") or {}
+    opts = ResearchOptions(**{k: v for k, v in recorded.items() if k in names and k != "cpi_table"})
+    if meta.get("cpi_table"):
+        opts.cpi_table = {int(y): float(v) for y, v in meta["cpi_table"].items()}
+    return opts
+
+
+def replay_extraction(
+    metadata_path: str,
+    output_dir: Optional[str] = None,
+    verify: bool = True,
+    client: Optional[CensusAPIClient] = None,
+    refresh: bool = False,
+    log: Optional[LogFn] = None,
+) -> Dict[str, Any]:
+    """Re-run an extraction from its ``<table>_extraction_metadata.json``.
+
+    Uses the recorded table, dataset, years, exact entity list, variables and
+    research options (including a caller-supplied cpi_table). Outputs go to
+    ``output_dir`` (default ``<original dir>/replays/<UTC timestamp>``; the
+    original directory itself is refused so the files being verified survive).
+
+    With ``verify``, every output file's SHA-256 is compared with the hash in
+    the original metadata, and changed CSV/Parquet/Excel outputs are compared
+    cell by cell (GEOID/year/column/old/new). Differences, e.g. Census
+    revisions, give ``success: True, verified: False`` with an explanation.
+
+    ``refresh=True`` bypasses the query cache so the live API is queried
+    (detects revisions); by default the recorded ``use_cache`` option is
+    honoured, which reproduces cached responses offline.
+    """
+    try:
+        with open(metadata_path, encoding="utf-8") as f:
+            original = json.load(f)
+    except OSError as exc:
+        return errors.error_result(
+            errors.INVALID_INPUT, f"Cannot read extraction metadata '{metadata_path}': {exc}"
+        )
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_INPUT, f"'{metadata_path}' is not valid JSON: {exc}")
+    if not isinstance(original, dict):
+        return errors.error_result(
+            errors.INVALID_INPUT, f"'{metadata_path}' is not extraction metadata."
+        )
+    missing = [k for k in REPLAY_REQUIRED_FIELDS if k not in original]
+    if missing:
+        return errors.error_result(
+            errors.INVALID_INPUT,
+            f"'{metadata_path}' (package_version {original.get('package_version', 'unknown')}) "
+            f"lacks fields needed for replay: {missing}. Metadata written before replay "
+            f"support (schema {REPLAY_SCHEMA_VERSION}) cannot be replayed exactly; re-run the "
+            "extraction with the current package to get replayable metadata.",
+            missing_fields=missing,
+            metadata_package_version=original.get("package_version"),
+        )
+    try:
+        schema = int(original["replay_schema_version"])
+    except (TypeError, ValueError):
+        schema = REPLAY_SCHEMA_VERSION + 1
+    if schema > REPLAY_SCHEMA_VERSION:
+        return errors.error_result(
+            errors.INVALID_INPUT,
+            f"Metadata replay schema {original['replay_schema_version']!r} is not supported "
+            f"by this package (supports {REPLAY_SCHEMA_VERSION}); upgrade the package.",
+        )
+
+    original_dir = os.path.dirname(os.path.abspath(metadata_path))
+    if output_dir is None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        output_dir = os.path.join(original_dir, "replays", stamp)
+    if os.path.normcase(os.path.abspath(output_dir)) == os.path.normcase(original_dir):
+        return errors.error_result(
+            errors.INVALID_INPUT,
+            "output_dir is the original extraction directory; replaying there would "
+            "overwrite the outputs being verified. Choose another directory.",
+        )
+
+    try:
+        entities = [_entity_from_dict(d) for d in original["entities"]]
+        options = _options_from_metadata(original)
+    except (TypeError, ValueError, AttributeError) as exc:
+        return errors.error_result(errors.INVALID_INPUT, f"Malformed metadata: {exc}")
+    if refresh:
+        options.use_cache = False
+    if client is None:
+        client = CensusAPIClient(cache=get_default_cache() if options.use_cache else None)
+
+    result = run_batch(
+        original["table_code"],
+        entities,
+        original["years"],
+        output_dir,
+        original["output_format"],
+        options,
+        original["dataset"],
+        client,
+        log=log,
+        variables=original["variables"],
+    )
+    base = {
+        "output_dir": output_dir,
+        "original_metadata_path": os.path.abspath(metadata_path),
+        "data_source": "query cache allowed" if client.cache is not None else "live API",
+    }
+    if not result.get("success"):
+        return {**result, **base}
+
+    with open(result["metadata_path"], encoding="utf-8") as f:
+        replayed = json.load(f)
+    out: Dict[str, Any] = {
+        "success": True,
+        **base,
+        "metadata_path": result["metadata_path"],
+        "table_code": result["table_code"],
+        "successful_calls": result["successful_calls"],
+        "failed_calls": result["failed_calls"],
+        "provenance_differences": _provenance_differences(original, replayed),
+    }
+    if verify:
+        out.update(_verify_outputs(original, replayed, original_dir, output_dir))
+        if result["failed_calls"]:
+            out["explanation"] += (
+                f" {len(result['failed_calls'])} request(s) failed during replay "
+                "(see failed_calls), so missing rows may reflect API errors, not revisions."
+            )
+    else:
+        out["verified"] = None
+    return out

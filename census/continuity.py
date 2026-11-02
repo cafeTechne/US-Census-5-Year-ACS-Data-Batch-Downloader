@@ -25,6 +25,20 @@ COUNT_RELATIVE_CHANGE = 0.25
 PERCENT_POINT_CHANGE = 10.0
 
 
+def implausibility_thresholds(year_gap: int) -> Tuple[float, float]:
+    """(relative, percentage-point) thresholds for releases ``year_gap`` years apart.
+
+    The base thresholds describe one year of change. When non-adjacent releases
+    are requested (e.g. 2019 and 2023), real change accumulates: the relative
+    threshold compounds, (1 + 0.25) ** gap - 1, and the percentage-point
+    threshold scales linearly. Without this, stable concepts such as the top
+    income bracket of B19001 (nominal dollars, +73% from 2019 to 2023) were
+    flagged (validation check F9).
+    """
+    gap = max(1, int(year_gap))
+    return (1.0 + COUNT_RELATIVE_CHANGE) ** gap - 1.0, PERCENT_POINT_CHANGE * gap
+
+
 def _number(value: Any) -> Optional[float]:
     try:
         x = float(value)
@@ -81,12 +95,13 @@ def check_concepts(
             e2, m2, _ = p2
             checked += 1
             result = z_test(e1, m1, e2, m2, 0.90, overlap_years=acs5_overlap_years(y1, y2))
+            rel_limit, pp_limit = implausibility_thresholds(y2 - y1)
             if pct:
                 change = abs(e2 - e1)
-                implausible = change > PERCENT_POINT_CHANGE
+                implausible = change > pp_limit
             else:
                 change = abs(e2 - e1) / abs(e1) if e1 else math.inf
-                implausible = change > COUNT_RELATIVE_CHANGE
+                implausible = change > rel_limit
             if result["significant"] and implausible:
                 flags.append(
                     {
@@ -95,6 +110,7 @@ def check_concepts(
                         "change": round(change, 4),
                         "change_type": "percentage_points" if pct else "relative",
                         "z_statistic": round(result["z_statistic"], 3),
+                        "threshold": round(pp_limit if pct else rel_limit, 4),
                     }
                 )
         exemption = conc.continuity_exempt.get(cid)

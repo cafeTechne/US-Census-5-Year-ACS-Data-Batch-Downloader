@@ -62,7 +62,13 @@ def build_geo_params(
     msa_code: Optional[str] = None,
     year: Optional[int] = None,
 ) -> Dict[str, str]:
-    """Build the Census API ``for`` / ``in`` predicates for a geography level."""
+    """Build the Census API ``for`` / ``in`` predicates for a geography level.
+
+    ``state_code`` may be one FIPS code or a comma-separated list. For state,
+    county and place it may also be ``*`` (every state, including Puerto Rico);
+    the API rejects a state wildcard for tracts ("wildcard not allowed for
+    'state' in geography hierarchy"), so tract queries need explicit states.
+    """
     params: Dict[str, str] = {}
     if geo_level == "place":
         if not place_code:
@@ -77,6 +83,10 @@ def build_geo_params(
     elif geo_level == "tract":
         if not state_code:
             raise ValueError("state_code is required for tract-level query.")
+        if "*" in state_code:
+            raise ValueError(
+                "Tract queries cannot use a state wildcard; request one state at a time."
+            )
         params["for"] = f"tract:{tract_code or '*'}"
         params["in"] = f"state:{state_code} county:{county_code or '*'}"
     elif geo_level == "zcta":
