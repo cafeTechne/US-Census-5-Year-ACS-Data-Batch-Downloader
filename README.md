@@ -8,7 +8,7 @@ Multi-year panels are built from **concepts**, not raw variable codes. ACS codes
 
 | Interface | Entry point | Intended user |
 | :--- | :--- | :--- |
-| MCP server | `mcp_server.py` (32 tools, with server instructions) | Agents in Claude Code, Claude Desktop, other MCP clients |
+| MCP server | `mcp_server.py` (44 tools; `--profile core` gives 13 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
 | Command line | `python -m census <command> --json` | Agents and scripts without MCP |
 | Python library | `census` package (`plan_extraction`, `run_batch`) | Notebooks, pipelines |
 | Desktop GUI | `acs_downloader.py` (Tkinter) | Legacy point-and-click use; maintenance mode |
@@ -199,6 +199,25 @@ Every derived result records its `method` (for example `proportion`, `proportion
 | F6 | Prior-period dollars adjusted with R-CPI-U-RS | Comparison Profile values in current dollars |
 | F7 | Z-tests between periods | Comparison Profile significance flags |
 | F8 | Sums of counties | State estimates |
+
+## Inference
+
+Models and figures that keep ACS sampling error in view, validated by simulation ([docs/audits/inference_validation.md](docs/audits/inference_validation.md)):
+
+| Capability | Function / tool | Validation |
+| :--- | :--- | :--- |
+| Regression with replicate sampling SEs | `census.models.fit_replicate` / `fit_model` | 90% intervals cover 0.896 (population target) and 0.895 (these-areas target) |
+| Noisy predictors | `census.models.regression_calibration` | Attenuation removed; coverage 0.89 |
+| Small-area estimation (Fay–Herriot) | `census.sae.fay_herriot` / `small_area_estimates` | Reproduces the published R `sae` milk example; EBLUP coverage 0.897 |
+| Correlations with intervals and replicate SEs | `census.correlation.correlation_matrix` | Coverage 0.895 |
+| Trend tests on non-overlapping releases | `census.trends.linear_trend_test` / `trend_test` | Size 0.10 at nominal 0.10 |
+| Minimum detectable differences, reliability profiles | `census.planning` | |
+| Journal figures and LaTeX/Markdown tables | `census.figures`, `census.report_tables` | Byte-identical regeneration |
+| Pre-registered analyses | `census.manifest` / `create_manifest`, `run_manifest` | Hash in every output; deviations recorded |
+
+SIMEX is available but under-covers (0.81) and is not recommended for confirmatory use. Statistics use `scipy` and `statsmodels`; figures use `matplotlib`.
+
+**Local models.** `python mcp_server.py --profile core` serves a 13-tool profile with short descriptions, `summary`/`next_step` in every result, and step-by-step recipes (`get_recipe`). Qwen3 8B on CPU completed 5 of 6 evaluation tasks ([docs/audits/local_model_eval.md](docs/audits/local_model_eval.md)); setup in [docs/local_models.md](docs/local_models.md).
 
 ## Advisories and known limitations
 

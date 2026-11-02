@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 import pandas as pd
 
 from census.inflation import is_dollar_variable
-from census.stats import BASE_PATTERN, MEASUREMENT_TYPES, parse_variable_code
+from census.stats import ACS_MOE_Z, BASE_PATTERN, MEASUREMENT_TYPES, moe_to_se, parse_variable_code
 
 IDENTIFIER_COLUMNS: Dict[str, str] = {
     "GEOID": "Standard Census GEOID (TIGER/Line join key)",
@@ -392,8 +392,15 @@ PANEL_ID_COLUMNS = ["GEOID", "Year", "NAME"]
 def build_tidy_panel(
     frames: Iterable[pd.DataFrame],
     keep_annotations: bool = False,
+    add_se: bool = True,
 ) -> Tuple[pd.DataFrame, int]:
     """Stack coded per-year frames into a (GEOID, Year)-unique panel.
+
+    With ``add_se`` every MOE column gains a standard-error companion
+    (``<base>_SE`` for ``<base>M``, ``<base>P_SE`` for ``<base>PM``; slugged
+    ``*_se`` / ``*_pct_se``) equal to |MOE| / 1.645, unless one is already
+    present (PLAN_ROUND_8 A4). Census sentinel MOEs give NaN, except the
+    controlled-estimate code -555555555, whose SE is 0.
 
     Returns the panel (still using raw codes as column names; see
     ``make_slug_map`` to rename) and the number of duplicate rows dropped.
@@ -427,11 +434,35 @@ def build_tidy_panel(
     panel["GEOID"] = panel["GEOID"].astype(str)
     panel["Year"] = pd.to_numeric(panel["Year"]).astype("int64")
 
+    if add_se:
+        panel = _add_se_columns(panel)
+
     before = len(panel)
     panel = panel.drop_duplicates(subset=["GEOID", "Year"], keep="first")
     dropped = before - len(panel)
     panel = panel.sort_values(["GEOID", "Year"]).reset_index(drop=True)
     return panel, dropped
+
+
+def _add_se_columns(panel: pd.DataFrame) -> pd.DataFrame:
+    """Insert ``<key>_SE`` after each ``<base>M`` / ``<base>PM`` column lacking one."""
+    cols: List[str] = []
+    new: Dict[str, pd.Series] = {}
+    for col in panel.columns:
+        cols.append(col)
+        info = classify_column(str(col))
+        if not info or info[1] not in ("M", "PM"):
+            continue
+        key = info[0] + ("P" if info[1] == "PM" else "")
+        se_col = f"{key}_SE"
+        if se_col in panel.columns:
+            continue
+        new[se_col] = pd.Series(moe_to_se(panel[col].to_numpy(), ACS_MOE_Z), index=panel.index)
+        cols.append(se_col)
+    if not new:
+        return panel
+    out = pd.concat([panel, pd.DataFrame(new, index=panel.index)], axis=1)
+    return out[cols]
 
 
 def export_parquet(df: pd.DataFrame, path: str, compression: str = "snappy") -> str:

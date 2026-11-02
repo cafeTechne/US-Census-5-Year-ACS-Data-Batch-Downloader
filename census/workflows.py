@@ -11,6 +11,7 @@ import math
 import os
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from census import errors
@@ -51,7 +52,19 @@ _DERIVE_OPS = ("proportion", "ratio", "product", "difference", "percent_change",
 
 
 def _jsonable(value: Any) -> Any:
-    """Convert numpy/pandas scalars and NaN to JSON-friendly values."""
+    """Convert numpy/pandas scalars, arrays, frames and NaN to JSON-friendly values."""
+    if isinstance(value, pd.DataFrame):
+        if not isinstance(value.index, pd.RangeIndex):
+            value = value.reset_index()
+        return [_jsonable(r) for r in value.to_dict(orient="records")]
+    if isinstance(value, pd.Series):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, np.ndarray):
+        return [_jsonable(v) for v in value.tolist()]
+    if isinstance(value, (pd.Timestamp,)):
+        return value.isoformat()
+    if value is pd.NA or value is pd.NaT:
+        return None
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -61,7 +74,7 @@ def _jsonable(value: Any) -> Any:
             value = value.item()
         except (ValueError, AttributeError):
             pass
-    if isinstance(value, float) and math.isnan(value):
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         return None
     return value
 

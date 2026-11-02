@@ -60,7 +60,7 @@ from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs5_overlap_years
-from census import workflows
+from census import mcp_profiles, recipes, workflows, workflows_inference
 
 load_dotenv()
 
@@ -110,7 +110,7 @@ Derived statistics (every result records its `method`):
 Inflation: default index is R-CPI-U-RS (the Census Bureau's ACS index); 'c-cpi-u'
 matches CPS ASEC income reports. Never pass guessed values via cpi_table.
 Branch on error_code in failed results.
-Call get_research_protocol for the full protocol.
+Call get_research_protocol for the full protocol; get_recipe for short step lists.
 """
 
 mcp = FastMCP("US-Census-ACS-Downloader", instructions=INSTRUCTIONS)
@@ -1022,6 +1022,18 @@ for _tool in (
     workflows.draft_rule_override,
     workflows.record_rule_review,
     workflows.run_validation,
+    workflows_inference.build_analysis_frame,
+    workflows_inference.fit_model,
+    workflows_inference.small_area_estimates,
+    workflows_inference.correlation_matrix,
+    workflows_inference.minimum_detectable_difference,
+    workflows_inference.reliability_profile,
+    workflows_inference.trend_test,
+    workflows_inference.make_figure,
+    workflows_inference.make_table,
+    recipes.get_recipe,
+    workflows_inference.create_manifest,
+    workflows_inference.run_manifest,
 ):
     mcp.tool()(_tool)
 
@@ -1036,11 +1048,36 @@ replay_extraction = workflows.replay_extraction
 draft_rule_override = workflows.draft_rule_override
 record_rule_review = workflows.record_rule_review
 run_validation = workflows.run_validation
+build_analysis_frame = workflows_inference.build_analysis_frame
+fit_model = workflows_inference.fit_model
+small_area_estimates = workflows_inference.small_area_estimates
+correlation_matrix = workflows_inference.correlation_matrix
+minimum_detectable_difference = workflows_inference.minimum_detectable_difference
+reliability_profile = workflows_inference.reliability_profile
+trend_test = workflows_inference.trend_test
+make_figure = workflows_inference.make_figure
+make_table = workflows_inference.make_table
+create_manifest = workflows_inference.create_manifest
+run_manifest = workflows_inference.run_manifest
+get_recipe = recipes.get_recipe
 
 
-def main() -> None:
-    """Run the FastMCP server over standard I/O."""
-    mcp.run()
+def server_for_profile(profile: str) -> FastMCP:
+    """FastMCP server exposing one tool profile ('core', 'review', 'full');
+    see census/mcp_profiles.py."""
+    return mcp_profiles.build_profile_server(mcp, profile)
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """Run the FastMCP server over standard I/O.
+
+    ``--profile core|review|full`` (or env CENSUS_MCP_PROFILE) selects the tool
+    set; default 'full'. Local models should use 'core'.
+    """
+    import sys
+
+    profile = mcp_profiles.resolve_profile(sys.argv[1:] if argv is None else argv)
+    server_for_profile(profile).run()
 
 
 if __name__ == "__main__":

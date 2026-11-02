@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "title": "Median household income and population size, Manhattan tracts (ACS 2015-2019)",
+  "authors": ["human:example-researcher", "agent:claude"],
+  "created": "2026-11-02T00:00:00Z",
+  "releases": [2019],
+  "geography": {"level": "tract", "state": "36", "codes": ["061"]},
+  "variables": [
+    {"name": "income", "ref": "2019:B19013_001"},
+    {"name": "pop", "ref": "2019:B01003_001"}
+  ],
+  "exclusions": [
+    {"rule": "cv_screen", "threshold": 30, "variables": ["income"], "action": "flag"}
+  ],
+  "missing": "complete_case",
+  "confidence_level": 0.90,
+  "correction": {"method": "holm", "family": "all"},
+  "analyses": [
+    {"id": "m1", "method": "fit_replicate", "formula": "income ~ pop", "args": {"model": "ols"}},
+    {"id": "r1", "method": "correlation_matrix", "variables": ["income", "pop"]}
+  ],
+  "hypotheses": [
+    {"id": "H1", "statement": "Larger tracts have higher median household income.",
+     "analysis": "m1", "statistic": "coefficient", "term": "pop", "direction": "greater"},
+    {"id": "H2", "statement": "Income and population size are correlated.",
+     "analysis": "r1", "statistic": "correlation", "variables": ["income", "pop"], "direction": "two-sided"}
+  ]
+}

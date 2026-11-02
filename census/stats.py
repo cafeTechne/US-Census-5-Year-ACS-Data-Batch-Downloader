@@ -14,8 +14,9 @@ of error (see "Understanding and Using American Community Survey Data", ch. 7-8)
 
 import math
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 # Z critical values for two-tailed tests at common confidence levels.
@@ -41,6 +42,27 @@ CENSUS_SENTINELS: Dict[int, str] = {
     -333333333: "MOE not appropriate: median falls in open-ended interval (***)",
     -222222222: "MOE could not be computed: insufficient sample observations (**)",
 }
+
+CONTROLLED_MOE = -555555555
+
+
+def moe_to_se(moe: Any, z: Optional[float] = None) -> np.ndarray:
+    """Convert MOEs to standard errors with consistent sentinel handling.
+
+    ``-555555555`` (controlled estimate: no sampling error per Census) -> 0;
+    every other Census sentinel, other negative values, and NaN -> NaN;
+    otherwise ``|moe| / z`` (default z = 1.645, the ACS 90% convention).
+    """
+    z = ACS_MOE_Z if z is None else float(z)
+    shape = np.shape(moe)
+    flat = pd.to_numeric(pd.Series(np.ravel(np.asarray(moe, dtype=object))), errors="coerce")
+    m = flat.to_numpy(float).reshape(shape)
+    sentinels = np.array(sorted(CENSUS_SENTINELS), dtype=float)
+    with np.errstate(invalid="ignore"):
+        se = np.where(m == CONTROLLED_MOE, 0.0,
+                      np.where(np.isin(m, sentinels) | (m < 0), np.nan, m / z))
+    return se
+
 
 # Values in the EA/MA annotation columns that mark top/bottom coding.
 ANNOTATION_CODES: Dict[str, str] = {
@@ -327,6 +349,12 @@ def clean_census_sentinels(
     add_notes: bool = False,
 ) -> pd.DataFrame:
     """Convert value columns to numeric and replace Census sentinel codes with NaN.
+
+    This includes ``-555555555`` in MOE columns (controlled estimate: no
+    sampling error), which becomes NaN like every other sentinel; validation
+    check F1 relies on that contract. To keep the controlled status, use
+    ``add_notes=True`` (the ``_NOTE`` column records it) or convert raw MOEs
+    with :func:`moe_to_se`, which maps a controlled MOE to SE 0.
 
     Args:
         df: Frame with raw Census variable-code columns (strings or numbers).
