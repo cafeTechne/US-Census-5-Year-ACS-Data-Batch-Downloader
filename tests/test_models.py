@@ -59,7 +59,15 @@ class TestReplicateFit(unittest.TestCase):
         np.testing.assert_allclose(c["se_sampling"], np.sqrt(4 / 80 * acc), rtol=1e-8)
         np.testing.assert_allclose(c["se_total"], np.sqrt(c["se_model"] ** 2 + c["se_sampling"] ** 2))
         z90 = 1.6448536269514722
-        np.testing.assert_allclose(c["ci_upper"] - c["estimate"], z90 * c["se_total"])
+        # Default target "population": intervals from se_model (validated coverage 0.896).
+        np.testing.assert_allclose(c["ci_upper"] - c["estimate"], z90 * c["se_model"])
+        self.assertEqual(res.diagnostics["interval_target"], "population")
+        areas = fit_replicate("y ~ x + z", frame, reps, target="these_areas").coefficients
+        np.testing.assert_allclose(areas["ci_upper"] - areas["estimate"], z90 * areas["se_sampling"])
+        cons = fit_replicate("y ~ x + z", frame, reps, target="conservative").coefficients
+        np.testing.assert_allclose(cons["ci_upper"] - cons["estimate"], z90 * cons["se_total"])
+        with self.assertRaises(ValueError):
+            fit_replicate("y ~ x + z", frame, target="these_areas")  # needs replicates
         self.assertEqual(res.uncertainty_sources, ["model", "sampling_replicate"])
         self.assertIn("replicate_stability", res.diagnostics)
         self.assertIn("sampling_share_of_residual_variance", res.diagnostics)

@@ -163,17 +163,32 @@ def _z(confidence_level: float) -> float:
     return float(sps.norm.ppf(0.5 + confidence_level / 2.0))
 
 
-def _table(params: pd.Series, se_model: pd.Series, se_sampling: pd.Series, confidence_level: float) -> pd.DataFrame:
+# Which standard error the interval and p-value use (validated in
+# docs/audits/inference_validation.md, 1,000 simulated datasets, nominal 90%):
+#   "population"   se_model:    coverage 0.896 for the superpopulation coefficient.
+#                  The model residual already absorbs outcome sampling error.
+#   "these_areas"  se_sampling: coverage 0.895 for the coefficient among these
+#                  areas in this period (finite population), from replicates.
+#   "conservative" se_total = sqrt(se_model^2 + se_sampling^2): coverage 0.961;
+#                  double-counts outcome sampling error (PLAN_ROUND_8 decision 2,
+#                  revised after validation).
+INTERVAL_TARGETS = ("population", "these_areas", "conservative")
+
+
+def _table(params: pd.Series, se_model: pd.Series, se_sampling: pd.Series, confidence_level: float,
+           target: str = "population") -> pd.DataFrame:
     se_total = np.sqrt(se_model.to_numpy(float) ** 2 + np.nan_to_num(se_sampling.to_numpy(float)) ** 2)
     se_total = np.where(np.isnan(se_model.to_numpy(float)), np.nan, se_total)
+    basis = {"population": se_model.to_numpy(float), "these_areas": se_sampling.to_numpy(float),
+             "conservative": se_total}[target]
     z = _z(confidence_level)
     est = params.to_numpy(float)
     with np.errstate(divide="ignore", invalid="ignore"):
-        p = 2 * sps.norm.sf(np.abs(est / se_total))
+        p = 2 * sps.norm.sf(np.abs(est / basis))
     return pd.DataFrame({
         "term": list(params.index), "estimate": est,
         "se_model": se_model.to_numpy(float), "se_sampling": se_sampling.to_numpy(float),
-        "se_total": se_total, "ci_lower": est - z * se_total, "ci_upper": est + z * se_total,
+        "se_total": se_total, "ci_lower": est - z * basis, "ci_upper": est + z * basis,
         "p_value": p,
     })[COEFFICIENT_COLUMNS]
 
@@ -257,6 +272,7 @@ def fit_replicate(
     confidence_level: float = 0.90,
     cv_threshold: float = DEFAULT_CV_THRESHOLD,
     max_failed_replicates: int = 0,
+    target: str = "population",
 ) -> ModelResult:
     """Fit a statsmodels formula model with ACS replicate sampling SEs.
 
@@ -266,9 +282,18 @@ def fit_replicate(
     others (and weights, exposure, trials) stay at their full-sample values.
     Without replicates only model SEs are reported, with a note pointing to
     :func:`regression_calibration`, :func:`simex`, or census.sae.fh_regression.
-    Intervals are estimate +/- z * se_total at ``confidence_level``.
+    ``target`` chooses the SE behind ``ci_lower``/``ci_upper``/``p_value``
+    (see INTERVAL_TARGETS): "population" (default, se_model) for the general
+    relationship; "these_areas" (se_sampling, needs replicates) for the
+    relationship among these areas given ACS sampling error; "conservative"
+    (se_total). All three SEs are always reported. Replicates do not correct
+    attenuation from noisy covariates; use regression_calibration for that.
     """
     model = model.lower()
+    if target not in INTERVAL_TARGETS:
+        raise ValueError(f"target must be one of {INTERVAL_TARGETS}")
+    if target == "these_areas" and (replicates is None or not len(replicates)):
+        raise ValueError("target='these_areas' needs replicates (se_sampling)")
     if model not in MODELS:
         raise ValueError(f"unknown model {model!r}; expected one of {MODELS}")
     data, n_trials, notes = _prepare(frame, formula, model, weights, exposure, trials)
@@ -322,13 +347,16 @@ def fit_replicate(
         }
         diagnostics["replicate_failures"] = failed
         provenance["replicate_variables"] = sorted(mats)
-        notes.append("se_total = sqrt(se_model^2 + se_sampling^2) (PLAN_ROUND_8 decision 2); conservative because "
-                     "the model residual variance already absorbs part of the outcome sampling error")
+        notes.append("se_total = sqrt(se_model^2 + se_sampling^2) is reported but conservative (validated "
+                     "coverage 0.961 at nominal 0.90): the model residual already absorbs outcome sampling error")
     else:
         notes.append("no replicates: SEs reflect model error only, not ACS sampling error of inputs; use "
                      "replicates, regression_calibration/simex for noisy covariates, or " + FH_POINTER)
 
-    table = _table(params, bse, se_sampling, confidence_level)
+    table = _table(params, bse, se_sampling, confidence_level, target)
+    notes.append(f"intervals and p-values use the '{target}' target ("
+                 + {"population": "se_model", "these_areas": "se_sampling", "conservative": "se_total"}[target] + ")")
+    diagnostics["interval_target"] = target
     diagnostics.update(_numeric_diagnostics(formula, data, full, model, table, weights, exposure,
                                             n_trials, cv_threshold))
     return ModelResult(model_type=model, formula=formula, n_obs=int(full.nobs), coefficients=table,
@@ -511,6 +539,12 @@ def simex(
 ) -> ModelResult:
     """SIMEX for covariates with known (heteroscedastic) sampling SEs.
 
+    NOT VALIDATED as a default: in docs/audits/inference_validation.md, quadratic
+    SIMEX under-corrects attenuation and its 90% intervals covered 0.81 at
+    covariate reliability 0.71 (0.29 at reliability 0.38). Prefer
+    :func:`regression_calibration` (coverage 0.89, bias removed). Results
+    carry a note saying so.
+
     For each lambda, ``n_sim`` data sets W + sqrt(lambda) * s_i * Z (Z ~ N(0,1))
     are refit; mean coefficients are extrapolated (``quadratic`` or
     ``linear`` in lambda, through lambda = 0, the naive fit) to lambda = -1
@@ -557,6 +591,8 @@ def simex(
                    "simex_path": pd.DataFrame(M, columns=list(terms)).assign(**{"lambda": lam_a}),
                    "failed_simulations": failed}
     notes = notes + [f"SIMEX ({extrapolation} extrapolation, lambdas {lam}, {n_sim} simulations each) for "
-                     f"{list(spec)}", FH_POINTER]
+                     f"{list(spec)}", FH_POINTER,
+                     "SIMEX is not validated for confirmatory use: simulated 90% interval coverage was 0.81 "
+                     "(docs/audits/inference_validation.md); prefer regression_calibration"]
     return _corrected_result(formula, model, naive, pd.Series(est, index=terms), se_total, confidence_level,
                              "simex", notes, diagnostics, int(naive.nobs))

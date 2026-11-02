@@ -109,15 +109,19 @@ def fit_model(
     se_col: Optional[str] = None,
     confidence_level: float = 0.90,
     figure_dir: Optional[str] = None,
+    target: str = "population",
 ) -> Dict[str, Any]:
     """Fit a regression whose standard errors account for ACS sampling error.
 
     Args:
         input_path: Analysis frame from build_analysis_frame.
         formula: e.g. "poverty_rate ~ median_rent + unemployment_rate".
-        method: "replicate" (refit on Census replicates; best), "regression_calibration"
-            or "simex" (predictors with known SEs, no replicates), "fay_herriot"
-            (outcome with known SE in se_col).
+        method: "replicate" (refit on Census replicates), "regression_calibration"
+            (predictors measured with error; corrects attenuation), "simex" (not
+            validated for confirmatory use), "fay_herriot" (outcome with known SE in se_col).
+        target: "population" (default: the general relationship, model SE),
+            "these_areas" (these areas in this period, replicate SE), or
+            "conservative" (both added; intervals too wide).
         model: "ols", "wls", "binomial", "poisson", or "negbin".
         replicates_path: From build_analysis_frame (needed for exact sampling error).
         error_covariates: Predictors measured with error (regression_calibration/simex).
@@ -136,7 +140,7 @@ def fit_model(
         frame = _load_frame(input_path)
         if method == "replicate":
             result = models.fit_replicate(formula, frame, _read_replicates(replicates_path), model=model,
-                                          confidence_level=confidence_level)
+                                          confidence_level=confidence_level, target=target)
         elif method in ("regression_calibration", "simex"):
             if not error_covariates:
                 return _fail(errors.INVALID_INPUT, f"{method} needs error_covariates.")
@@ -401,3 +405,60 @@ def save_json(result: Dict[str, Any], path: str) -> str:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(_jsonable(result), f, indent=2)
     return path
+
+
+def create_manifest(manifest_path: str) -> Dict[str, Any]:
+    """Validate a pre-registration manifest (JSON) and return its SHA-256 hash.
+    Commit the manifest and hash BEFORE pulling data; then call run_manifest.
+
+    The schema is documented in census/manifest.py and examples/manifests/.
+    Example: create_manifest("examples/manifests/income_population_tracts.json")
+    """
+    from census.manifest import create_manifest as _create
+
+    try:
+        res = _create(manifest_path)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        return _fail(errors.INVALID_INPUT, str(exc))
+    if res.get("errors"):
+        return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
+                     "fix the listed problems and call create_manifest again")
+    return _ok(f"Manifest valid; SHA-256 {res['hash']}.",
+               "commit the manifest, then run_manifest with the same path", **res)
+
+
+def run_manifest(manifest_path: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
+    """Run a pre-registered analysis exactly as written: extraction, derived
+    variables, models, tests with the registered correction, then a results
+    bundle (tables, figures, methods.md). Every output carries the manifest hash;
+    anything that could not run is listed under deviations, never substituted.
+
+    Example: run_manifest("examples/manifests/income_population_tracts.json")
+    """
+    from census.manifest import run_manifest as _run
+
+    folder = _out_dir(output_dir, "manifest_run")
+    try:
+        res = _run(manifest_path, folder)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        return _fail(errors.INVALID_INPUT, str(exc))
+    if res.get("errors"):
+        return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
+                     "fix the manifest with create_manifest")
+    hyp = res.get("hypotheses")
+    devs = res.get("deviations") or []
+    out = {
+        "manifest_hash": res.get("manifest_hash"), "output_dir": res.get("output_dir"),
+        "deviations": devs, "hypotheses": hyp if isinstance(hyp, pd.DataFrame) else hyp,
+        "bundle": res.get("bundle"),
+    }
+    payload = _jsonable(out)
+    if not res.get("success"):
+        payload.update({"success": False, "error_code": errors.NO_DATA,
+                        "error": f"Manifest ran with {len(devs)} deviation(s) that block results.",
+                        "summary": f"Run incomplete: {len(devs)} deviation(s); see deviations.",
+                        "next_step": "report the deviations; do not substitute variables or releases"})
+        return payload
+    return _ok(f"Manifest run complete; {len(devs)} deviation(s); results in {res.get('output_dir')}.",
+               "read methods.md and the tables in the output folder; report deviations if any",
+               **out)

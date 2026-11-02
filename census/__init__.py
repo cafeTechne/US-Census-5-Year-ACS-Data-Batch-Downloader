@@ -182,6 +182,8 @@ from census.planning import aggregation_forecast, minimum_detectable_difference,
 from census.trends import linear_trend_test, overlap_design_check
 from census.correlation import correlation_matrix
 from census.report_tables import results_bundle
+from census.manifest import create_manifest, label_exploratory, manifest_hash, methods_section, run_manifest, validate_manifest
+from census.models import INTERVAL_TARGETS
 
 __all__ = [
     # api
@@ -378,4 +380,11 @@ __all__ = [
     "overlap_design_check",
     "correlation_matrix",
     "results_bundle",
+    "create_manifest",
+    "label_exploratory",
+    "manifest_hash",
+    "methods_section",
+    "run_manifest",
+    "validate_manifest",
+    "INTERVAL_TARGETS",
 ]

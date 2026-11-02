@@ -155,3 +155,22 @@ Every derived result carries `estimate`, `moe` (90%), `se`, `cv_percent`, `metho
 
 `run_validation` (CLI: `validate`; script: `scripts/validate_against_census.py`) recomputes values the Census Bureau publishes independently and compares: pipeline cells against raw API cells, Data Profile percentages from detailed tables, replicate MOEs against published MOEs, medians from distributions, Comparison Profile inflation adjustments and significance flags, and county sums against states. Offline checks run against frozen fixtures in every test run; CI runs the live battery weekly. If your analysis relies on a calculation path, check that the corresponding validation check passes in `docs/audits/validation_report.md`.
 
+## 12. Inference (models, small areas, correlations, figures)
+
+Validated in `docs/audits/inference_validation.md` by simulation with known truth (coverage of nominal 90% intervals).
+
+| Task | Tool | Rule |
+| :--- | :--- | :--- |
+| Model-ready data | `build_analysis_frame` | Each variable keeps `_se` and `_cv`; `use_replicates=True` attaches Census replicates |
+| Regression | `fit_model(method="replicate")` | Intervals default to `target="population"` (model SE; coverage 0.896). `target="these_areas"` uses replicate SEs for the relationship among these areas in this period (0.895). `"conservative"` adds both and is too wide (0.961) |
+| Noisy predictors | `fit_model(method="regression_calibration")` | Corrects attenuation (bias removed, coverage 0.89). Replicates do not correct attenuation. SIMEX under-covers (0.81) and is not for confirmatory use |
+| Noisy small areas | `small_area_estimates` (Fay–Herriot) | Reproduces the published `sae` reference to about six significant figures; EBLUP intervals cover 0.897. Report `gamma` (how far each area moved toward the model) |
+| Correlations | `correlation_matrix` | Intervals cover the correlation of the observed estimates (0.895). Sampling error shrinks correlations toward zero; `disattenuate=True` reports a corrected value alongside |
+| Trends | `trend_test` | Only non-overlapping releases (at least 5 years apart); overlapping sets are refused |
+| Planning | `minimum_detectable_difference`, `reliability_profile` | Check whether the data can detect the effect before designing the analysis |
+| Figures and tables | `make_figure`, `make_table`, or `figure_dir=` on model tools | Vector files with values CSV, caption, and provenance |
+
+**Pre-registration.** For confirmatory work, write a manifest (`examples/manifests/`), call `create_manifest` to validate it and get its SHA-256, commit it, then `run_manifest`. Every output carries the hash; anything that could not run is listed under `deviations`, never silently substituted. Analyses outside the manifest are labeled exploratory.
+
+**Local models.** `python mcp_server.py --profile core` exposes 13 tools with short descriptions; every result starts with `summary` and `next_step`. Call `get_recipe` first for multi-step tasks. See `docs/local_models.md`.
+

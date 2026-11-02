@@ -2,7 +2,7 @@
 
 **Planning Round:** 8
 **Date:** 2026-11-02
-**Status:** Decisions made (section 13); ready to implement
+**Status:** Implemented (section 15)
 **Branch:** `phase8/inference-framework` (from `defaultBranch` after the Rounds 1–7 merge)
 
 ---
@@ -304,7 +304,7 @@ PHASE 8d: Outputs and interface
 | # | Question | Decision |
 | :--- | :--- | :--- |
 | 1 | Dependencies | **Decided:** lean on established libraries as required dependencies: `scipy` (statistics), `statsmodels` (regression, GLMs, mixed models, multiple testing), `matplotlib` (figures). Considered and not adopted as dependencies: `seaborn` (convenience over matplotlib; not needed), `scikit-learn` (prediction-oriented), `linearmodels` (panel/IV; revisit if needed), `samplics` (SAE and replicate weights; used only as a test-time cross-check if installed), `pingouin` (less established) |
-| 2 | Combining replicate and model variance | **Decided:** report both and a total equal to their sum, with a note |
+| 2 | Combining replicate and model variance | **Decided, then revised by validation:** all three SEs are reported, but intervals use `target="population"` (model SE, coverage 0.896) by default, or `"these_areas"` (replicate SE, 0.895). The sum (`"conservative"`) double-counts outcome sampling error and over-covers (0.961) |
 | 3 | Recording pre-registration hashes | **Decided:** commit the manifest to the repository; external timestamping (for example OSF) optional |
 | 4 | High-CV observations | **Decided:** keep and report by default; manifests may exclude explicitly |
 | 5 | Fay–Herriot validation | **Decided:** reproduce published `sae` worked examples in Python, without R |
@@ -325,3 +325,26 @@ PHASE 8d: Outputs and interface
 8. Figures are produced as vector files with a values CSV, caption, and provenance sidecar, and regenerate byte-identically from the same results.
 9. Correlation matrices report intervals and, when replicates exist, design-based standard errors.
 10. The `core` MCP profile passes the design-rule tests, and the local-model evaluation reports a completion rate for each core recipe with at least one local model.
+
+---
+
+## 15. Implementation status
+
+| Workstream | Files | Result |
+| :--- | :--- | :--- |
+| Contract | `census/results.py` | `ModelResult`, `SmallAreaResult`, `CorrelationResult`, analysis-frame convention |
+| A Analysis frames | `census/analysis.py`, panel `*_se` columns | Derived variables evaluated on each replicate |
+| B Models | `census/models.py` | Replicate refit regression (OLS/WLS/GLM), regression calibration, SIMEX, reliability screen; interval targets |
+| C Fay–Herriot | `census/sae.py` | Reproduces the R `sae` milk example (sigma2_u 0.0185503 vs 0.01855022; betas and SEs within 2e-6) |
+| D Manifests | `census/manifest.py`, `examples/manifests/` | Validate, hash, run, deviations, methods section |
+| E, G Planning and trends | `census/planning.py`, `census/trends.py` | MDD, aggregation forecasts, overlap checks, GLS trend test |
+| F Validation | `census/simulation.py`, `scripts/inference_validation.py` | Coverage studies; findings below |
+| I Outputs | `census/correlation.py`, `census/figures.py`, `census/report_tables.py` | Reproducible journal figures, LaTeX/Markdown tables, results bundles |
+| H, J Interfaces | `census/workflows_inference.py`, `census/mcp_profiles.py`, `census/recipes.py`, `scripts/local_model_eval.py` | 44 tools (13 in `core`), recipes, design-rule tests, local-model harness |
+
+**Validation findings that changed the plan.** (1) Adding model and replicate variance (decision 2) double-counts outcome sampling error: coverage 0.961. Intervals now default to the model SE for population inference (0.896) or replicate SE for these-areas inference (0.895). (2) Quadratic SIMEX under-corrects attenuation and under-covers (0.81; 0.29 at reliability 0.38); it is documented as not validated and regression calibration (0.89) is the recommended correction. (3) Replicate refits do not correct attenuation from noisy predictors (coverage 0.54 in that scenario). (4) Correlations among noisy estimates are attenuated: intervals cover the observed-estimate correlation (0.895) but not the true-value correlation (0.45); disattenuation is reported alongside.
+
+**Local-model evaluation.** Qwen3 8B (CPU with partial GPU offload) passed 5 of 6 tasks through the `core` profile, about 5–7 minutes per task. The failure (a multi-step question answered without the recipe) led to a recipe-first instruction; the run also exposed a misleading overlapping-trend error, now fixed.
+
+**Carried to Round 9:** spatial models and maps; slimmer core wrapper for `batch_download` (26 parameters); native `summary`/`next_step` in Round 7 tools; tract-level CV profiles from real tract MOEs for the simulations (currently assumed); rerun of the local-model evaluation with an 8K context.
+

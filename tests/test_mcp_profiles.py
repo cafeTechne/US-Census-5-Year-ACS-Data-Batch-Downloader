@@ -89,6 +89,7 @@ class TestCoreDesignRules(unittest.TestCase):
             "fit_model": dict(input_path="does/not/exist.csv", formula="y ~ x"),
             "make_figure": dict(kind="nope", input_path="x.csv"),
             "build_analysis_frame": dict(input_path="does/not/exist.csv"),
+            "run_manifest": dict(manifest_path="does/not/exist.json"),
         }
         inference_tools = {n for n in CORE_TOOLS if hasattr(workflows_inference, n)}
         self.assertTrue(inference_tools <= set(cases), f"add a case for {inference_tools - set(cases)}")

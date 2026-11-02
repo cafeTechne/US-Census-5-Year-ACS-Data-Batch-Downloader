@@ -1032,6 +1032,8 @@ for _tool in (
     workflows_inference.make_figure,
     workflows_inference.make_table,
     recipes.get_recipe,
+    workflows_inference.create_manifest,
+    workflows_inference.run_manifest,
 ):
     mcp.tool()(_tool)
 
@@ -1055,6 +1057,8 @@ reliability_profile = workflows_inference.reliability_profile
 trend_test = workflows_inference.trend_test
 make_figure = workflows_inference.make_figure
 make_table = workflows_inference.make_table
+create_manifest = workflows_inference.create_manifest
+run_manifest = workflows_inference.run_manifest
 get_recipe = recipes.get_recipe
 
 
