@@ -2,80 +2,51 @@
 
 **Planning Round:** 4  
 **Date:** 2026-11-01  
-**Branch:** phase4/mcp-server (to branch off main / defaultBranch once phase3 is merged)  
-**Status:** Phase 3 COMPLETE. Ready to begin Phase 4.  
-**Next Round:** Final round / Production readiness.
+**Branch:** phase4/mcp-server  
+**Status:** Phase 4 COMPLETE. Production Readiness Achieved.  
 
 ---
 
-## Phase 3 Retrospective & Baseline State
+## Phase 4 Completion Summary
 
-Phase 3 successfully extracted the headless library layer:
-- Clean package structure: `census/` (`api.py`, `geo.py`, `tables.py`, `export.py`).
-- Automatic retry with exponential backoff for transient Census API errors (429, 500, 502, 503, 504).
-- `acs_downloader.py` converted into a thin GUI consumer.
-- Modularized unit test suite: 33 tests across 5 test files (`test_api`, `test_geo`, `test_tables`, `test_export`, `test_downloader`), all passing in ~0.15s.
+Phase 4 successfully implemented the Model Context Protocol (MCP) server, targeted specifically for **Anthropic's Claude Code** and **Claude Desktop**.
 
----
+### Implemented Enhancements
 
-## Phase 4 Plan — Model Context Protocol (MCP) Server
+1. **MCP Server Core (`mcp_server.py`)**
+   - Built on official `mcp.server.fastmcp.FastMCP` with stdio transport.
+   - Clean integration with the underlying headless `census` library (`census.api`, `census.geo`, `census.tables`, `census.export`).
+   - Tools implemented:
+     - `list_states`: Lists states and territories with 2-digit FIPS codes.
+     - `list_places`: Resolves cities, towns, and CDPs for a state with substring filtering.
+     - `search_tables`: Searches ACS 5-year table groups by code or keyword in `groups.json`.
+     - `list_variables`: Retrieves variable definitions and labels from `variables.json`.
+     - `fetch_table_data`: Queries live Census ACS5 API and formats output into human-readable JSON records.
+     - `batch_download`: Downloads multi-year data across entities and exports CSV or multi-sheet Excel files.
 
-### Objectives
-Build an MCP server (`mcp_server.py`) powered by the headless `census/` library. This allows Claude Desktop, Cursor, and other agentic coding environments to inspect Census geographies, explore tables/variables, and trigger data extraction pipelines directly via standard MCP tool calls.
+2. **Dependencies**
+   - Added `mcp>=1.0.0` to `requirements.txt`.
 
-### Proposed Architecture
+3. **Automated Testing Suite**
+   - Added `tests/test_mcp.py` covering state listing, place filtering, table search, variable previews, live API query formatting, and multi-year batch downloads.
+   - Total test count: 39 tests across 6 modules (`test_mcp`, `test_api`, `test_geo`, `test_tables`, `test_export`, `test_downloader`). All passing in ~0.17s.
+   - 100% compliant with `black` formatting standards.
 
-```text
-mcp_server.py
-├── Server Initialization (mcp.server.fastmcp or FastMCP)
-├── Tools:
-│   ├── list_states() -> List[Dict]
-│   ├── list_places(state_code: str, search: Optional[str]) -> List[Dict]
-│   ├── search_tables(query: str, limit: int = 20) -> List[Dict]
-│   ├── list_variables(table_code: str, limit: int = 50) -> List[Dict]
-│   ├── fetch_table_data(year: int, state_code: str, table_code: str, geo_level: str, ...) -> Dict
-│   └── batch_download(state_code: str, table_code: str, years: List[int], ...) -> Dict
-└── Client Configuration Guide:
-    ├── claude_desktop_config.json
-    └── cursor_config.json
-```
-
-### Detailed Work Breakdown
-
-#### 4a — Environment & Dependencies
-1. Check or install `mcp` (`pip install mcp`).
-2. Add `mcp>=1.0.0` to `requirements.txt`.
-
-#### 4b — MCP Server Implementation (`mcp_server.py`)
-1. Implement `mcp_server.py` using `FastMCP`:
-   - `@mcp.tool() def list_states() -> List[Dict[str, str]]`:
-     Returns all supported states/territories with FIPS codes.
-   - `@mcp.tool() def list_places(state_code: str, search: str = "") -> List[Dict[str, str]]`:
-     Returns places in the state, optionally filtered by keyword.
-   - `@mcp.tool() def search_tables(query: str, limit: int = 25) -> List[Dict[str, str]]`:
-     Searches `groups.json` by table code or title description.
-   - `@mcp.tool() def list_variables(table_code: str, limit: int = 50) -> List[Dict[str, str]]`:
-     Returns variable codes and descriptions for the specified table.
-   - `@mcp.tool() def fetch_table_data(year: int, state_code: str, table_code: str, geo_level: str = "place", place_code: Optional[str] = None, county_code: Optional[str] = None) -> Dict[str, Any]`:
-     Queries live Census ACS5 API and returns formatted JSON rows.
-   - `@mcp.tool() def batch_download(state_code: str, table_code: str, start_year: int, end_year: int, geo_level: str = "place", place_codes: Optional[List[str]] = None, output_format: str = "both", output_dir: Optional[str] = None) -> Dict[str, Any]`:
-     Executes batch downloads across years/entities and writes files to disk.
-
-#### 4c — Automated Tests & Verification
-1. Add `tests/test_mcp.py` to test MCP tool registrations and execution.
-2. Verify with standard test runner: `python -m unittest discover tests`.
-
-#### 4d — Documentation
-1. Provide copy-paste MCP configuration snippets for:
-   - Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json` on Windows).
-   - Cursor (`.cursor/mcp.json`).
+4. **Claude Code & Claude Desktop Integration Guides**
+   - Created `docs/claude_setup.md` documenting:
+     - `claude mcp add` CLI command for Claude Code.
+     - Project-level configuration in `.claude/config.json`.
+     - User-global configuration in `~/.claude.json`.
+     - Claude Desktop configuration at `%APPDATA%\Claude\claude_desktop_config.json`.
+     - Practical example research prompts.
 
 ---
 
-## Notes for Next Agent
+## Retrospective Across All Rounds
 
-- Active branch to merge: `phase3/headless-library` -> `defaultBranch`.
-- New branch for Phase 4: `git checkout -b phase4/mcp-server`.
-- All 33 unit tests pass.
-- Adhere to Senior Principal Engineer persona: deliberate planning, explicit typing, black formatting, zero placeholders.
-
+| Round / Phase | Key Accomplishments |
+| :--- | :--- |
+| **Phase 1: Cleanup & Bug Fixes** | Fixed DataFrame formatting crash, fixed place/state column filter bug, secured API key via `.env`, added dynamic year spinboxes, cleaned dead files. |
+| **Phase 2: Research UX Overhaul** | Asynchronous daemon worker threading, Dracula progress/status log, multi-place selection, dynamic call estimator, output format options (CSV / Excel), variable explorer, geography selector. |
+| **Phase 3: Headless Library** | Decoupled core logic into standalone `census/` package (`api`, `geo`, `tables`, `export`) with exponential backoff HTTP retry logic. Converted `acs_downloader.py` into a thin UI consumer. |
+| **Phase 4: Anthropic MCP Integration** | Created `mcp_server.py` with 6 MCP tools, added `test_mcp.py`, configured setups for Claude Code & Claude Desktop. |
