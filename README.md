@@ -1,12 +1,14 @@
 # US Census ACS 5-Year Data Batch Downloader
 
-A Python toolkit for extracting American Community Survey (ACS) 5-year data from the US Census Bureau API into research-ready files. It handles multi-year, multi-geography batches. It keeps estimates paired with their margins of error, derives standard errors, coefficients of variation, and significance tests, and converts dollar values to constant dollars with the Census Bureau's index (R-CPI-U-RS). It also writes tidy panels, Parquet files, codebooks, and provenance metadata.
+A Python toolkit for extracting American Community Survey (ACS) 5-year data from the US Census Bureau API into research-ready files. It handles multi-year, multi-geography batches. It keeps estimates paired with their margins of error and derives proportions, ratios, sums, medians for custom areas, and significance tests with multiple-comparison correction, using Census replicate weights for exact variances where Census publishes them. It converts dollar values to constant dollars with the Census Bureau's index (R-CPI-U-RS), harmonizes tract panels across the 2010/2020 boundary change, and writes tidy panels, Parquet files, codebooks, and replayable provenance metadata.
+
+Calculations are checked against values the Census Bureau publishes itself (profile percentages, comparison-profile inflation adjustments and significance flags, replicate-based MOEs, medians). See [Validation](#validation-against-census-published-values).
 
 Multi-year panels are built from **concepts**, not raw variable codes. ACS codes are renumbered, reused, and redefined between releases, so every (year, code) is matched through a checked concordance, and anything unverifiable stops the run instead of silently mixing measures. See [Cross-release concordance](#cross-release-concordance).
 
 | Interface | Entry point | Intended user |
 | :--- | :--- | :--- |
-| MCP server | `mcp_server.py` (22 tools, with server instructions) | Agents in Claude Code, Claude Desktop, other MCP clients |
+| MCP server | `mcp_server.py` (32 tools, with server instructions) | Agents in Claude Code, Claude Desktop, other MCP clients |
 | Command line | `python -m census <command> --json` | Agents and scripts without MCP |
 | Python library | `census` package (`plan_extraction`, `run_batch`) | Notebooks, pipelines |
 | Desktop GUI | `acs_downloader.py` (Tkinter) | Legacy point-and-click use; maintenance mode |
@@ -15,7 +17,7 @@ All four interfaces share one pipeline and the same defaults.
 
 ## Installation
 
-Tested on Python 3.12.
+Tested on Python 3.10–3.12 (Linux and Windows CI).
 
 ```bash
 git clone https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader
@@ -23,7 +25,7 @@ cd US-Census-5-Year-ACS-Data-Batch-Downloader
 pip install -r requirements.txt
 ```
 
-Price-index data (R-CPI-U-RS and CPI-U, 2000–2024) ships with the repository, so constant-dollar conversion works out of the box.
+Price-index data (R-CPI-U-RS, CPI-U, and C-CPI-U, 2000–2024) ships with the repository, so constant-dollar conversion works out of the box.
 
 **Refreshing R-CPI-U-RS** (once a year, after BLS publishes a new annual average). BLS publishes the series only as an Excel file and blocks anonymous scripted downloads. Download `https://www.bls.gov/cpi/research-series/r-cpi-u-rs-allitems.xlsx` in a browser, save it over `data/price_indexes/source/r-cpi-u-rs-allitems.xlsx`, and run:
 
@@ -43,7 +45,8 @@ Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a
 | `CENSUS_CROSSWALK_DIR` | Alternate override directory (default `crosswalks/`) |
 | `CENSUS_PRICE_INDEX_DIR` | Alternate price-index directory (default `data/price_indexes/`) |
 | `BLS_USER_AGENT` | Identifying User-Agent for `scripts/update_price_indexes.py` |
-| `CENSUS_LIVE_TESTS=1` | Enable live API contract tests |
+| `CENSUS_VRE_DIR` | Cache for downloaded Census Variance Replicate Estimate files (default `.cache/vre/`) |
+| `CENSUS_LIVE_TESTS=1` | Enable live API contract tests and the live validation battery |
 
 ## Quick start
 
@@ -73,6 +76,12 @@ python -m census plan    --table DP02 --geo state --state 36 --years 2018-2022 -
 python -m census extract --table DP02 --geo state --state 36 --years 2018-2022 --variables DP02_0016 --out out --json
 python -m census concordance --table B27001 --years 2016-2017 --variables B27001_006 --json
 python -m census describe --code DP02_0002PE --year 2018
+python -m census extract --table B19013 --geo county --state all --years 2022 --format parquet --out out
+python -m census replay out/B19013_extraction_metadata.json --json
+python -m census derive proportion --estimates 4500,30000 --moes 400,900 --json
+python -m census aggregate --input out/B17001_tract_panel_2023.csv --groups groups.csv --year 2023 \
+    --derive '[{"name": "poverty_rate", "op": "proportion", "num": "B17001_002E", "den": "B17001_001E"}]'
+python -m census validate --offline
 ```
 
 Exit codes: `0` success, `2` invalid input, `3` concordance review required, `4` API or data failure.
@@ -103,6 +112,7 @@ How it is handled:
 4. **Selection.** `variables=` names what the analysis uses. A bare code resolves in the latest requested year, `YEAR:CODE` pins a vintage, and concept IDs are exact.
 5. **Modes.** `fail` (default) stops when unresolved issues touch selected variables, `strict` proceeds and reports, and `code` is the legacy raw-code mode.
 6. **Reviewed overrides.** `crosswalks/<dataset>/<table>.csv` records `merge`, `split`, and `exclude` decisions, each drafted and then independently reviewed (by an agent or a human) with generated evidence and a census.gov source. The rules are in [docs/agent_protocol.md](docs/agent_protocol.md) and enforced in code.
+7. **Table-scoped rules.** `crosswalks/<dataset>/<table>_rules.csv` holds reviewed regex rewrites for systematic redesigns (two rules resolve 165 of the 171 S1701 lines changed in 2017). Rules that would change any number in a label are rejected, and merged concepts are still continuity-checked. See [docs/rule_overrides.md](docs/rule_overrides.md).
 
 Each multi-year run writes `<table>_concordance.csv` (every output column traced to its code in each year) and `<table>_concordance_issues.json`.
 
@@ -113,7 +123,7 @@ Each multi-year run writes `<table>_concordance.csv` (every output column traced
 | `geo_level` | Summary level | `GEOID` | `codes` in `build_entities` |
 | :--- | :--- | :--- | :--- |
 | `us` | 010 | `US` | none |
-| `state` | 040 | `SS` | none; `state_code` required |
+| `state` | 040 | `SS` | none; `state_code` required (`"all"` = 50 states + DC everywhere) |
 | `county` | 050 | `SSCCC` | county FIPS; default all in state |
 | `tract` | 140 | `SSCCCTTTTTT` | county FIPS; one request per county; default all |
 | `place` | 160 | `SSPPPPP` | place FIPS (required) |
@@ -160,15 +170,40 @@ Every run also writes `<table>_extraction_metadata.json`. It records the request
 | Standard error | `SE = MOE / 1.645` | `census.stats.standard_error` |
 | Coefficient of variation | `CV = SE / estimate × 100`; High ≤ 15%, Moderate ≤ 30%, Low > 30% | `census.stats.coefficient_of_variation` |
 | Difference test | `Z = |X1 − X2| / sqrt(SE1² + SE2²)`, scaled by `sqrt(1 − overlap/5)` for overlapping periods | `census.stats.z_test` |
-| Sum of estimates | `MOE = sqrt(Σ MOE²)`; largest MOE once for zero components | `census.stats.aggregate_estimates` |
+| Sum of estimates | `MOE = sqrt(Σ MOE²)` over every component, including zeros (Handbook 2020 ch. 8; the older largest-zero-MOE rule is available) | `census.derived.sum_estimates` |
+| Proportion (subset) | `MOE = sqrt(MOE_X² − P²·MOE_Y²) / Y`; ratio formula if the radicand is negative | `census.derived.proportion` |
+| Ratio, product, percent change | Handbook 2020 ch. 8 formulas | `census.derived` |
+| Exact variance | `Var = 4/80 · Σ (rep_r − est)²` over Census's 80 replicate estimates | `census.replicate`, `census.variance` |
+| Median for custom areas | Sum bracket counts, linear interpolation (ACS Subject Definitions); MOE by replicates or an approximation | `census.medians` |
+| Custom geographies | Sum counts, then derive; non-additive measures refused | `census.aggregate` |
+| Multiple comparisons | Holm (default), Bonferroni, Benjamini–Hochberg, Benjamini–Yekutieli | `census.multitest` |
+| Tract harmonization | `Σ w·X`, `MOE = sqrt(Σ (w·MOE)²)` with Census 2010/2020 tract relationship weights | `census.geo_crosswalk` |
 | Sentinel values | Census jam values (`-999999999`, `-666666666`, …) become null | `census.stats.clean_census_sentinels` |
-| Constant dollars | `real = nominal × index_base / index_year` on dollar-valued estimates and MOEs (not counts in dollar brackets); default R-CPI-U-RS, optional CPI-U | `census.inflation.deflate_dataframe` |
+| Constant dollars | `real = nominal × index_base / index_year` on dollar-valued estimates and MOEs (not counts in dollar brackets); default R-CPI-U-RS, optional CPI-U and C-CPI-U | `census.inflation.deflate_dataframe` |
 
-Price indexes live in `data/price_indexes/` and are generated from BLS sources by `scripts/update_price_indexes.py`, with checksums. R-CPI-U-RS values are the workbook's annual averages; the source workbook is kept in `data/price_indexes/source/` and its SHA-256 is recorded. CPI-U annual averages are computed from monthly values (they match BLS's published averages to ±0.001). 2025 is omitted from both because BLS did not publish October 2025; the R-CPI-U-RS workbook shows an 11-month 2025 average, which is deliberately not used. The Census Bureau switched its CPS income reports to C-CPI-U in 2023 but still uses R-CPI-U-RS for all ACS years.
+Price indexes live in `data/price_indexes/` and are generated from BLS sources by `scripts/update_price_indexes.py`, with checksums. R-CPI-U-RS values are the workbook's annual averages; the source workbook is kept in `data/price_indexes/source/` and its SHA-256 is recorded. CPI-U annual averages are computed from monthly values (they match BLS's published averages to ±0.001). 2025 is omitted because BLS did not publish October 2025; the R-CPI-U-RS workbook's 11-month 2025 average is stored as provisional and used only with `allow_provisional_index=True`, which adds an advisory. The Census Bureau switched its CPS income reports to C-CPI-U in 2023 but still uses R-CPI-U-RS for all ACS years.
+
+Every derived result records its `method` (for example `proportion`, `proportion_ratio_fallback`, `replicate`, `median_interpolated`, `apportioned`) alongside `estimate`, `moe`, `se`, and `cv_percent`. Approximation formulas ignore covariance; for estimates that feed a hypothesis test, check `check_replicate_availability` and prefer replicate variances.
+
+## Validation against Census-published values
+
+`python scripts/validate_against_census.py` (or `python -m census validate`, or the MCP tool `run_validation`) recomputes numbers the Census Bureau publishes independently and compares them with this toolkit's output. Every check runs offline against frozen fixtures in the normal test suite, and CI runs the live battery weekly. The latest report is [docs/audits/validation_report.md](docs/audits/validation_report.md).
+
+| Check | Recomputed by the toolkit | Census-published value |
+| :--- | :--- | :--- |
+| F1 | Pipeline output cells (panel, Parquet) | Raw API cells |
+| F2 | Proportions and MOEs from detailed tables | Data Profile percentages and percent MOEs |
+| F3 | MOEs from 80 replicate estimates | Published MOEs |
+| F4 | Exact replicate proportion MOEs | Data Profile percent MOEs |
+| F5 | Medians from distribution tables | Published medians |
+| F6 | Prior-period dollars adjusted with R-CPI-U-RS | Comparison Profile values in current dollars |
+| F7 | Z-tests between periods | Comparison Profile significance flags |
+| F8 | Sums of counties | State estimates |
 
 ## Advisories and known limitations
 
-- **Boundary vintages.** Requests spanning 2019 to 2020 at tract, ZCTA, place, county, or CBSA level produce an advisory. Tract panels across that break need a geographic crosswalk, which is not yet implemented.
+- **Boundary vintages.** Requests spanning 2019 to 2020 at tract, ZCTA, place, county, or CBSA level produce an advisory. Tract panels can be harmonized with `harmonize_tracts_to=2010|2020` (land-area weights from the Census relationship file, or NHGIS-style population weights you supply); apportioned MOEs assume independent components and exact weights, and boundary slivers produce tiny weights. Other levels are not harmonized.
+- **Medians from coarse brackets.** Household-income medians rebuilt from B19001 are usually within 1% of the published B19013, but can differ by more than 2% because Census interpolates a finer internal distribution.
 - **Home values.** Before the 2022 releases, home values were not on the period end-year dollar basis (ACS user note 2023-07), so deflating them is approximate. Plans include an advisory.
 - **Subject tables.** Their 2013 and 2017 redesigns changed thousands of labels. Multi-year subject pulls usually need `variables=` and reviewed overrides.
 - **ZIP codes vs. ZCTAs.** `zip2fips.json` maps each ZIP to one primary county; PO-box-only ZIPs have no ZCTA.
@@ -186,14 +221,25 @@ census/
   pipeline.py      plan_extraction, run_batch, build_entities, ResearchOptions
   inflation.py     Price indexes, deflator, advisories
   stats.py         MOE, SE, CV, Z-tests, aggregation, sentinel cleaning
+  variance.py      DerivedEstimate and replicate-variance primitives
+  derived.py       Proportions, ratios, products, sums, percent change (Handbook ch. 8)
+  replicate.py     Census Variance Replicate Estimate tables: download, parse, exact variances
+  medians.py       Medians and MOEs from distribution tables
+  aggregate.py     Custom geography aggregation
+  multitest.py     Multiple-comparison corrections, batch significance tests
+  geo_crosswalk.py 2010/2020 tract apportionment, Connecticut recodes
+  validation.py    Checks against Census-published values
+  workflows.py     File-level workflows shared by the MCP server and CLI
   panel.py         Slugs, codebooks, tidy panels, Parquet
   geo.py, tables.py, export.py, errors.py, __main__.py (CLI)
-mcp_server.py      MCP server (instructions + 22 tools)
+mcp_server.py      MCP server (instructions + 32 tools)
 acs_downloader.py  Tkinter GUI (maintenance mode)
 metadata/          Per-vintage ACS metadata archive with manifest
 crosswalks/        Reviewed concordance overrides and their evidence
-data/price_indexes/  R-CPI-U-RS and CPI-U with source sidecars
-scripts/           fetch_metadata_archive.py, update_price_indexes.py, audit_concordance.py
+data/price_indexes/  R-CPI-U-RS, CPI-U, and C-CPI-U with source sidecars
+data/geo_crosswalks/ Census 2010/2020 tract relationships and Connecticut recodes
+scripts/           fetch_metadata_archive.py, update_price_indexes.py, audit_concordance.py,
+                   fetch_tract_relationships.py, validate_against_census.py
 docs/              agent_protocol.md, claude_setup.md, audits/
 tests/             unittest suite (pytest); tests/test_live.py is opt-in
 ```
@@ -201,10 +247,15 @@ tests/             unittest suite (pytest); tests/test_live.py is opt-in
 ## Testing
 
 ```bash
-python -m pytest -q                                          # offline
-CENSUS_LIVE_TESTS=1 python -m pytest -q tests/test_live.py   # live API contracts
+python -m pytest -q                                          # offline, including validation fixtures
+CENSUS_LIVE_TESTS=1 python -m pytest -q                      # adds live API and validation tests
+python scripts/validate_against_census.py --live             # full live validation report
 python -m census validate-crosswalks
 ```
+
+## Citation and attribution
+
+Created and maintained by [cafeTechne](https://github.com/cafeTechne). If you use this toolkit in research, cite it using [CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" button produces APA and BibTeX), and cite the Census Bureau as the source of the data, naming the ACS 5-year release(s) and table(s) used. Forks and derivative works must keep this attribution and the license notice.
 
 ## License
 

@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "US Census ACS 5-Year Data Batch Downloader"
+abstract: >-
+  A Python toolkit and MCP server for extracting American Community Survey
+  5-year data from the US Census Bureau API into research-ready files, with
+  vintage-safe variable concordance, margins of error for derived estimates,
+  constant-dollar conversion with R-CPI-U-RS, and validation against
+  Census-published values.
+type: software
+authors:
+  - alias: cafeTechne
+license: AGPL-3.0-or-later
+repository-code: "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader"
+version: "0.7.0"
+date-released: "2026-11-02"
+keywords:
+  - American Community Survey
+  - US Census Bureau
+  - margins of error
+  - survey statistics
+  - research data

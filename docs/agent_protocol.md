@@ -1,4 +1,4 @@
-# Agent Protocol: Extraction, Concordance Review, and Overrides
+# Agent Protocol: Extraction, Concordance Review, Derived Statistics, and Validation
 
 This protocol governs how agents (and humans) extract multi-year ACS data, decide whether variables are comparable across releases, and record those decisions. The MCP server returns this document from `get_research_protocol`; its rules are enforced in code, not only described here.
 
@@ -65,6 +65,7 @@ Decisions are recorded in `crosswalks/<dataset>/<table>.csv`. Each row maps one 
 | `merge` | Moves the (year, code) into the target concept, so one continuous column | Same measure, cosmetic relabel or renumbering that automatic matching missed |
 | `split` | Confirms the (year, code) is its own concept and resolves the review issue | The measure changed |
 | `exclude` | Drops the (year, code) from outputs | The line should not be used at all |
+| `rule` | A reviewed regex rewrite of one table's labels at one release boundary; every rewritten line that then matches exactly one later line is merged | Systematic redesigns (for example S1701 in 2017 inserted "population for whom poverty status is determined" into every label). Stored in `crosswalks/<dataset>/<table>_rules.csv`; see section 5a |
 
 **When in doubt, choose `split`.** Keeping two measures apart never corrupts data, while a wrong merge does.
 
@@ -102,9 +103,15 @@ Invalid rows are never applied; they surface as `invalid_override` issues.
 
 Use a stable session identifier, so that an audit can confirm the drafter and reviewer were different sessions.
 
+## 5a. Table-scoped rules
+
+`draft_rule_override` / `record_rule_review` (CLI: `draft-rule`, `record-rule`) follow the same two-identity process as single-row overrides. A rule applies `re.sub(pattern, replacement, label)` to the canonical labels of the earlier release of one table, at one adjacent release boundary. Validation rejects a rule that changes any number in a label (age bands and dollar bounds must stay blocked), maps two earlier lines to one later line, creates no new match, overlaps another rule, or cites a source outside `census.gov`. Evidence (every rewrite and match) is generated and re-verified. Merged concepts are still continuity-checked; a rule grants no exemption. Full procedure: `docs/rule_overrides.md`, which `get_research_protocol` also returns.
+
 ## 6. Price indexes
 
-Constant-dollar conversion defaults to **R-CPI-U-RS**, the index the Census Bureau uses for ACS inflation adjustment. CPI-U is available with `price_index="cpi-u"`. Index data lives in `data/price_indexes/` with source checksums. If a year is missing, the run fails with `PRICE_INDEX_UNAVAILABLE`. Do not supply guessed values through `cpi_table`.
+Constant-dollar conversion defaults to **R-CPI-U-RS**, the index the Census Bureau uses for all ACS years. `price_index="cpi-u"` is available for comparison and `"c-cpi-u"` (chained CPI) for matching CPS ASEC income reports, which Census has adjusted with C-CPI-U from 2000 onward since 2023. Index data lives in `data/price_indexes/` with source checksums. If a year is missing, the run fails with `PRICE_INDEX_UNAVAILABLE`. Do not supply guessed values through `cpi_table`.
+
+Years with an unpublished month (2025: October was never published) are excluded. BLS's incomplete-year figure is used only with `allow_provisional_index=True` (`allow_provisional` in `adjust_inflation`), which adds a `PROVISIONAL INDEX` advisory; say so wherever results are reported.
 
 Home values in releases before 2022 were not on the period end-year dollar basis (ACS user note 2023-07). Plans include an advisory when such tables are deflated.
 
@@ -114,4 +121,37 @@ Branch on `error_code`, not on message text: `INVALID_INPUT`, `INVALID_GEO_LEVEL
 
 ## 8. Outputs to cite and keep
 
-Every run writes `<table>_extraction_metadata.json`. It records the package version, git commit, metadata checksum per vintage, the concordance mode, the normalization version, the overrides applied, the price index and its source, and the advisories. Keep it alongside results. `<table>_concordance.csv` maps every output column back to its code in each year.
+Every run writes `<table>_extraction_metadata.json`. It records the package version, git commit, metadata checksum per vintage, the concordance mode, the normalization version, the overrides and rules applied, the price index and its source, any tract harmonization, the advisories, the SHA-256 of every output file, and a `replay_command`. Keep it alongside results. `<table>_concordance.csv` maps every output column back to its code in each year.
+
+**Replay.** `replay_extraction(metadata_path)` (CLI: `replay`) re-runs an extraction into a new folder and compares every file, then every cell. Differences caused by Census revising published data return `success=true, verified=false` with the changed cells; report them, they are not errors. Use `refresh=True` to bypass the query cache.
+
+**Nationwide.** `state_code="all"` covers the 50 states and DC (`include_pr=True` adds Puerto Rico). County and place levels take one request per year; tracts take one per state per year. Failed calls are listed in `failed_calls`; re-running resumes from the query cache.
+
+## 9. Derived statistics
+
+Every derived result carries `estimate`, `moe` (90%), `se`, `cv_percent`, `method`, and `notes`. Report the method.
+
+| Need | Tool | Rule |
+| :--- | :--- | :--- |
+| Rate where the numerator is a subset of the denominator (poverty rate, share 65+) | `derive_estimate("proportion")` | If the radicand is negative the ratio formula is used and `method` says `proportion_ratio_fallback` |
+| Ratio of two non-nested estimates (males per female, renters per owner) | `derive_estimate("ratio")` | Never use `proportion` for non-nested quantities |
+| Sum, difference, product, percent change | `derive_estimate(...)` | Sums of zero estimates include every MOE (Handbook 2020, ch. 8) |
+| Combine geographies | `aggregate_geographies` | Sum counts first, then `derive`; averaging member rates is wrong. Medians, means, and percentages are refused |
+| Median for a custom area | `median_from_distribution` | Sums bracket counts, then linearly interpolates as Census does. Top-coded medians return the bracket bound with `+` and no MOE |
+| Many geographies tested at once | `batch_significance` | Default `holm`; `bh` for exploratory screening. Report `significant_adjusted` |
+
+**Approximation versus exact variance.** The formulas above ignore covariance and get worse as more estimates are combined. For any derived estimate that feeds a hypothesis test, call `check_replicate_availability(table, year, geo_level)`. When Census publishes Variance Replicate Estimates (2014 onward, a listed subset of detailed tables, never medians), pass `use_replicates=True` (or `method="replicate"`): the statistic is evaluated on all 80 replicates and Var = 4/80 × Σ(rep − est)². Two cases return special values: estimates built only from controlled cells get MOE 0, and uncontrolled cells with zero replicate variance (Census uses a model-based MOE there) get MOE NaN with a note.
+
+**Median MOEs without replicates.** The default approximation fits the Census 50-percent-proportion variance function to the published bracket MOEs. This is a documented adaptation, not a Census-published formula: it tracks published county MOEs within about 10–20%. The PUMS design-factor method is used only when you pass `design_factor`. Medians rebuilt from B19001 income brackets are usually within 1% of the published B19013 but can differ by more than 2% because Census interpolates a finer internal distribution; gross-rent medians (B25063) reproduce B25064 to the dollar.
+
+**Comparing periods.** Comparisons of overlapping 5-year periods share sample; the z-test applies the overlap factor and notes it. Prefer non-overlapping periods (at least 5 years apart) for confirmatory tests.
+
+## 10. Geography changes
+
+- **Tracts across 2010/2020.** Releases through 2019 use 2010 tracts; 2020 onward use 2020 tracts. `batch_download(..., harmonize_tracts_to=2020)` or `apportion_tracts` apportion the other vintage with the Census tract relationship file (land-area weights by default; NHGIS-style population weights via `weights_file`). MOEs assume independent components and exact weights; say so. Counts only: apportion counts, then re-derive rates and medians.
+- **Connecticut** switched from eight counties to nine planning regions in the 2022 release; tract GEOIDs differ between 2020–2021 and 2022+. Harmonization recodes them.
+
+## 11. Validation against Census-published values
+
+`run_validation` (CLI: `validate`; script: `scripts/validate_against_census.py`) recomputes values the Census Bureau publishes independently and compares: pipeline cells against raw API cells, Data Profile percentages from detailed tables, replicate MOEs against published MOEs, medians from distributions, Comparison Profile inflation adjustments and significance flags, and county sums against states. Offline checks run against frozen fixtures in every test run; CI runs the live battery weekly. If your analysis relies on a calculation path, check that the corresponding validation check passes in `docs/audits/validation_report.md`.
+

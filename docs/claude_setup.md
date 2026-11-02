@@ -30,7 +30,8 @@ The server sends **instructions** to the client describing the extraction and re
 | `fetch_table_data` | `year`, `state_code`, `table_code`, `geo_level`, entity codes, `compute_reliability` | One release, one geography, with that release's labels |
 | `query_data_profile` | `profile_code`, `year`, `state_code`, `geo_level` | DP02–DP05 with percentages (`*PE`/`*PM`) |
 | `plan_extraction` | same as `batch_download` | Dry run: calls, cached calls, `selection`, issues, `would_block`, advisories |
-| `batch_download` | `state_code`, `table_code`, `start_year`, `end_year`, `geo_level`, `variables`, entity codes, `output_format`, `concordance_mode`, `inflation_base_year`, `price_index`, `include_codebook`, … | Multi-year extraction to CSV, Excel, tidy panel, or Parquet, with concordance, codebook, and metadata |
+| `batch_download` | `state_code` (or `'all'`), `table_code`, `start_year`, `end_year`, `geo_level`, `variables`, entity codes, `output_format`, `concordance_mode`, `inflation_base_year`, `price_index`, `harmonize_tracts_to`, `include_codebook`, … | Multi-year extraction to CSV, Excel, tidy panel, or Parquet, with concordance, codebook, and metadata |
+| `replay_extraction` | `metadata_path`, `verify`, `refresh` | Re-run an extraction from its metadata and compare every file and cell |
 
 **Concordance review**
 
@@ -39,7 +40,9 @@ The server sends **instructions** to the client describing the extraction and re
 | `check_variable_concordance` | `table_code`, `start_year`, `end_year`, `variables`, `include_nonblocking` | How variables line up across releases, with issues and evidence |
 | `draft_crosswalk_override` | `table_code`, `entries` (`YEAR:CODE`), `decision`, `drafted_by`, `rationale`, `source_url`, `target_concept_id` | Step 1: generate evidence and draft rows |
 | `record_crosswalk_review` | `row`, `reviewed_by`, `table_code` | Step 2: a different reviewer (agent or human) approves; validated before writing |
-| `validate_crosswalks` | none | Check all override files against the review requirements |
+| `draft_rule_override` | `table_code`, `from_year`, `to_year`, `pattern`, `replacement`, `drafted_by`, `rationale`, `source_url` | Table-scoped rule for systematic redesigns: preview, guardrails, evidence |
+| `record_rule_review` | `row`, `reviewed_by` | A different reviewer approves a rule; validated before writing |
+| `validate_crosswalks` | none | Check all override and rule files against the review requirements |
 
 **Statistics**
 
@@ -47,8 +50,20 @@ The server sends **instructions** to the client describing the extraction and re
 | :--- | :--- | :--- |
 | `calculate_cv` | `estimate`, `moe` | SE, CV %, reliability flag, 90% bounds |
 | `calculate_significance` | `est1`, `moe1`, `est2`, `moe2`, `confidence_level`, `year1`/`year2` | Two-tailed Z-test with the overlapping-period adjustment |
-| `adjust_inflation` | `value`, `from_year`, `to_year`, `index` | Constant dollars with R-CPI-U-RS (default) or CPI-U |
+| `adjust_inflation` | `value`, `from_year`, `to_year`, `index`, `allow_provisional` | Constant dollars with R-CPI-U-RS (default), CPI-U, or C-CPI-U |
 | `generate_codebook` | `table_code`, `year`, `include_moe`, `include_reliability`, `output_path` | Data dictionary for one release |
+
+**Derived statistics and geography**
+
+| Tool | Key parameters | Purpose |
+| :--- | :--- | :--- |
+| `derive_estimate` | `operation`, `estimates`, `moes`, `as_percent` | Proportion, ratio, product, difference, percent change, or sum with its MOE and method |
+| `check_replicate_availability` | `table_code`, `year`, `geo_level` | Whether Census publishes Variance Replicate Estimates (exact MOEs) |
+| `aggregate_geographies` | `input_path`, `groups`, `variables`, `derive`, `year`, `use_replicates` | Combine geographies into custom areas, then derive rates |
+| `median_from_distribution` | `table_code`, `year`, `input_path` or `counts`, `geoids`, `use_replicates` | Median and MOE for custom areas from distribution tables |
+| `batch_significance` | `input_path`, `est1`, `moe1`, `est2`, `moe2`, `year1`, `year2`, `correction` | Many-geography difference tests with multiple-comparison correction |
+| `apportion_tracts` | `input_path`, `target_vintage`, `weight`, `weights_file` | Harmonize a tract panel across the 2010/2020 tract change |
+| `run_validation` | `checks`, `live` | Recompute Census-published values and report agreement |
 
 Failed results carry `success: false`, an `error_code`, and `error`. **Geography levels:** `us`, `state`, `county`, `tract`, `place`, `zcta`, `msa`. **Datasets** (inferred): `acs5`, `profile`, `subject`, `cprofile`. **Query cache:** `.cache/census_cache.db` (`CENSUS_CACHE_PATH`, `CENSUS_CACHE_DISABLED=1`).
 

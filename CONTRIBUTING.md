@@ -22,6 +22,7 @@ Override rows follow [docs/agent_protocol.md](docs/agent_protocol.md): generated
 python -m pytest -q                                   # offline suite
 CENSUS_LIVE_TESTS=1 python -m pytest -q tests/test_live.py   # live API contracts (optional)
 python -m census validate-crosswalks
+python -m census validate --offline                   # calculations vs Census-published values
 ```
 
 Regenerate derived data with the scripts in `scripts/`. Never hand-edit `metadata/`, `data/price_indexes/`, or `crosswalks/evidence/`; they are checksummed.
