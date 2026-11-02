@@ -209,7 +209,7 @@ class TestACSDownloader(unittest.TestCase):
             self.assertIn("Wide_Data", xl.sheet_names)
             self.assertIn("Melted_Data", xl.sheet_names)
 
-    @patch("requests.get")
+    @patch("requests.Session.get")
     def test_fetch_census_data_geographies(self, mock_get):
         mock_response = MagicMock()
         mock_response.json.return_value = [["NAME", "B01001_001E"], ["Entity", "100"]]

@@ -6,32 +6,40 @@ and output formats (CSV, Excel).
 """
 
 from datetime import datetime
-import json
 import os
 import queue
-import re
 import sys
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-import openpyxl  # Ensure dependency presence for Excel export
 import pandas as pd
-import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from census import (
+    CensusAPIClient,
+    FIPS_MAPPING,
+    STATE_FILES,
+    STATE_MAPPING,
+    enhanced_melt,
+    extract_state_abbr_from_filename,
+    fetch_census_data,
+    format_dataframe,
+    get_local_places_file,
+    get_resource_path,
+    get_variable_descriptions,
+    handle_duplicate_columns,
+    load_places_from_local,
+    load_tables_from_local,
+    load_variable_definitions,
+    VARIABLE_DEFINITIONS,
+    process_data_and_save,
+    sanitize_filename,
+    save_excel_workbook,
+)
+
 load_dotenv()
-
-
-def get_resource_path(relative_path: str) -> str:
-    """Get the path to the resource in either development or packaged application."""
-    if getattr(sys, "_MEIPASS", False):
-        base_path = sys._MEIPASS  # type: ignore[attr-defined]
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
-
 
 # Dracula Theme Color Palette
 BACKGROUND_COLOR = "#282A36"
@@ -48,382 +56,6 @@ PINK = "#FF79C6"
 
 BASE_URL = "https://api.census.gov/data"
 API_KEY = os.getenv("CENSUS_API_KEY", "")
-
-VARIABLE_DEFINITIONS: Dict[str, str] = {}
-
-STATE_FILES: List[str] = [
-    "st01_al_place2020.txt",
-    "st02_ak_place2020.txt",
-    "st04_az_place2020.txt",
-    "st05_ar_place2020.txt",
-    "st06_ca_place2020.txt",
-    "st08_co_place2020.txt",
-    "st09_ct_place2020.txt",
-    "st10_de_place2020.txt",
-    "st11_dc_place2020.txt",
-    "st12_fl_place2020.txt",
-    "st13_ga_place2020.txt",
-    "st15_hi_place2020.txt",
-    "st16_id_place2020.txt",
-    "st17_il_place2020.txt",
-    "st18_in_place2020.txt",
-    "st19_ia_place2020.txt",
-    "st20_ks_place2020.txt",
-    "st21_ky_place2020.txt",
-    "st22_la_place2020.txt",
-    "st23_me_place2020.txt",
-    "st24_md_place2020.txt",
-    "st25_ma_place2020.txt",
-    "st26_mi_place2020.txt",
-    "st27_mn_place2020.txt",
-    "st28_ms_place2020.txt",
-    "st29_mo_place2020.txt",
-    "st30_mt_place2020.txt",
-    "st31_ne_place2020.txt",
-    "st32_nv_place2020.txt",
-    "st33_nh_place2020.txt",
-    "st34_nj_place2020.txt",
-    "st35_nm_place2020.txt",
-    "st36_ny_place2020.txt",
-    "st37_nc_place2020.txt",
-    "st38_nd_place2020.txt",
-    "st39_oh_place2020.txt",
-    "st40_ok_place2020.txt",
-    "st41_or_place2020.txt",
-    "st42_pa_place2020.txt",
-    "st44_ri_place2020.txt",
-    "st45_sc_place2020.txt",
-    "st46_sd_place2020.txt",
-    "st47_tn_place2020.txt",
-    "st48_tx_place2020.txt",
-    "st49_ut_place2020.txt",
-    "st50_vt_place2020.txt",
-    "st51_va_place2020.txt",
-    "st53_wa_place2020.txt",
-    "st54_wv_place2020.txt",
-    "st55_wi_place2020.txt",
-    "st56_wy_place2020.txt",
-    "st60_as_place2020.txt",
-    "st66_gu_place2020.txt",
-    "st69_mp_place2020.txt",
-    "st72_pr_place2020.txt",
-    "st78_vi_place2020.txt",
-]
-
-STATE_MAPPING: Dict[str, str] = {
-    "01": "Alabama",
-    "02": "Alaska",
-    "04": "Arizona",
-    "05": "Arkansas",
-    "06": "California",
-    "08": "Colorado",
-    "09": "Connecticut",
-    "10": "Delaware",
-    "11": "District of Columbia",
-    "12": "Florida",
-    "13": "Georgia",
-    "15": "Hawaii",
-    "16": "Idaho",
-    "17": "Illinois",
-    "18": "Indiana",
-    "19": "Iowa",
-    "20": "Kansas",
-    "21": "Kentucky",
-    "22": "Louisiana",
-    "23": "Maine",
-    "24": "Maryland",
-    "25": "Massachusetts",
-    "26": "Michigan",
-    "27": "Minnesota",
-    "28": "Mississippi",
-    "29": "Missouri",
-    "30": "Montana",
-    "31": "Nebraska",
-    "32": "Nevada",
-    "33": "New Hampshire",
-    "34": "New Jersey",
-    "35": "New Mexico",
-    "36": "New York",
-    "37": "North Carolina",
-    "38": "North Dakota",
-    "39": "Ohio",
-    "40": "Oklahoma",
-    "41": "Oregon",
-    "42": "Pennsylvania",
-    "44": "Rhode Island",
-    "45": "South Carolina",
-    "46": "South Dakota",
-    "47": "Tennessee",
-    "48": "Texas",
-    "49": "Utah",
-    "50": "Vermont",
-    "51": "Virginia",
-    "53": "Washington",
-    "54": "West Virginia",
-    "55": "Wisconsin",
-    "56": "Wyoming",
-    "60": "American Samoa",
-    "66": "Guam",
-    "69": "Northern Mariana Islands",
-    "72": "Puerto Rico",
-    "74": "U.S. Minor Outlying Islands",
-    "78": "U.S. Virgin Islands",
-}
-
-FIPS_MAPPING: Dict[str, str] = {v: k for k, v in STATE_MAPPING.items()}
-
-
-# --------- Data Loading & Processing Functions -------------
-
-
-def extract_state_abbr_from_filename(filename: str) -> str:
-    """Extract numeric two-digit state FIPS code from place filename."""
-    return filename[2:4]
-
-
-def get_local_places_file(state_abbr: str) -> Optional[str]:
-    """Return the absolute path to the local places file for a state code."""
-    matching_files = [file for file in STATE_FILES if f"st{state_abbr}" in file]
-    if matching_files:
-        return get_resource_path(os.path.join("state_places", matching_files[0]))
-    return None
-
-
-def load_variable_definitions(filepath: Optional[str] = None) -> Dict[str, str]:
-    """Load and cache variable definitions from variables.json."""
-    global VARIABLE_DEFINITIONS
-    if VARIABLE_DEFINITIONS:
-        return VARIABLE_DEFINITIONS
-
-    target_path = filepath or get_resource_path("variables.json")
-    if os.path.exists(target_path):
-        with open(target_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            VARIABLE_DEFINITIONS = {
-                var: details["label"]
-                for var, details in data.get("variables", {}).items()
-            }
-    return VARIABLE_DEFINITIONS
-
-
-def get_variable_descriptions(table_code: str) -> Dict[str, str]:
-    """Retrieve variable descriptions starting with the given table code."""
-    if not isinstance(table_code, str):
-        raise ValueError(
-            f"Expected table_code to be a string but got {type(table_code)}"
-        )
-
-    if not VARIABLE_DEFINITIONS:
-        load_variable_definitions()
-
-    return {
-        var: label
-        for var, label in VARIABLE_DEFINITIONS.items()
-        if var.startswith(table_code)
-    }
-
-
-def load_places_from_local(path: str) -> List[Tuple[str, str, str, str, str]]:
-    """Load place entries from a pipe-delimited Census place definition file."""
-    with open(path, "r", encoding="utf-8", errors="replace") as file:
-        lines = file.readlines()
-    lines = lines[1:]  # Skip header
-
-    places: List[Tuple[str, str, str, str, str]] = []
-    for line in lines:
-        parts = line.strip().split("|")
-        if len(parts) >= 9:
-            _, state_code, place_code, _, place_name, place_type, _, _, counties = (
-                parts[:9]
-            )
-            places.append((state_code, place_code, place_name, place_type, counties))
-    return places
-
-
-def load_tables_from_local(path: str) -> Dict[str, str]:
-    """Load table groups mapping (table code -> description) from groups.json."""
-    with open(path, "r", encoding="utf-8") as file:
-        data = json.load(file)
-    tables = {item["name"]: item["description"] for item in data.get("groups", [])}
-    for key, value in tables.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise ValueError(
-                f"Invalid structure for all_tables. Key: {key}, Value: {value}"
-            )
-    return tables
-
-
-def fetch_census_data(
-    year: int,
-    state_code: str,
-    table_code: str,
-    geo_level: str = "place",
-    place_code: Optional[str] = None,
-    county_code: Optional[str] = None,
-    api_key: Optional[str] = None,
-    timeout: int = 30,
-) -> Optional[List[List[str]]]:
-    """Fetch Census ACS 5-year data for given parameters.
-
-    Supports geography levels: 'place', 'state', 'county'.
-    """
-    key = api_key if api_key is not None else API_KEY
-    endpoint = f"{BASE_URL}/{year}/acs/acs5"
-    params: Dict[str, str] = {
-        "get": f"NAME,group({table_code})",
-        "key": key,
-    }
-
-    if geo_level == "place":
-        if not place_code:
-            raise ValueError("place_code is required for place-level fetch.")
-        params["for"] = f"place:{place_code}"
-        params["in"] = f"state:{state_code}"
-    elif geo_level == "state":
-        params["for"] = f"state:{state_code}"
-    elif geo_level == "county":
-        params["for"] = f"county:{county_code or '*'}"
-        params["in"] = f"state:{state_code}"
-    else:
-        raise ValueError(f"Unsupported geography level: {geo_level}")
-
-    try:
-        response = requests.get(endpoint, params=params, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException:
-        return None
-
-
-def format_dataframe(df: pd.DataFrame, table_code: str) -> pd.DataFrame:
-    """Rename raw Census variable codes to their human-readable labels."""
-    variable_descriptions = get_variable_descriptions(table_code)
-    df.rename(columns=variable_descriptions, inplace=True)
-    return df
-
-
-def handle_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Deduplicate identical column headers by appending an index suffix."""
-    cols = pd.Series(df.columns)
-    for dup in cols[cols.duplicated()].unique():
-        cols[cols[cols == dup].index.values.tolist()] = [
-            dup + "_" + str(i) if i != 0 else dup for i in range(sum(cols == dup))
-        ]
-    df.columns = cols
-    return df
-
-
-def enhanced_melt(
-    df: pd.DataFrame,
-    id_vars: List[str],
-    var_name: str = "Variable",
-    value_name: str = "Value",
-) -> pd.DataFrame:
-    """Melt a DataFrame from wide to long format with validation."""
-    if df.empty:
-        return pd.DataFrame()
-
-    missing_columns = [col for col in id_vars if col not in df.columns]
-    if missing_columns:
-        return pd.DataFrame()
-
-    return df.melt(id_vars=id_vars, var_name=var_name, value_name=value_name)
-
-
-def sanitize_filename(name: str) -> str:
-    """Replace non-alphanumeric filesystem characters with underscores."""
-    return re.sub(r'[\\/*?:"<>| ]', "_", name).strip("_")
-
-
-def process_data_and_save(
-    formatted_df: pd.DataFrame,
-    folder_name: str,
-    entity_name: str,
-    table_code: str,
-    year: int,
-    output_format: str = "both",
-    excel_accumulator: Optional[Dict[str, List[pd.DataFrame]]] = None,
-) -> None:
-    """Save wide/melted CSVs or accumulate DataFrames for Excel export.
-
-    Inserts 'Year' column at column 0 for multi-year disambiguation.
-    output_format options: 'both', 'wide_only', 'melted_only', 'excel'.
-    """
-    df = formatted_df.copy()
-
-    # Prepend Year column if not already present
-    if "Year" not in df.columns:
-        df.insert(0, "Year", year)
-
-    df = handle_duplicate_columns(df)
-
-    if "NAME" not in df.columns or "state" not in df.columns:
-        return
-
-    clean_entity = sanitize_filename(entity_name)
-
-    # Wide format CSV export
-    if output_format in ("both", "wide_only"):
-        compiled_file_name = os.path.join(folder_name, "compiled_unmelted_data.csv")
-        write_headers = not os.path.exists(compiled_file_name)
-        with open(compiled_file_name, "a", newline="", encoding="utf-8") as f:
-            df.to_csv(f, header=write_headers, index=False)
-
-    # Melted format CSV export
-    id_vars = [
-        col for col in ["Year", "NAME", "state", "place", "county"] if col in df.columns
-    ]
-    melted_df = enhanced_melt(df, id_vars, "Variable", "Value")
-
-    if output_format in ("both", "melted_only"):
-        if not melted_df.empty:
-            melted_file_name = os.path.join(
-                folder_name, f"{clean_entity}_{table_code}_{year}.csv"
-            )
-            melted_df.to_csv(melted_file_name, index=False, encoding="utf-8")
-
-    # Excel accumulator
-    if output_format == "excel" and excel_accumulator is not None:
-        excel_accumulator.setdefault("wide", []).append(df)
-        if not melted_df.empty:
-            excel_accumulator.setdefault("melted", []).append(melted_df)
-
-
-def save_excel_workbook(
-    folder_name: str,
-    entity_name: str,
-    table_code: str,
-    excel_accumulator: Dict[str, List[pd.DataFrame]],
-) -> Optional[str]:
-    """Compile accumulated DataFrames into an Excel workbook with multiple sheets."""
-    clean_entity = sanitize_filename(entity_name)
-    excel_file_path = os.path.join(
-        folder_name, f"{clean_entity}_{table_code}_data.xlsx"
-    )
-
-    wide_list = excel_accumulator.get("wide", [])
-    melted_list = excel_accumulator.get("melted", [])
-
-    if not wide_list and not melted_list:
-        return None
-
-    combined_wide = (
-        pd.concat(wide_list, ignore_index=True) if wide_list else pd.DataFrame()
-    )
-    combined_melted = (
-        pd.concat(melted_list, ignore_index=True) if melted_list else pd.DataFrame()
-    )
-
-    with pd.ExcelWriter(excel_file_path, engine="openpyxl") as writer:
-        if not combined_wide.empty:
-            combined_wide.to_excel(writer, sheet_name="Wide_Data", index=False)
-        if not combined_melted.empty:
-            combined_melted.to_excel(writer, sheet_name="Melted_Data", index=False)
-
-    return excel_file_path
-
-
-# --------- GUI Application Class -------------
 
 
 class ACSDownloaderApp:
@@ -515,7 +147,7 @@ class ACSDownloaderApp:
 
         subtitle_label = tk.Label(
             header_frame,
-            text="Phase 2 Research UX",
+            text="Research Edition",
             font=("Segoe UI", 10, "italic"),
             bg=BACKGROUND_COLOR,
             fg=COMMENT,
@@ -1142,7 +774,6 @@ class ACSDownloaderApp:
                 return
             for idx in selected_indices:
                 place_tuple = self.displayed_places[idx]
-                # place_tuple is (state_code, place_code, place_name, place_type, counties)
                 entities.append((place_tuple[2], place_tuple[1]))
         elif geo_level == "state":
             entities.append((STATE_MAPPING[matched_state_code], None))
