@@ -1,0 +1,24 @@
+﻿# Environment variables - never commit the real key
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Output data (optional - remove if you want to track outputs)
+*.csv

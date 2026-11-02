@@ -4,7 +4,10 @@ import json
 import requests
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog, messagebox,ttk
+from tkinter import filedialog, messagebox, ttk
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 
@@ -20,15 +23,8 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-if getattr(sys, 'frozen', False):
-    base_path = sys._MEIPASS
-else:
-    base_path = os.path.dirname(os.path.abspath(__file__))
-
 current_directory = os.path.dirname(os.path.abspath(__file__))
 json_file_path = get_resource_path("variables.json")
-
-json_file = get_resource_path("variables.json")
 
 BACKGROUND_COLOR = "#282A36"
 FOREGROUND_COLOR = "#F8F8F2"
@@ -42,7 +38,7 @@ PURPLE = "#BD93F9"
 CYAN = "#8BE9FD"
 PINK = "#FF79C6"
 BASE_URL = "https://api.census.gov/data"
-API_KEY = "f803cbec090c9ae9aa7fe1390bedd70ac37af6fd"
+API_KEY = os.getenv("CENSUS_API_KEY", "")
 VARIABLE_DEFINITIONS = {}
 STATE_FILES = [
     "st01_al_place2020.txt", "st02_ak_place2020.txt", "st04_az_place2020.txt", "st05_ar_place2020.txt",
@@ -142,18 +138,10 @@ def fetch_census_data(year, state_code, place_code, table_code):
         return None
 
 
-def format_dataframe(df, table_code):
+def format_dataframe(df: pd.DataFrame, table_code: str) -> pd.DataFrame:
+    """Rename raw Census variable codes to their human-readable labels."""
     variable_descriptions = get_variable_descriptions(table_code)
-
-    hybrid_names = {}
-    for var, description in variable_descriptions.items():
-        attributes = VARIABLE_DEFINITIONS[var]["attributes"].split(",") if "attributes" in VARIABLE_DEFINITIONS[var] else []
-        if var in attributes:
-            hybrid_names[var] = f"Margin of Error ({var}) for {description}"
-        else:
-            hybrid_names[var] = description
-
-    df.rename(columns=hybrid_names, inplace=True)
+    df.rename(columns=variable_descriptions, inplace=True)
     return df
 
 
@@ -167,53 +155,55 @@ def handle_duplicate_columns(df):
     return df
 
 
-def enhanced_melt(df, id_vars, var_name, value_name):
-    print("DataFrame:\n", df)
-    print("Columns in DataFrame: ", df.columns)
-    print("DataFrame Columns and Data:")
-    print(df.head())  # This will print the top 5 rows. If you want more/less, adjust the number inside head().
-
-
-    # Check if DataFrame is empty
+def enhanced_melt(df: pd.DataFrame, id_vars: list, var_name: str, value_name: str) -> pd.DataFrame:
+    """Melt a DataFrame from wide to long format with safety checks."""
     if df.empty:
         print("DataFrame is empty. Aborting the melt operation.")
         return pd.DataFrame()
 
-    # Check if id_vars columns exist in the dataframe
     missing_columns = [col for col in id_vars if col not in df.columns]
     if missing_columns:
-        print(f"Following columns are missing in the dataframe and are required for melt: {missing_columns}")
+        print(f"Columns missing for melt (id_vars): {missing_columns}")
+        print(f"Available columns: {list(df.columns)}")
         return pd.DataFrame()
 
     return df.melt(id_vars=id_vars, var_name=var_name, value_name=value_name)
 
 
-def process_data_and_save(formatted_df, folder_name, selected_place, table_code, year, descriptions, all_tables):
+def process_data_and_save(
+    formatted_df: pd.DataFrame,
+    folder_name: str,
+    selected_place: str,
+    table_code: str,
+    year: int,
+    descriptions: dict,
+    all_tables: dict,
+) -> None:
+    """Save wide and melted CSVs for one year's fetched data."""
     formatted_df = handle_duplicate_columns(formatted_df)
 
-    if "NAME" in formatted_df.columns and "GEO_ID" in formatted_df.columns:
-        # Save the formatted DataFrame by appending to a single CSV file
-        compiled_file_name = os.path.join(folder_name, f"compiled_unmelted_data.csv")
-
-        # Check if the file already exists; if not, write headers
+    # The Census ACS5 API returns NAME, state, and place columns (not GEO_ID).
+    if "NAME" in formatted_df.columns and "state" in formatted_df.columns:
+        # Append to the running compiled (wide) CSV
+        compiled_file_name = os.path.join(folder_name, "compiled_unmelted_data.csv")
         write_headers = not os.path.exists(compiled_file_name)
-
-        with open(compiled_file_name, 'a') as f:
+        with open(compiled_file_name, 'a', newline='') as f:
             formatted_df.to_csv(f, header=write_headers, index=False)
+        print(f"Wide data appended to: {compiled_file_name}")
 
-        print(f"Formatted data appended to: {compiled_file_name}")
+        # Melt to long format using the geographic identity columns as anchors
+        id_vars = [col for col in ["NAME", "state", "place"] if col in formatted_df.columns]
+        melted_df = enhanced_melt(formatted_df, id_vars, "Variable", "Value")
 
-        print("Formatted DataFrame before melting:")
-        print(formatted_df.head())
-
-        melted_df = enhanced_melt(formatted_df, ["NAME", "GEO_ID"], "Variable", "Value")
-
-        # Save the melted DataFrame
-        melted_file_name = os.path.join(folder_name, f"{selected_place.replace(' ', '_')}_{table_code}_{year}.csv")
-        melted_df.to_csv(melted_file_name, index=False)
-        print(f"Melted data saved to: {melted_file_name}")
+        if not melted_df.empty:
+            melted_file_name = os.path.join(
+                folder_name,
+                f"{selected_place.replace(' ', '_')}_{table_code}_{year}.csv"
+            )
+            melted_df.to_csv(melted_file_name, index=False)
+            print(f"Melted data saved to: {melted_file_name}")
     else:
-        print("Unexpected DataFrame structure or missing columns.")
+        print(f"[{year}] Unexpected response structure. Columns present: {list(formatted_df.columns)}")
 
 
 # --------- UI Callbacks -------------
@@ -234,24 +224,18 @@ def update_table_description(event):
 
 
 
-def on_submit():
+def on_submit() -> None:
     current_selection = table_listbox.curselection()
     if not current_selection:
         messagebox.showerror("Error", "Please select a table.")
         return
 
     selected_state_name = state_combo.get().strip()
-
-    # Use a substring match to find the state code
     matched_states = [code for code, name in STATE_MAPPING.items() if name.lower() in selected_state_name.lower()]
-
     if not matched_states:
         messagebox.showerror("Error", f"{selected_state_name} not found in states mapping.")
         return
-
-    # Take the first matched state code
     selected_state_code = matched_states[0]
-    print("selected state code is " + selected_state_code)
 
     places_file = get_local_places_file(selected_state_code)
     if not places_file:
@@ -259,17 +243,31 @@ def on_submit():
         return
 
     selected_place = combo.get()
-    places = load_places_from_local(places_file)
+    if not selected_place:
+        messagebox.showerror("Error", "Please select a place.")
+        return
 
+    places = load_places_from_local(places_file)
     table_code = table_listbox.get(current_selection[0])
 
-    if not isinstance(table_code, str):
-        messagebox.showerror("Error", "Invalid table code selected.")
+    # Validate year range
+    try:
+        year_start = int(start_year_spin.get())
+        year_end = int(end_year_spin.get())
+    except ValueError:
+        messagebox.showerror("Error", "Year values must be integers.")
+        return
+    if year_start > year_end:
+        messagebox.showerror("Error", "Start year must be less than or equal to end year.")
         return
 
     load_variable_definitions()
 
-    state_code, place_code = next((place[0], place[1]) for place in places if place[2] == selected_place)
+    match = next(((p[0], p[1]) for p in places if p[2] == selected_place), None)
+    if match is None:
+        messagebox.showerror("Error", f"Place '{selected_place}' not found in loaded places file.")
+        return
+    state_code, place_code = match
 
     folder_path = filedialog.askdirectory(title="Select Directory to Save Data")
     if not folder_path:
@@ -279,15 +277,17 @@ def on_submit():
 
     descriptions = get_variable_descriptions(table_code)
 
-    for year in range(2010, 2020):
+    for year in range(year_start, year_end + 1):
+        print(f"Fetching {table_code} for {selected_place}, {year}...")
         data = fetch_census_data(year, state_code, place_code, table_code)
         if data:
-            df = pd.DataFrame(data[1:], columns=data[0])  # data[0] is the header
+            df = pd.DataFrame(data[1:], columns=data[0])
             formatted_df = format_dataframe(df, table_code)
-            print("Formatted DataFrame:")
-            print(formatted_df.head())
-
             process_data_and_save(formatted_df, folder_name, selected_place, table_code, year, descriptions, all_tables)
+        else:
+            print(f"  No data returned for {year} — skipping.")
+
+    messagebox.showinfo("Done", f"Download complete. Files saved to:\n{folder_name}")
 
 # Define constants
 LABEL_FONT = ("Arial", 14, "bold")
@@ -326,61 +326,86 @@ def on_state_selected(event):
 # Initialize main application window
 app = tk.Tk()
 app.title("ACS 5-Year Data Downloader")
-app.geometry("800x550")
+app.geometry("800x650")
 app.config(bg=BACKGROUND_COLOR)
 
 # Set styles
 configure_styles()
 
-
 # Set main frame
 main_frame = tk.Frame(app, bg=BACKGROUND_COLOR)
 main_frame.pack(pady=20, padx=20, expand=True, fill=tk.BOTH)
 
-# Add labels and dropdown for states
+# Row 0: State selector
 state_label = ttk.Label(main_frame, text="Select a State or U.S. Territory:", foreground=RED)
 state_label.grid(row=0, column=0, pady=(0, 10), sticky="w")
-
 state_abbreviations = [extract_state_abbr_from_filename(file) for file in STATE_FILES]
 state_values = [f"{STATE_MAPPING[abbr]} ({abbr})" for abbr in state_abbreviations]
 state_combo = ttk.Combobox(main_frame, values=state_values, width=40)
-state_combo.grid(row=0, column=1, pady=(0, 20))
+state_combo.grid(row=0, column=1, pady=(0, 10), sticky="w")
 state_combo.bind("<<ComboboxSelected>>", on_state_selected)
 
-# Add labels and dropdown for places
+# Row 1: Place selector
 place_label = ttk.Label(main_frame, text="Select a Place:", foreground=YELLOW)
 place_label.grid(row=1, column=0, pady=10, sticky="w")
 combo = ttk.Combobox(main_frame, values=[], width=40)
-combo.grid(row=1, column=1, pady=10)
+combo.grid(row=1, column=1, pady=10, sticky="w")
 
-# Add search field
+# Row 2: Year range
+year_range_label = ttk.Label(main_frame, text="Year Range:", foreground=ORANGE)
+year_range_label.grid(row=2, column=0, pady=10, sticky="w")
+year_frame = tk.Frame(main_frame, bg=BACKGROUND_COLOR)
+year_frame.grid(row=2, column=1, pady=10, sticky="w")
+ttk.Label(year_frame, text="From", foreground=ORANGE, background=BACKGROUND_COLOR).pack(side=tk.LEFT)
+start_year_spin = tk.Spinbox(
+    year_frame, from_=2005, to=2023, width=6,
+    bg=SELECTION_COLOR, fg=FOREGROUND_COLOR, buttonbackground=SELECTION_COLOR,
+    highlightthickness=0, relief="flat"
+)
+start_year_spin.delete(0, tk.END)
+start_year_spin.insert(0, "2010")
+start_year_spin.pack(side=tk.LEFT, padx=(4, 8))
+ttk.Label(year_frame, text="To", foreground=ORANGE, background=BACKGROUND_COLOR).pack(side=tk.LEFT)
+end_year_spin = tk.Spinbox(
+    year_frame, from_=2005, to=2023, width=6,
+    bg=SELECTION_COLOR, fg=FOREGROUND_COLOR, buttonbackground=SELECTION_COLOR,
+    highlightthickness=0, relief="flat"
+)
+end_year_spin.delete(0, tk.END)
+end_year_spin.insert(0, "2022")
+end_year_spin.pack(side=tk.LEFT, padx=(4, 0))
+
+# Row 3: Table search
 search_label = ttk.Label(main_frame, text="Search Table:", foreground=GREEN)
-search_label.grid(row=2, column=0, pady=10, sticky="w")
+search_label.grid(row=3, column=0, pady=10, sticky="w")
 search_entry = ttk.Entry(main_frame, width=40)
-search_entry.grid(row=2, column=1, pady=10, padx=(0, 20))
+search_entry.grid(row=3, column=1, pady=10, padx=(0, 20), sticky="w")
 search_entry.bind("<KeyRelease>", search_tables)
 
-# Listbox setup for table selection
+# Row 4: Table listbox
 table_label = ttk.Label(main_frame, text="Select a Table:", foreground=PINK)
-table_label.grid(row=3, column=0, pady=10, sticky="w")
+table_label.grid(row=4, column=0, pady=10, sticky="w")
 local_groups_file = get_resource_path("groups.json")
 all_tables = load_tables_from_local(local_groups_file)
-table_listbox = tk.Listbox(main_frame, bg=SELECTION_COLOR, fg=FOREGROUND_COLOR, selectbackground=COMMENT, width=40)
-table_listbox.grid(row=3, column=1, pady=10, padx=(0, 20))
+table_listbox = tk.Listbox(
+    main_frame, bg=SELECTION_COLOR, fg=FOREGROUND_COLOR,
+    selectbackground=COMMENT, width=40, height=8
+)
+table_listbox.grid(row=4, column=1, pady=10, padx=(0, 20), sticky="w")
 for table_code in sorted(all_tables.keys()):
     table_listbox.insert(tk.END, table_code)
 table_listbox.bind("<<ListboxSelect>>", update_table_description)
 
-
-# Description field setup
+# Row 5: Table description
 description_label = ttk.Label(main_frame, text="Table Description:", foreground=CYAN)
-description_label.grid(row=4, column=0, pady=(20, 0), sticky="nw")
-description_text = tk.Text(main_frame, height=6, width=40, font=DESCRIPTION_FONT)
-description_text.grid(row=4, column=1, pady=20)
+description_label.grid(row=5, column=0, pady=(10, 0), sticky="nw")
+description_text = tk.Text(main_frame, height=4, width=40, font=DESCRIPTION_FONT,
+                           bg=SELECTION_COLOR, fg=FOREGROUND_COLOR, wrap=tk.WORD)
+description_text.grid(row=5, column=1, pady=10, sticky="w")
 
-# Submit button setup
-submit_button = ttk.Button(main_frame, text="Submit", command=on_submit)
-submit_button.grid(row=5, column=0, columnspan=2, pady=20)
+# Row 6: Submit button
+submit_button = ttk.Button(main_frame, text="Download Data", command=on_submit)
+submit_button.grid(row=6, column=0, columnspan=2, pady=20)
 
 # Start main loop
 app.mainloop()
