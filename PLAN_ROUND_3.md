@@ -92,3 +92,4 @@ Once the `census` headless package is stable, build `mcp_server.py`:
 - New branch for Phase 3: `git checkout -b phase3/headless-library`
 - All unit tests pass with `python -m unittest discover tests`.
 - Adhere to Senior Principal Engineer persona: explicit typing, black formatting, deliberate planning.
+
