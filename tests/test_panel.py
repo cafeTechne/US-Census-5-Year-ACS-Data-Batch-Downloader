@@ -166,7 +166,8 @@ class TestTidyPanel(unittest.TestCase):
         self.assertEqual(len(back), 4)
         self.assertEqual(back["Year"].dtype, "int64")
         self.assertEqual(back["B19013_001E"].dtype.kind, "i")
-        self.assertEqual(str(back["GEOID"].dtype), "string")
+        # A pandas string dtype ("string" in pandas 2, "str" in pandas 3), not object.
+        self.assertIsInstance(back["GEOID"].dtype, pd.StringDtype)
         self.assertEqual(back["GEOID"].iloc[0], "36061")  # leading zeros intact
 
 
