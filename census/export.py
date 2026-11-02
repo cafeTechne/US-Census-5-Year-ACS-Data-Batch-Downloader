@@ -5,7 +5,24 @@ import re
 from typing import Dict, List, Optional
 import openpyxl  # Ensure dependency presence for Excel export
 import pandas as pd
+from census.geo import GEOGRAPHY_COLUMNS
 from census.tables import get_variable_descriptions
+
+# Phase 5 research helpers, re-exported so `census.export` is the single entry
+# point for data transformations.
+from census.stats import (  # noqa: F401
+    add_reliability_columns,
+    aggregate_columns,
+    aggregate_estimates,
+    clean_census_sentinels,
+    pair_estimates_and_moes,
+)
+from census.panel import (  # noqa: F401
+    build_tidy_panel,
+    export_parquet,
+    generate_codebook,
+    make_slug_map,
+)
 
 
 def format_dataframe(
@@ -78,7 +95,7 @@ def process_data_and_save(
 
     df = handle_duplicate_columns(df)
 
-    if "NAME" not in df.columns or "state" not in df.columns:
+    if "NAME" not in df.columns:
         return
 
     clean_entity = sanitize_filename(entity_name)
@@ -92,7 +109,7 @@ def process_data_and_save(
 
     # Melted format CSV export
     id_vars = [
-        col for col in ["Year", "NAME", "state", "place", "county"] if col in df.columns
+        col for col in ["Year"] + GEOGRAPHY_COLUMNS if col in df.columns
     ]
     melted_df = enhanced_melt(df, id_vars, "Variable", "Value")
 

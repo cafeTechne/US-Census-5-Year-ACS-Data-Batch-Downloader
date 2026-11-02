@@ -1,8 +1,10 @@
 """US Census 5-Year ACS Data Batch Downloader.
 
 A desktop application to fetch, format, and export American Community Survey (ACS)
-5-year dataset tables across multiple years, geography levels (place, state, county),
-and output formats (CSV, Excel).
+5-year dataset tables across multiple years and geography levels (nation, state,
+county, tract, place, ZCTA, CBSA), with research options: MOE-derived standard
+errors and CVs, Census sentinel cleaning, CPI-U constant dollars, tidy panels,
+Parquet, and codebooks.
 """
 
 from datetime import datetime
@@ -18,8 +20,16 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from census import (
+    CPI_U_ANNUAL,
+    DATASET_TABLES,
     CensusAPIClient,
     FIPS_MAPPING,
+    ResearchOptions,
+    build_entities,
+    counties_for_state,
+    get_default_cache,
+    run_batch,
+    zctas_for_state,
     STATE_FILES,
     STATE_MAPPING,
     enhanced_melt,
@@ -38,6 +48,7 @@ from census import (
     sanitize_filename,
     save_excel_workbook,
 )
+from census.pipeline import ZCTA_CHUNK_SIZE
 
 load_dotenv()
 
@@ -57,6 +68,45 @@ PINK = "#FF79C6"
 BASE_URL = "https://api.census.gov/data"
 API_KEY = os.getenv("CENSUS_API_KEY", "")
 
+GEO_LEVEL_OPTIONS: List[Tuple[str, str]] = [
+    ("place", "Places (Cities/CDPs)"),
+    ("state", "Entire State"),
+    ("county", "All Counties in State"),
+    ("tract", "Tracts in County"),
+    ("zcta", "ZCTA (ZIP)"),
+    ("msa", "Metro/Micro Areas (CBSA)"),
+    ("us", "United States"),
+]
+
+# Levels that use the multi-select entity list, and its heading per level
+LIST_LEVEL_TITLES: Dict[str, str] = {
+    "place": "3. Select Places (Multi-select):",
+    "tract": "3. Select Counties (all tracts in each):",
+    "zcta": "3. Select ZCTAs / ZIP Codes (Multi-select):",
+}
+
+# Levels that are national and do not need a state
+NATIONAL_LEVELS = ("msa", "us")
+
+DATASET_OPTIONS: List[Tuple[str, str]] = [
+    ("acs5", "Detailed Tables (B/C)"),
+    ("profile", "Data Profiles (DP02-DP05)"),
+    ("subject", "Subject Tables (S)"),
+    ("cprofile", "Comparison Profiles (CP)"),
+]
+
+FORMAT_OPTIONS: List[Tuple[str, str]] = [
+    ("Both Wide & Melted CSVs", "both"),
+    ("Melted CSV only", "melted_only"),
+    ("Wide CSV only", "wide_only"),
+    ("Excel Workbook (.xlsx)", "excel"),
+    ("Tidy Panel CSV (GEOID x Year)", "panel"),
+    ("Parquet (.parquet, tidy panel)", "parquet"),
+]
+
+MIN_YEAR = 2009
+MAX_YEAR = 2024
+
 
 class ACSDownloaderApp:
     """Tkinter-based GUI for Census ACS batch data downloading."""
@@ -64,8 +114,8 @@ class ACSDownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("ACS 5-Year Data Batch Downloader")
-        self.root.geometry("1000x760")
-        self.root.minsize(920, 680)
+        self.root.geometry("1100x900")
+        self.root.minsize(980, 780)
         self.root.config(bg=BACKGROUND_COLOR)
 
         self.msg_queue: queue.Queue[Tuple[str, Any]] = queue.Queue()
@@ -73,8 +123,11 @@ class ACSDownloaderApp:
 
         # Data caches
         self.all_tables: Dict[str, str] = {}
-        self.current_places: List[Tuple[str, str, str, str, str]] = []
-        self.displayed_places: List[Tuple[str, str, str, str, str]] = []
+        # Multi-select entity list items: (code, display label)
+        self.current_items: List[Tuple[str, str]] = []
+        self.displayed_items: List[Tuple[str, str]] = []
+        self.selected_state_code: Optional[str] = None
+        self.county_names: Dict[str, Dict[str, str]] = {}  # state -> {county: name}
 
         self._load_initial_data()
         self._configure_styles()
@@ -129,6 +182,14 @@ class ACSDownloaderApp:
             foreground=FOREGROUND_COLOR,
             font=("Segoe UI", 10),
         )
+        style.configure(
+            "TCheckbutton",
+            background=BACKGROUND_COLOR,
+            foreground=FOREGROUND_COLOR,
+            font=("Segoe UI", 9),
+        )
+        style.map("TCheckbutton", background=[("active", BACKGROUND_COLOR)])
+        style.map("TRadiobutton", background=[("active", BACKGROUND_COLOR)])
 
     def _build_ui(self) -> None:
         """Assemble all frames and widgets in the application window."""
@@ -189,11 +250,7 @@ class ACSDownloaderApp:
         geo_button_frame.pack(fill=tk.X, pady=(0, 8))
 
         self.geo_level_var = tk.StringVar(value="place")
-        for level, text in [
-            ("place", "Place (Cities/CDPs)"),
-            ("state", "Entire State"),
-            ("county", "All Counties in State"),
-        ]:
+        for idx, (level, text) in enumerate(GEO_LEVEL_OPTIONS):
             rb = ttk.Radiobutton(
                 geo_button_frame,
                 text=text,
@@ -201,7 +258,7 @@ class ACSDownloaderApp:
                 variable=self.geo_level_var,
                 command=self._on_geo_level_changed,
             )
-            rb.pack(side=tk.LEFT, padx=(0, 10))
+            rb.grid(row=idx // 3, column=idx % 3, sticky="w", padx=(0, 10))
 
         # 2. State Selector
         state_label = tk.Label(
@@ -228,13 +285,14 @@ class ACSDownloaderApp:
         place_header = tk.Frame(self.place_section_frame, bg=BACKGROUND_COLOR)
         place_header.pack(fill=tk.X, pady=(0, 4))
 
-        tk.Label(
+        self.list_title_label = tk.Label(
             place_header,
-            text="3. Select Places (Multi-select):",
+            text=LIST_LEVEL_TITLES["place"],
             font=("Segoe UI", 10, "bold"),
             bg=BACKGROUND_COLOR,
             fg=GREEN,
-        ).pack(side=tk.LEFT)
+        )
+        self.list_title_label.pack(side=tk.LEFT)
 
         self.place_count_label = tk.Label(
             place_header,
@@ -314,8 +372,8 @@ class ACSDownloaderApp:
         ).pack(side=tk.LEFT)
         self.start_year_spin = tk.Spinbox(
             year_frame,
-            from_=2005,
-            to=2023,
+            from_=MIN_YEAR,
+            to=MAX_YEAR,
             width=6,
             bg=SELECTION_COLOR,
             fg=FOREGROUND_COLOR,
@@ -335,8 +393,8 @@ class ACSDownloaderApp:
         )
         self.end_year_spin = tk.Spinbox(
             year_frame,
-            from_=2005,
-            to=2023,
+            from_=MIN_YEAR,
+            to=MAX_YEAR,
             width=6,
             bg=SELECTION_COLOR,
             fg=FOREGROUND_COLOR,
@@ -361,19 +419,62 @@ class ACSDownloaderApp:
 
         self.format_combo = ttk.Combobox(
             parent,
-            values=[
-                "Both Wide & Melted CSVs",
-                "Melted CSV only",
-                "Wide CSV only",
-                "Excel Workbook (.xlsx)",
-            ],
+            values=[label for label, _ in FORMAT_OPTIONS],
             state="readonly",
             width=38,
         )
         self.format_combo.current(0)
-        self.format_combo.pack(fill=tk.X, pady=(0, 8))
+        self.format_combo.pack(fill=tk.X, pady=(0, 6))
 
-        # 6. Call Estimation Banner
+        # 6. Research Options
+        tk.Label(
+            parent,
+            text="6. Research Options:",
+            font=("Segoe UI", 10, "bold"),
+            bg=BACKGROUND_COLOR,
+            fg=PURPLE,
+        ).pack(anchor="w", pady=(2, 2))
+
+        options_frame = tk.Frame(parent, bg=BACKGROUND_COLOR)
+        options_frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.reliability_var = tk.BooleanVar(value=False)
+        self.sentinel_var = tk.BooleanVar(value=True)
+        self.codebook_var = tk.BooleanVar(value=True)
+        self.cache_var = tk.BooleanVar(value=True)
+        self.inflation_var = tk.BooleanVar(value=False)
+
+        checks = [
+            (self.reliability_var, "Calculate Standard Errors & CVs"),
+            (self.sentinel_var, "Clean Census sentinel codes (-666666666 -> blank)"),
+            (self.codebook_var, "Include Codebook (codebook.csv)"),
+            (self.cache_var, "Use local query cache (.cache/census_cache.db)"),
+        ]
+        for idx, (var, text) in enumerate(checks):
+            ttk.Checkbutton(options_frame, text=text, variable=var).grid(
+                row=idx, column=0, columnspan=2, sticky="w"
+            )
+
+        ttk.Checkbutton(
+            options_frame,
+            text="Adjust Financial Values to Constant Dollars (CPI-U), base year:",
+            variable=self.inflation_var,
+        ).grid(row=len(checks), column=0, sticky="w")
+        self.inflation_year_spin = tk.Spinbox(
+            options_frame,
+            from_=min(CPI_U_ANNUAL),
+            to=max(CPI_U_ANNUAL),
+            width=6,
+            bg=SELECTION_COLOR,
+            fg=FOREGROUND_COLOR,
+            buttonbackground=SELECTION_COLOR,
+            highlightthickness=0,
+        )
+        self.inflation_year_spin.delete(0, tk.END)
+        self.inflation_year_spin.insert(0, str(max(CPI_U_ANNUAL)))
+        self.inflation_year_spin.grid(row=len(checks), column=1, sticky="w", padx=(4, 0))
+
+        # 7. Call Estimation Banner
         self.estimate_frame = tk.Frame(
             parent, bg=SELECTION_COLOR, padx=8, pady=6, relief="flat"
         )
@@ -390,6 +491,24 @@ class ACSDownloaderApp:
 
     def _build_right_panel(self, parent: tk.Frame) -> None:
         """Build table browser and variable preview controls."""
+        # 0. Dataset / endpoint selector
+        tk.Label(
+            parent,
+            text="Census Endpoint:",
+            font=("Segoe UI", 10, "bold"),
+            bg=BACKGROUND_COLOR,
+            fg=ORANGE,
+        ).pack(anchor="w", pady=(0, 4))
+        self.dataset_combo = ttk.Combobox(
+            parent,
+            values=[label for _, label in DATASET_OPTIONS],
+            state="readonly",
+            width=38,
+        )
+        self.dataset_combo.current(0)
+        self.dataset_combo.pack(fill=tk.X, pady=(0, 6))
+        self.dataset_combo.bind("<<ComboboxSelected>>", self._on_dataset_changed)
+
         # 1. Search Table
         search_label = tk.Label(
             parent,
@@ -437,7 +556,7 @@ class ACSDownloaderApp:
         table_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.table_listbox.config(yscrollcommand=table_scroll.set)
 
-        self._populate_table_listbox(sorted(self.all_tables.keys()))
+        self._populate_table_listbox(sorted(self._dataset_tables().keys()))
 
         # 3. Table & Variable Details Text
         details_label = tk.Label(
@@ -518,65 +637,127 @@ class ACSDownloaderApp:
 
     # --------- Event Handlers & Dynamic UI Logic -------------
 
+    def _selected_dataset(self) -> str:
+        label = self.dataset_combo.get()
+        for key, text in DATASET_OPTIONS:
+            if text == label:
+                return key
+        return "acs5"
+
+    def _dataset_tables(self) -> Dict[str, str]:
+        """Tables available for the selected Census endpoint."""
+        dataset = self._selected_dataset() if hasattr(self, "dataset_combo") else "acs5"
+        if dataset == "acs5":
+            return self.all_tables
+        return DATASET_TABLES.get(dataset, {})
+
+    def _on_dataset_changed(self, event: Optional[tk.Event] = None) -> None:
+        self.table_search_entry.delete(0, tk.END)
+        self._populate_table_listbox(sorted(self._dataset_tables().keys()))
+        self.description_text.delete(1.0, tk.END)
+
     def _on_geo_level_changed(self) -> None:
         """Handle geography level radiobutton selection."""
         level = self.geo_level_var.get()
-        if level == "place":
-            self.place_section_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 8))
+        if level in LIST_LEVEL_TITLES:
+            self.list_title_label.config(text=LIST_LEVEL_TITLES[level])
+            self.place_section_frame.pack(
+                fill=tk.BOTH, expand=True, pady=(4, 8), after=self.state_combo
+            )
+            self._reload_items()
         else:
             self.place_section_frame.pack_forget()
         self._update_call_estimate()
 
-    def _on_state_selected(self, event: Optional[tk.Event] = None) -> None:
-        """Load places when a new state is chosen."""
+    def _parse_state_code(self) -> Optional[str]:
         selection = self.state_combo.get().strip()
-        matched_abbr = None
-        for abbr, name in STATE_MAPPING.items():
+        for abbr in STATE_MAPPING:
             if f"({abbr})" in selection:
-                matched_abbr = abbr
-                break
+                return abbr
+        return None
 
-        if not matched_abbr:
-            return
+    def _on_state_selected(self, event: Optional[tk.Event] = None) -> None:
+        """Reload the entity list when a new state is chosen."""
+        self.selected_state_code = self._parse_state_code()
+        self._reload_items()
 
-        places_file = get_local_places_file(matched_abbr)
-        if not places_file or not os.path.exists(places_file):
-            self.current_places = []
-            self.displayed_places = []
-            self.place_listbox.delete(0, tk.END)
-            self._update_place_count()
-            self._update_call_estimate()
-            return
+    def _reload_items(self) -> None:
+        """Populate the multi-select list for the current level and state."""
+        level = self.geo_level_var.get()
+        state = self.selected_state_code
+        items: List[Tuple[str, str]] = []
 
-        self.current_places = load_places_from_local(places_file)
+        if state and level == "place":
+            places_file = get_local_places_file(state)
+            if places_file and os.path.exists(places_file):
+                items = [(p[1], p[2]) for p in load_places_from_local(places_file)]
+        elif state and level == "tract":
+            names = self.county_names.get(state)
+            if names:
+                items = sorted(names.items(), key=lambda kv: kv[1])
+            else:
+                items = [(c, f"County {state}{c}") for c in counties_for_state(state)]
+                self._load_county_names_async(state)
+        elif state and level == "zcta":
+            items = [(z, f"ZCTA {z}") for z in zctas_for_state(state)]
+
+        self.current_items = items
         self._on_place_filter_changed()
 
+    def _load_county_names_async(self, state_code: str) -> None:
+        """Fetch county names from the Census API without blocking the UI."""
+
+        # Read Tk variables on the UI thread only
+        year = min(self._get_year_range()[1], MAX_YEAR)
+        use_cache = self.cache_var.get()
+
+        def worker() -> None:
+            client = CensusAPIClient(cache=get_default_cache() if use_cache else None)
+            rows = client.list_geographies(year, "county", state_code=state_code)
+            self.msg_queue.put(("COUNTIES", (state_code, rows)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_counties_loaded(self, state_code: str, rows: List[Dict[str, str]]) -> None:
+        if not rows:
+            self._append_log(
+                f"Could not load county names for state {state_code}; showing FIPS codes."
+            )
+            return
+        self.county_names[state_code] = {
+            r.get("county", ""): r.get("NAME", "").split(",")[0] for r in rows
+        }
+        if self.geo_level_var.get() == "tract" and self.selected_state_code == state_code:
+            self._reload_items()
+
     def _on_place_filter_changed(self, event: Optional[tk.Event] = None) -> None:
-        """Filter places list based on search entry text."""
+        """Filter the entity list based on the search entry text."""
         query = self.place_filter_entry.get().strip().lower()
         self.place_listbox.delete(0, tk.END)
 
         if not query:
-            self.displayed_places = list(self.current_places)
+            self.displayed_items = list(self.current_items)
         else:
-            self.displayed_places = [
-                p for p in self.current_places if query in p[2].lower()
+            self.displayed_items = [
+                item
+                for item in self.current_items
+                if query in item[1].lower() or query in item[0].lower()
             ]
 
-        for p in self.displayed_places:
-            self.place_listbox.insert(tk.END, p[2])
+        for _, label in self.displayed_items:
+            self.place_listbox.insert(tk.END, label)
 
         self._update_place_count()
         self._update_call_estimate()
 
     def _select_all_places(self) -> None:
-        """Select all visible items in the place listbox."""
+        """Select all visible items in the entity listbox."""
         self.place_listbox.select_set(0, tk.END)
         self._update_place_count()
         self._update_call_estimate()
 
     def _clear_place_selection(self) -> None:
-        """Deselect all items in the place listbox."""
+        """Deselect all items in the entity listbox."""
         self.place_listbox.selection_clear(0, tk.END)
         self._update_place_count()
         self._update_call_estimate()
@@ -587,7 +768,7 @@ class ACSDownloaderApp:
         self._update_call_estimate()
 
     def _update_place_count(self) -> None:
-        """Update the selected places counter."""
+        """Update the selected items counter."""
         count = len(self.place_listbox.curselection())
         self.place_count_label.config(text=f"{count} selected")
 
@@ -600,27 +781,33 @@ class ACSDownloaderApp:
         except ValueError:
             return 2010, 2022
 
+    def _selected_codes(self) -> List[str]:
+        return [self.displayed_items[i][0] for i in self.place_listbox.curselection()]
+
+    def _count_requests(self) -> int:
+        """Number of API requests per year for the current selection."""
+        level = self.geo_level_var.get()
+        has_state = bool(self.state_combo.get().strip())
+        selected = len(self.place_listbox.curselection())
+        if level in ("place", "tract"):
+            return selected
+        if level == "zcta":
+            return -(-selected // ZCTA_CHUNK_SIZE)  # ceil
+        if level in NATIONAL_LEVELS:
+            return 1
+        return 1 if has_state else 0
+
     def _update_call_estimate(self) -> None:
         """Recalculate and display the estimated number of API calls."""
-        level = self.geo_level_var.get()
         start_yr, end_yr = self._get_year_range()
         year_count = max(0, end_yr - start_yr + 1)
-
-        if level == "place":
-            selected_indices = self.place_listbox.curselection()
-            entity_count = len(selected_indices)
-        elif level == "state":
-            entity_count = 1 if self.state_combo.get().strip() else 0
-        elif level == "county":
-            entity_count = 1 if self.state_combo.get().strip() else 0
-        else:
-            entity_count = 0
+        entity_count = self._count_requests()
 
         total_calls = entity_count * year_count
         color = GREEN if total_calls <= 50 else (ORANGE if total_calls <= 150 else RED)
 
         self.estimate_label.config(
-            text=f"Estimated API calls: {total_calls} ({entity_count} entities x {year_count} years)",
+            text=f"Estimated API calls: {total_calls} ({entity_count} requests x {year_count} years)",
             fg=color,
         )
 
@@ -633,12 +820,13 @@ class ACSDownloaderApp:
     def _on_table_search_changed(self, event: Optional[tk.Event] = None) -> None:
         """Filter table codes by code or description."""
         query = self.table_search_entry.get().strip().lower()
+        tables = self._dataset_tables()
         if not query:
-            filtered = sorted(self.all_tables.keys())
+            filtered = sorted(tables.keys())
         else:
             filtered = [
                 code
-                for code, desc in sorted(self.all_tables.items())
+                for code, desc in sorted(tables.items())
                 if query in code.lower() or query in desc.lower()
             ]
         self._populate_table_listbox(filtered)
@@ -650,7 +838,20 @@ class ACSDownloaderApp:
             return
 
         table_code = self.table_listbox.get(selection[0])
-        description = self.all_tables.get(table_code, "No description available.")
+        description = self._dataset_tables().get(
+            table_code, "No description available."
+        )
+        if self._selected_dataset() != "acs5":
+            self.description_text.delete(1.0, tk.END)
+            self.description_text.insert(
+                tk.END,
+                f"Table: {table_code}\nTitle: {description}\n"
+                f"Endpoint: /acs/acs5/{self._selected_dataset()}\n" + "-" * 50 + "\n"
+                "Variable labels are fetched from the Census API at download time "
+                "and written to the codebook.\n"
+                "Percent columns end in PE (estimate) and PM (margin of error).",
+            )
+            return
 
         # Lazy load variable definitions
         load_variable_definitions()
@@ -707,6 +908,8 @@ class ACSDownloaderApp:
                     self._on_download_complete(payload)
                 elif msg_type == "ERROR":
                     self._on_download_error(payload)
+                elif msg_type == "COUNTIES":
+                    self._on_counties_loaded(*payload)
         except queue.Empty:
             pass
         finally:
@@ -730,6 +933,30 @@ class ACSDownloaderApp:
 
     # --------- Submission & Background Thread Worker -------------
 
+    def _collect_options(self) -> Optional[ResearchOptions]:
+        """Read research toggles; None (after an error dialog) if invalid."""
+        base_year: Optional[int] = None
+        if self.inflation_var.get():
+            try:
+                base_year = int(self.inflation_year_spin.get())
+            except ValueError:
+                messagebox.showerror("Error", "CPI-U base year must be an integer.")
+                return None
+            if base_year not in CPI_U_ANNUAL:
+                messagebox.showerror(
+                    "Error",
+                    f"No CPI-U data for {base_year}. Available: "
+                    f"{min(CPI_U_ANNUAL)}-{max(CPI_U_ANNUAL)}.",
+                )
+                return None
+        return ResearchOptions(
+            clean_sentinels=self.sentinel_var.get(),
+            compute_reliability=self.reliability_var.get(),
+            inflation_base_year=base_year,
+            include_codebook=self.codebook_var.get(),
+            use_cache=self.cache_var.get(),
+        )
+
     def on_submit(self) -> None:
         """Validate input and trigger background worker thread."""
         if self.is_downloading:
@@ -740,16 +967,15 @@ class ACSDownloaderApp:
             messagebox.showerror("Error", "Please select a table.")
             return
         table_code = self.table_listbox.get(table_selection[0])
+        dataset = self._selected_dataset()
 
-        state_text = self.state_combo.get().strip()
-        matched_state_code = None
-        for code, name in STATE_MAPPING.items():
-            if f"({code})" in state_text:
-                matched_state_code = code
-                break
-        if not matched_state_code:
+        geo_level = self.geo_level_var.get()
+        state_code = self._parse_state_code()
+        if not state_code and geo_level not in NATIONAL_LEVELS:
             messagebox.showerror("Error", "Please select a valid state.")
             return
+        if geo_level in NATIONAL_LEVELS:
+            state_code = None
 
         try:
             year_start = int(self.start_year_spin.get())
@@ -764,28 +990,40 @@ class ACSDownloaderApp:
             )
             return
 
-        geo_level = self.geo_level_var.get()
-        entities: List[Tuple[str, Optional[str]]] = []
+        options = self._collect_options()
+        if options is None:
+            return
 
-        if geo_level == "place":
-            selected_indices = self.place_listbox.curselection()
-            if not selected_indices:
-                messagebox.showerror("Error", "Please select at least one place.")
+        codes: Optional[List[str]] = None
+        names: Dict[str, str] = {}
+        if geo_level in LIST_LEVEL_TITLES:
+            codes = self._selected_codes()
+            if not codes:
+                messagebox.showerror(
+                    "Error", "Please select at least one item from the list."
+                )
                 return
-            for idx in selected_indices:
-                place_tuple = self.displayed_places[idx]
-                entities.append((place_tuple[2], place_tuple[1]))
-        elif geo_level == "state":
-            entities.append((STATE_MAPPING[matched_state_code], None))
-        elif geo_level == "county":
-            entities.append((f"{STATE_MAPPING[matched_state_code]}_All_Counties", "*"))
+            names = dict(self.displayed_items)
+            if geo_level == "tract":
+                names = {
+                    code: self.county_names.get(state_code or "", {}).get(code, label)
+                    for code, label in names.items()
+                }
 
-        total_calls = len(entities) * (year_end - year_start + 1)
+        try:
+            entities = build_entities(geo_level, state_code, codes, names)
+        except ValueError as exc:
+            messagebox.showerror("Error", str(exc))
+            return
+
+        years = list(range(year_start, year_end + 1))
+        total_calls = len(entities) * len(years)
         if total_calls > 50:
             confirm = messagebox.askyesno(
                 "Large Batch Warning",
-                f"This operation will make {total_calls} API calls to the Census Bureau.\n"
-                f"Entities: {len(entities)}, Years: {year_end - year_start + 1}.\n\n"
+                f"This operation will make up to {total_calls} API calls to the Census "
+                f"Bureau.\nRequests: {len(entities)}, Years: {len(years)}.\n"
+                f"(Cached responses are not re-requested.)\n\n"
                 f"Do you want to proceed?",
             )
             if not confirm:
@@ -795,12 +1033,7 @@ class ACSDownloaderApp:
         if not folder_path:
             return
 
-        format_mapping = {
-            "Both Wide & Melted CSVs": "both",
-            "Melted CSV only": "melted_only",
-            "Wide CSV only": "wide_only",
-            "Excel Workbook (.xlsx)": "excel",
-        }
+        format_mapping = dict(FORMAT_OPTIONS)
         output_format = format_mapping.get(self.format_combo.get(), "both")
 
         # Disable submit button and initialize state
@@ -813,130 +1046,72 @@ class ACSDownloaderApp:
         threading.Thread(
             target=self._download_worker,
             args=(
-                matched_state_code,
                 table_code,
-                geo_level,
+                dataset,
                 entities,
-                year_start,
-                year_end,
+                years,
                 folder_path,
                 output_format,
+                options,
             ),
             daemon=True,
         ).start()
 
     def _download_worker(
         self,
-        state_code: str,
         table_code: str,
-        geo_level: str,
-        entities: List[Tuple[str, Optional[str]]],
-        year_start: int,
-        year_end: int,
+        dataset: str,
+        entities: List[Any],
+        years: List[int],
         base_folder: str,
         output_format: str,
+        options: ResearchOptions,
     ) -> None:
         """Worker thread to execute batch downloads without freezing UI."""
-        total_entities = len(entities)
-        years = list(range(year_start, year_end + 1))
-        total_calls = total_entities * len(years)
-        call_index = 0
-
-        self.msg_queue.put(
-            (
-                "LOG",
-                f"Starting download: {total_entities} entities x {len(years)} years "
-                f"({total_calls} total calls). Format: {output_format}",
-            )
-        )
-
         load_variable_definitions()
 
-        saved_folders: List[str] = []
+        def log(message: str) -> None:
+            self.msg_queue.put(("LOG", message))
 
-        for entity_idx, (entity_name, place_or_county_code) in enumerate(entities, 1):
-            clean_entity = sanitize_filename(entity_name)
-            entity_folder = os.path.join(base_folder, f"{clean_entity}_{table_code}")
-            os.makedirs(entity_folder, exist_ok=True)
-            saved_folders.append(entity_folder)
-
-            excel_accumulator: Dict[str, List[pd.DataFrame]] = {
-                "wide": [],
-                "melted": [],
-            }
-
+        def progress(index: int, total: int, entity_name: str, year: int) -> None:
             self.msg_queue.put(
-                (
-                    "LOG",
-                    f"[{entity_idx}/{total_entities}] Processing {entity_name} ({geo_level})...",
-                )
+                ("STATUS", f"Fetching [{index}/{total}]: {entity_name} ({year})...")
             )
 
-            for year in years:
-                call_index += 1
-                self.msg_queue.put(
-                    (
-                        "STATUS",
-                        f"Fetching [{call_index}/{total_calls}]: {entity_name} ({year})...",
-                    )
-                )
+        try:
+            result = run_batch(
+                table_code=table_code,
+                entities=entities,
+                years=years,
+                output_dir=base_folder,
+                output_format=output_format,
+                options=options,
+                dataset=dataset,
+                log=log,
+                progress=progress,
+            )
+        except Exception as exc:  # surface any failure in the UI, never hang
+            self.msg_queue.put(("ERROR", f"{type(exc).__name__}: {exc}"))
+            return
 
-                data = fetch_census_data(
-                    year=year,
-                    state_code=state_code,
-                    table_code=table_code,
-                    geo_level=geo_level,
-                    place_code=place_or_county_code if geo_level == "place" else None,
-                    county_code=place_or_county_code if geo_level == "county" else None,
-                )
+        if not result.get("success"):
+            self.msg_queue.put(("ERROR", result.get("error", "Unknown error")))
+            return
 
-                if data and len(data) > 1:
-                    df = pd.DataFrame(data[1:], columns=data[0])
-                    formatted_df = format_dataframe(df, table_code)
-                    process_data_and_save(
-                        formatted_df=formatted_df,
-                        folder_name=entity_folder,
-                        entity_name=entity_name,
-                        table_code=table_code,
-                        year=year,
-                        output_format=output_format,
-                        excel_accumulator=excel_accumulator,
-                    )
-                    self.msg_queue.put(
-                        (
-                            "LOG",
-                            f"  {year}: {len(df)} row(s), {len(formatted_df.columns)} columns saved.",
-                        )
-                    )
-                else:
-                    self.msg_queue.put(
-                        (
-                            "LOG",
-                            f"  {year}: No data returned (skipped or not available).",
-                        )
-                    )
-
-            if output_format == "excel":
-                saved_excel = save_excel_workbook(
-                    folder_name=entity_folder,
-                    entity_name=entity_name,
-                    table_code=table_code,
-                    excel_accumulator=excel_accumulator,
-                )
-                if saved_excel:
-                    self.msg_queue.put(
-                        (
-                            "LOG",
-                            f"  Excel workbook saved: {os.path.basename(saved_excel)}",
-                        )
-                    )
-
-        summary_msg = (
-            f"Download completed successfully.\n"
-            f"Total API Calls: {total_calls}\n"
-            f"Saved to: {base_folder}"
-        )
-        self.msg_queue.put(("DONE", summary_msg))
+        lines = [
+            "Download completed.",
+            f"Successful API calls: {result['successful_calls']} / "
+            f"{result['total_calls_attempted']}",
+            f"Saved to: {base_folder}",
+        ]
+        if result.get("panel_path"):
+            lines.append(f"Panel: {os.path.basename(result['panel_path'])}")
+        if result.get("codebook_path"):
+            lines.append(f"Codebook: {os.path.basename(result['codebook_path'])}")
+        if result.get("advisories"):
+            lines.append("")
+            lines.append("See the log for boundary/comparability advisories.")
+        self.msg_queue.put(("DONE", "\n".join(lines)))
 
 
 def main() -> None:

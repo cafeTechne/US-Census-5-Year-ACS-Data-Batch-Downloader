@@ -1,8 +1,12 @@
 """Geographic reference data and place parsing utilities for US Census ACS."""
 
+import json
 import os
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple
+
+if TYPE_CHECKING:  # pragma: no cover
+    import pandas as pd
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -169,3 +173,161 @@ def load_places_from_local(path: str) -> List[Tuple[str, str, str, str, str]]:
             )
             places.append((state_code, place_code, place_name, place_type, counties))
     return places
+
+
+# ---------------------------------------------------------------------------
+# Composite GEOIDs (TIGER/Line join keys)
+# ---------------------------------------------------------------------------
+
+# Census API response column names for geography components
+ZCTA_COLUMN = "zip code tabulation area"
+MSA_COLUMN = "metropolitan statistical area/micropolitan statistical area"
+
+# geo level -> ordered (column, width) components making up its GEOID
+GEOID_COMPONENTS: Dict[str, List[Tuple[str, int]]] = {
+    "state": [("state", 2)],
+    "county": [("state", 2), ("county", 3)],
+    "tract": [("state", 2), ("county", 3), ("tract", 6)],
+    "place": [("state", 2), ("place", 5)],
+    "zcta": [(ZCTA_COLUMN, 5)],
+    "msa": [(MSA_COLUMN, 5)],
+}
+
+# Geography columns that may appear in API responses (never numeric data)
+GEOGRAPHY_COLUMNS: List[str] = [
+    "GEO_ID",
+    "GEOID",
+    "NAME",
+    "us",
+    "state",
+    "county",
+    "tract",
+    "place",
+    ZCTA_COLUMN,
+    MSA_COLUMN,
+]
+
+
+def detect_geo_level(columns: Iterable[str]) -> Optional[str]:
+    """Infer the geography level from API response columns (most specific first)."""
+    cols = set(columns)
+    if "tract" in cols:
+        return "tract"
+    if ZCTA_COLUMN in cols:
+        return "zcta"
+    if MSA_COLUMN in cols:
+        return "msa"
+    if "place" in cols:
+        return "place"
+    if "county" in cols:
+        return "county"
+    if "state" in cols:
+        return "state"
+    if "us" in cols:
+        return "us"
+    return None
+
+
+def build_geoid(components: Mapping[str, object], geo_level: str) -> str:
+    """Build a standard Census GEOID string for one entity.
+
+    Tract: SSCCCTTTTTT (11), County: SSCCC (5), Place: SSPPPPP (7),
+    ZCTA: ZZZZZ (5), CBSA: MMMMM (5), State: SS (2), Nation: 'US'.
+    """
+    if geo_level == "us":
+        return "US"
+    parts = GEOID_COMPONENTS.get(geo_level)
+    if not parts:
+        raise ValueError(f"Unsupported geography level for GEOID: {geo_level}")
+    out = []
+    for column, width in parts:
+        value = components.get(column)
+        if value is None or str(value) == "" or str(value).lower() == "nan":
+            raise KeyError(f"Missing '{column}' component for {geo_level} GEOID")
+        out.append(str(value).split(".")[0].zfill(width))
+    return "".join(out)
+
+
+def add_geoid_column(df: "pd.DataFrame", geo_level: Optional[str] = None) -> "pd.DataFrame":
+    """Insert a ``GEOID`` column (as first column) built from geography components.
+
+    Falls back to the suffix of the API's ``GEO_ID`` (e.g. 1400000US36061000100)
+    when components are unavailable.
+    """
+    import pandas as pd  # local import keeps geo lightweight
+
+    out = df.copy()
+    if out.empty:
+        if "GEOID" not in out.columns:
+            out.insert(0, "GEOID", pd.Series(dtype=str))
+        return out
+    level = geo_level or detect_geo_level(out.columns)
+    geoids: Optional[pd.Series] = None
+    if level:
+        try:
+            geoids = out.apply(lambda row: build_geoid(row, level), axis=1)
+        except (KeyError, ValueError):
+            geoids = None
+    if geoids is None and "GEO_ID" in out.columns:
+        geoids = out["GEO_ID"].astype(str).str.split("US").str[-1]
+    if geoids is None:
+        return out
+    if "GEOID" in out.columns:
+        out = out.drop(columns=["GEOID"])
+    out.insert(0, "GEOID", geoids.astype(str))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# ZIP Code / ZCTA resolution (zip2fips.json)
+# ---------------------------------------------------------------------------
+
+_ZIP2FIPS: Dict[str, str] = {}
+
+
+def load_zip2fips(path: Optional[str] = None, force_reload: bool = False) -> Dict[str, str]:
+    """Load the ZIP -> 5-digit county FIPS crosswalk (cached)."""
+    global _ZIP2FIPS
+    if _ZIP2FIPS and not force_reload and path is None:
+        return _ZIP2FIPS
+    target = path or get_resource_path("zip2fips.json")
+    data: Dict[str, str] = {}
+    if os.path.exists(target):
+        with open(target, "r", encoding="utf-8") as f:
+            data = {str(k).zfill(5): str(v).zfill(5) for k, v in json.load(f).items()}
+    if path is None:
+        _ZIP2FIPS = data
+    return data
+
+
+def resolve_zip(zip_code: str) -> Optional[Dict[str, str]]:
+    """Resolve a 5-digit ZIP code to its (primary) state and county FIPS codes."""
+    zip_code = str(zip_code).strip().zfill(5)
+    fips = load_zip2fips().get(zip_code)
+    if not fips:
+        return None
+    state = fips[:2]
+    return {
+        "zip_code": zip_code,
+        "county_geoid": fips,
+        "state_code": state,
+        "county_code": fips[2:],
+        "state_name": STATE_MAPPING.get(state, ""),
+    }
+
+
+def zctas_for_state(state_code: str, county_code: Optional[str] = None) -> List[str]:
+    """ZIP codes whose primary county lies in the given state (and county).
+
+    Note: ZIP codes are USPS delivery routes; ZCTAs are their Census areal
+    approximations. PO-box-only ZIPs have no ZCTA and will return no data.
+    """
+    state_code = str(state_code).zfill(2)
+    prefix = state_code + (str(county_code).zfill(3) if county_code else "")
+    return sorted(z for z, f in load_zip2fips().items() if f.startswith(prefix))
+
+
+def counties_for_state(state_code: str) -> List[str]:
+    """3-digit county FIPS codes in a state known to the ZIP crosswalk."""
+    state_code = str(state_code).zfill(2)
+    return sorted({f[2:] for f in load_zip2fips().values() if f.startswith(state_code)})

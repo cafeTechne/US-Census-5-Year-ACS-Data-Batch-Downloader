@@ -22,3 +22,9 @@ env/
 
 # Output data (optional - remove if you want to track outputs)
 *.csv
+
+# Local Census API query cache (SQLite)
+.cache/
+
+# Default MCP batch download output
+downloads/

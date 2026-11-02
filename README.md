@@ -9,6 +9,40 @@ Easily fetch and process census data with this Python script.
 4. 💾 Saves data locally in CSV format.
 
 
+## 🔬 Research-Grade Pipeline (Phase 5)
+
+The `census/` library, the desktop GUI, and the MCP server share one pipeline (`census.pipeline.run_batch`) with these research features:
+
+| Area | What you get |
+| :--- | :--- |
+| **Geographies** | Nation (`us`), state, county, **census tract** (11-digit GEOIDs), place, **ZCTA** (ZIP, resolvable via `zip2fips.json`), **metro/micro areas (CBSA)**. Every output carries a standard `GEOID` for joining TIGER/Line shapefiles. |
+| **Endpoints** | Detailed tables (`B`/`C`), **Data Profiles** (`DP02`–`DP05`), **Subject tables** (`S1501`, `S1701`, `S1901`, `S2701`, …), **Comparison Profiles** (`CP02`–`CP05`). The endpoint is inferred from the table code. |
+| **Sampling error** | Estimates stay paired with their 90% MOEs; optional `_SE` (MOE/1.645), `_CV` (%), and `_RELIABILITY` (High ≤15%, Moderate ≤30%, Low >30%) columns. `census.stats` adds Z-tests (with the overlapping-period adjustment) and root-sum-of-squares MOE aggregation. |
+| **Sentinels** | Census jam values (`-666666666`, `-999999999`, `-222222222`, …) become blanks instead of fake negative incomes; optional `_NOTE` columns explain each one and flag top/bottom-coded medians. |
+| **Constant dollars** | Dollar-valued variables (medians, means, aggregates, per-capita — not counts in `$` brackets) and their MOEs can be converted to a base year with the BLS CPI-U annual average (2000–2024 built in; pass `cpi_table` to extend). |
+| **Comparability** | Requests spanning 2019→2020 log a boundary advisory (2010 vs. 2020 Census geography). Advisories are saved in `<table>_extraction_metadata.json` with every request parameter, for reproducibility. |
+| **Outputs** | Wide/melted CSV and Excel as before, plus a **tidy panel** (unique `(geoid, year)` rows, snake_case column slugs) as CSV or **Parquet** (snappy, native dtypes), and `<table>_codebook.csv` (code, slug, measurement type, description, concept, universe, unit). |
+| **Cache** | Responses are cached in `.cache/census_cache.db` so re-runs are offline and avoid rate limits (`CENSUS_CACHE_PATH` / `CENSUS_CACHE_DISABLED=1`). |
+
+Headless example:
+
+```python
+from census import ResearchOptions, build_entities, run_batch
+
+result = run_batch(
+    table_code="B19013",                                   # median household income
+    entities=build_entities("tract", "48", ["453"]),       # all tracts in Travis County, TX
+    years=range(2015, 2023),
+    output_dir="out",
+    output_format="parquet",
+    options=ResearchOptions(compute_reliability=True, inflation_base_year=2022, include_codebook=True),
+)
+print(result["panel_path"], result["advisories"])
+```
+
+Install the extra dependency for Parquet with `pip install -r requirements.txt` (adds `pyarrow`). See [docs/claude_setup.md](docs/claude_setup.md) for the MCP tools.
+
+
 # 🐍 Setting Up Python and Using the Command Line 🖥️
 
 If you're new to Python or haven't used the command line (terminal on macOS/Linux, Command Prompt or PowerShell on Windows) before, here's a quick guide to get you started:
