@@ -1,0 +1,39 @@
+﻿# Environment variables - never commit the real key
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Output data (optional - remove if you want to track outputs)
+*.csv
+
+# Local Census API query cache (SQLite)
+.cache/
+
+# Default MCP batch download output
+downloads/
+
+# Regenerable audit detail (python scripts/audit_concordance.py)
+docs/audits/*.csv
+
+# Versioned data that must be committed despite *.csv above
+!data/price_indexes/*.csv
+!crosswalks/**/*.csv
+!data/geo_crosswalks/*.csv
+!tests/fixtures/**/*.csv

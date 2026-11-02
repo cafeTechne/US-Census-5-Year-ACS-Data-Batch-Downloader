@@ -1,0 +1,59 @@
+{
+  "name": "Connecticut census tract GEOID recode: 2020 county-based -> 2022 planning-region-based",
+  "publisher": "Derived by this toolkit from U.S. Census Bureau relationship files",
+  "source_url": "https://www2.census.gov/geo/docs/maps-data/data/rel2022/acs22_cousub22_tract22_st09.txt",
+  "also_uses": "https://www2.census.gov/geo/docs/maps-data/data/rel2020/tract/tab20_tract20_tract10_natl.txt",
+  "documentation": [
+    "https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2022.html",
+    "https://www.census.gov/programs-surveys/geography/technical-documentation/records-layout/2022-connecticut-record-layout.html",
+    "https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2023-01.html"
+  ],
+  "retrieved_at": "2026-11-02T13:35:31+00:00",
+  "retrieved_from": "https://www2.census.gov/geo/docs/maps-data/data/rel2022/acs22_cousub22_tract22_st09.txt",
+  "source_last_modified": "Fri, 20 Jan 2023 15:22:06 GMT",
+  "source_bytes": 136368,
+  "source_sha256": "e3ed94f81229c0dd6bf5afb75922d60cc76020dce8becd4830db43ae9ff52591",
+  "method": "Match on the 6-digit tract code, which is unique statewide for every Connecticut tract with land in both vintages; land areas must agree within 10% (2022 TIGER areas differ slightly from 2020 after boundary corrections; tract codes and delineations were otherwise kept).",
+  "max_relative_land_area_difference": 0.045854,
+  "land_area_differs_over_1%": [
+    {
+      "geoid_2020": "09009345202",
+      "geoid_2022": "09140345202",
+      "arealand_2020": 4671635,
+      "arealand_2022": 4896144
+    },
+    {
+      "geoid_2020": "09009351300",
+      "geoid_2022": "09140351300",
+      "arealand_2020": 2265724,
+      "arealand_2022": 2296209
+    },
+    {
+      "geoid_2020": "09009352600",
+      "geoid_2022": "09140352600",
+      "arealand_2020": 2267728,
+      "arealand_2022": 2337814
+    },
+    {
+      "geoid_2020": "09013530301",
+      "geoid_2022": "09110530301",
+      "arealand_2020": 4482463,
+      "arealand_2022": 4528721
+    },
+    {
+      "geoid_2020": "09011693600",
+      "geoid_2022": "09180693600",
+      "arealand_2020": 11098159,
+      "arealand_2022": 11212514
+    }
+  ],
+  "rows": 879,
+  "unmapped_water_only_2020": [
+    "09001990000",
+    "09007990100",
+    "09009990000",
+    "09011990100"
+  ],
+  "unchanged_tract_code": 879,
+  "csv_sha256": "40ce974ee89b919f53bc653f6e8b783e990f9b79e8481dcc094efa16f9b8d646"
+}

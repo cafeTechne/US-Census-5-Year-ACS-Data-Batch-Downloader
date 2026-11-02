@@ -1,0 +1,757 @@
+{
+  "description": "Per-vintage Census API metadata for ACS 5-year datasets. Paths are <dataset>/<year>/<file>.gz; sha256 and bytes refer to the raw (uncompressed) API response.",
+  "files": {
+    "acs5/2009/groups.json.gz": {
+      "url": "https://api.census.gov/data/2009/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:24+00:00",
+      "bytes": 142823,
+      "sha256": "0d922768ca5f034063282bd644d3dfc1957df2acc1e1d57976237c2d04746cce"
+    },
+    "acs5/2009/variables.json.gz": {
+      "url": "https://api.census.gov/data/2009/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:23+00:00",
+      "bytes": 4155170,
+      "sha256": "f3330551b84f08df09e994e29c9b9917a79b1c2c0c53e304df42e81aa6b89eaa"
+    },
+    "acs5/2010/groups.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:25+00:00",
+      "bytes": 215228,
+      "sha256": "095a752efc31a248fea30af86237ba6ada2638fbb0264cd077c2e3883fa1c07e"
+    },
+    "acs5/2010/variables.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:24+00:00",
+      "bytes": 7819144,
+      "sha256": "2c0bc57025f027b485cf77a58485918efbe534de26debbce72e8797857c765b2"
+    },
+    "acs5/2011/groups.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:26+00:00",
+      "bytes": 215649,
+      "sha256": "fc33de622af665491dc2510ff33eb16f2dd64c030407902d835e8ce5f19e1579"
+    },
+    "acs5/2011/variables.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:25+00:00",
+      "bytes": 7863543,
+      "sha256": "51ffdc6a8e2ae5418cd9ec0f75085712f91d00f2f9e1287106b0df5590a66719"
+    },
+    "acs5/2012/groups.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:27+00:00",
+      "bytes": 234060,
+      "sha256": "0a3262b2e2db7f80aaf7effc7e1a7a1e67ba78884dda8ff94612f26553cf1712"
+    },
+    "acs5/2012/variables.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:27+00:00",
+      "bytes": 8355455,
+      "sha256": "e3e5cd2297799f0705a04679c23d804f3a8de94d6d2ed41373b925542614ec24"
+    },
+    "acs5/2013/groups.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:28+00:00",
+      "bytes": 237310,
+      "sha256": "b30f0dcf3af8966728cc20b507227a5c93cdcf6c0ec0ce96795575e646e5ebc0"
+    },
+    "acs5/2013/variables.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:28+00:00",
+      "bytes": 8417403,
+      "sha256": "48f7a70ee3b66e79f7dd83af811056fe767ff77fec71e3857ee73d6b88500a38"
+    },
+    "acs5/2014/groups.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:29+00:00",
+      "bytes": 237895,
+      "sha256": "6e5e72491fb124015b473495eb3bc89cd388f83203c23033fb913e76b61c1858"
+    },
+    "acs5/2014/variables.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:29+00:00",
+      "bytes": 8420906,
+      "sha256": "ac646f58d86fb504a2dca501f7369926e7cb4036bb05ec64c0954662ca4c2bda"
+    },
+    "acs5/2015/groups.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:31+00:00",
+      "bytes": 237862,
+      "sha256": "5f6a65e6ff66adda12493516a56444557506162b92c2eaf4df8632a6b4489d95"
+    },
+    "acs5/2015/variables.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:30+00:00",
+      "bytes": 8477221,
+      "sha256": "9caf26b4b4bd124336e09cf1ff3077e5b18dcd9342ee8110bb5a3fba3d1f356b"
+    },
+    "acs5/2016/groups.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:32+00:00",
+      "bytes": 238060,
+      "sha256": "efd2bca5dfc2c78db46d535bfa52c3d4173be3779f4610d481ecf5b707be4be6"
+    },
+    "acs5/2016/variables.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:31+00:00",
+      "bytes": 8493959,
+      "sha256": "3e57215b5047ef72ad8979a388353b0b7ec9a5024e021e9b5994cc91aebd65f6"
+    },
+    "acs5/2017/groups.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:33+00:00",
+      "bytes": 254691,
+      "sha256": "9e105df2c140d61c45e06c2d1f75c275608f848b1d38d6da471f3c5ca9ca07ec"
+    },
+    "acs5/2017/variables.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:33+00:00",
+      "bytes": 9324657,
+      "sha256": "2fb73c3bc0e8a2926bcbc178a13ef8cbdbdb9b0cfb4d4b51354ec9ade33186a8"
+    },
+    "acs5/2018/groups.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:34+00:00",
+      "bytes": 256782,
+      "sha256": "30f4d0e60464f32bd6b616cbab0daaa39444d96ad6a0aab12acd8cce5037680e"
+    },
+    "acs5/2018/variables.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:34+00:00",
+      "bytes": 9960636,
+      "sha256": "711dfb6005983b0dc259c6a31a01e356ef0977d88cbc746883854e1c34077258"
+    },
+    "acs5/2019/groups.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:36+00:00",
+      "bytes": 256894,
+      "sha256": "89d7fda8e09eb4473cc6b066e9bdcb3696860a9783a4bb12dbe4caf64814249e"
+    },
+    "acs5/2019/variables.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:35+00:00",
+      "bytes": 10036017,
+      "sha256": "824bb0c3f1b9ab2d4e7323a5fb184b8a4d15de1b7068e08bef01c6599c8bc574"
+    },
+    "acs5/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:37+00:00",
+      "bytes": 299680,
+      "sha256": "a36787ec3c1e555a014e38fb63f8343c65e081789861362af32f3a415c15694c"
+    },
+    "acs5/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:36+00:00",
+      "bytes": 10308724,
+      "sha256": "67fc9b087bf9649ad434bc983748c3cebf82581bff66a927c7f6edf433daa7c3"
+    },
+    "acs5/2021/groups.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:38+00:00",
+      "bytes": 336688,
+      "sha256": "9151cf3281110225e2447b2f766d402bc9c87e10e6ae7749def6098381f12ae5"
+    },
+    "acs5/2021/variables.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:38+00:00",
+      "bytes": 10318785,
+      "sha256": "5f03e6389a716e1b1ac35ad1d45a587449dba666ebb8895d911bd7763fcef160"
+    },
+    "acs5/2022/groups.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:39+00:00",
+      "bytes": 347828,
+      "sha256": "c99f290025794f2db57c1fe0b71d03ebe96c397abc8115895ca21d40afd61503"
+    },
+    "acs5/2022/variables.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:39+00:00",
+      "bytes": 10413505,
+      "sha256": "bf9d10f20ac15cb06986df35d6ababeb048633f6bd3963d53c6d09a83a5f208d"
+    },
+    "acs5/2023/groups.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:41+00:00",
+      "bytes": 351561,
+      "sha256": "523438b3ebc8e815254660d15a4a5d85e1cff7b5836126c89dae0643174497d1"
+    },
+    "acs5/2023/variables.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:40+00:00",
+      "bytes": 10457748,
+      "sha256": "64c771effa75cfe4e2c0e1c091af808ee20f1dd68e546b13d270d8542d9ebbe0"
+    },
+    "acs5/2024/groups.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/groups.json",
+      "retrieved_at": "2026-11-02T02:38:42+00:00",
+      "bytes": 353152,
+      "sha256": "d86af6430d810bbcbd8ac56680551288e04ced80cdd49c08e00144dc42250973"
+    },
+    "acs5/2024/variables.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/variables.json",
+      "retrieved_at": "2026-11-02T02:38:42+00:00",
+      "bytes": 10508565,
+      "sha256": "f689926f9a34944a7d5e66f78e5eb47ae801dc06e7b09cd2b724950a7546e4a8"
+    },
+    "cprofile/2015/groups.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:06+00:00",
+      "bytes": 972,
+      "sha256": "8a85feb68b7898d951dc3b43c3475fb1fe3a48cb02ecd7c3c21c9190932b7de7"
+    },
+    "cprofile/2015/variables.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:05+00:00",
+      "bytes": 480722,
+      "sha256": "d702eaccf8aae0c20ace3704aa7c7fbb4b6531fb6c225c80014bb2f891cc58b7"
+    },
+    "cprofile/2016/groups.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:06+00:00",
+      "bytes": 972,
+      "sha256": "ed995510f382b9af11d1e3165e6e7259371ba085db343a72e533f35acced7812"
+    },
+    "cprofile/2016/variables.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:06+00:00",
+      "bytes": 480750,
+      "sha256": "c519071bf2493220cad640377faf3bd9c1ab2fd52944621321826ed742d6f740"
+    },
+    "cprofile/2017/groups.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:06+00:00",
+      "bytes": 972,
+      "sha256": "264dcd8206b9677e66810f1b920fd447b024e0a011ade9d5984377aa6b0a8f8d"
+    },
+    "cprofile/2017/variables.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:06+00:00",
+      "bytes": 489078,
+      "sha256": "74aca1e8c772e3c3e8beb5e924397554312f4d152d13d65c998cf7618b9d05f9"
+    },
+    "cprofile/2018/groups.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:07+00:00",
+      "bytes": 972,
+      "sha256": "fa463c80fa4aedb61f3f26935ba41e74046ed81a420180ab38ed4ad518a5ff15"
+    },
+    "cprofile/2018/variables.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:07+00:00",
+      "bytes": 471298,
+      "sha256": "f124de4ed09c4e6f957d8cf91807bf5fb39ba16b15162955e047b06589232aa2"
+    },
+    "cprofile/2019/groups.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:07+00:00",
+      "bytes": 972,
+      "sha256": "ce750033ef2a8e3773921266d17e16ba482d46d6795b4b648cdb63920abdcd9e"
+    },
+    "cprofile/2019/variables.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:07+00:00",
+      "bytes": 474934,
+      "sha256": "16d81024cf1dc8c5f755e438c271b105bcd9b289bf623c614f29c4e5591fb640"
+    },
+    "cprofile/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:08+00:00",
+      "bytes": 972,
+      "sha256": "d6d0f37ff1aa1730c0ff32f79a65f16a1ebcd06f23036302e4a4ce60470b49eb"
+    },
+    "cprofile/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:08+00:00",
+      "bytes": 477554,
+      "sha256": "8311c5e2db5ef7da1adb9d8767ed4166673768c8b4745579eea543891e1be31c"
+    },
+    "cprofile/2021/groups.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:08+00:00",
+      "bytes": 972,
+      "sha256": "dfbb9163ff8e9982a8db878e617f4983456d741c7043f1e9b34f124f29625c15"
+    },
+    "cprofile/2021/variables.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:08+00:00",
+      "bytes": 477570,
+      "sha256": "306e4e14d1c176a947c1f0876b48ff906fa335be7e9684a7aba8ecbce1aa4ffd"
+    },
+    "cprofile/2022/groups.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:09+00:00",
+      "bytes": 972,
+      "sha256": "5ed815622d368eb21c54d824d5b0c18144614427609c0f6aebae47885a772656"
+    },
+    "cprofile/2022/variables.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:09+00:00",
+      "bytes": 478918,
+      "sha256": "23d8fb32c3a165ac2871146fbff52fc4a60634c5d28f6cee3c3f134912a37001"
+    },
+    "cprofile/2023/groups.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:09+00:00",
+      "bytes": 972,
+      "sha256": "330c66e0a1180615ee296736a7a1f2a4e119770a702a603c4776954f0218535a"
+    },
+    "cprofile/2023/variables.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:09+00:00",
+      "bytes": 481135,
+      "sha256": "34d548fb1ffe18cbffe4488b23871400641a56a935ce1615659d57fce5014218"
+    },
+    "cprofile/2024/groups.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/cprofile/groups.json",
+      "retrieved_at": "2026-11-02T02:39:10+00:00",
+      "bytes": 972,
+      "sha256": "f3a67fbbdb842e7c1355c127521639c25fc468e35346f77833b44770b876fafb"
+    },
+    "cprofile/2024/variables.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/cprofile/variables.json",
+      "retrieved_at": "2026-11-02T02:39:10+00:00",
+      "bytes": 490033,
+      "sha256": "2ef6cfc2f82415cefff5931f6742c4f006e95f2d760f082e58f662380f143544"
+    },
+    "profile/2009/groups.json.gz": {
+      "url": "https://api.census.gov/data/2009/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:43+00:00",
+      "bytes": 1015,
+      "sha256": "e98303b42957784aab7328b67193028c96c638168694d9843b8eeb5bd9f9738d"
+    },
+    "profile/2009/variables.json.gz": {
+      "url": "https://api.census.gov/data/2009/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:42+00:00",
+      "bytes": 450572,
+      "sha256": "15b3866209a1565408f99a4619777682cb2d009aaef2e1da8b2102716a46f7c2"
+    },
+    "profile/2010/groups.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:43+00:00",
+      "bytes": 959,
+      "sha256": "f101bef694a6888cca7eb9e8c03417d3df82bedd2d61d52e750265b449869349"
+    },
+    "profile/2010/variables.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:43+00:00",
+      "bytes": 343465,
+      "sha256": "9729f4475910ab8962e09d43307699b823e957a59cac46bb94489f2d12c5a527"
+    },
+    "profile/2011/groups.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:44+00:00",
+      "bytes": 959,
+      "sha256": "e6a5b41fa135c19669e5f90d826b68a8072a6f963d8f46f143cf6a151ffc4b78"
+    },
+    "profile/2011/variables.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:43+00:00",
+      "bytes": 425025,
+      "sha256": "97b303d29106d08f563f46444917dd867d3afa313ba04447def38aae5be638b0"
+    },
+    "profile/2012/groups.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:44+00:00",
+      "bytes": 959,
+      "sha256": "84ed676d4ee7ce6b8a0974d96f2a6055d23199cb95f834f2d3d7ef06fbb7eaa5"
+    },
+    "profile/2012/variables.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:44+00:00",
+      "bytes": 424939,
+      "sha256": "a85a95f13a05bb993f4b86593b3eebd272479183bac3bebc67c14df185cf90d0"
+    },
+    "profile/2013/groups.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:45+00:00",
+      "bytes": 959,
+      "sha256": "803a8347639e55c720565b06e6ae3c37350df3d80194d5d4d0238e3b341f6db5"
+    },
+    "profile/2013/variables.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:44+00:00",
+      "bytes": 457305,
+      "sha256": "374ad4d9b371ee6bdda7b651068c1f728fd8c6aa964204d3908bc21ec377b026"
+    },
+    "profile/2014/groups.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:45+00:00",
+      "bytes": 959,
+      "sha256": "63e91c9122080d91be3bd1a425122ecdcb761ab0a6680fe1f0506f54c03c600c"
+    },
+    "profile/2014/variables.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:45+00:00",
+      "bytes": 457305,
+      "sha256": "ba61f2ce58783759347736d8668d6ec77b2662f4dae4c22311cfc1152a6feddb"
+    },
+    "profile/2015/groups.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:46+00:00",
+      "bytes": 959,
+      "sha256": "c95179cff8c325f820aea620649466411dacbbce1f7ba11f3dd20b50b821bf32"
+    },
+    "profile/2015/variables.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:45+00:00",
+      "bytes": 461506,
+      "sha256": "833c88a277508eabbbf6f1647a2ce27c7d0c6f09e089a090a3411b5ea8dbd081"
+    },
+    "profile/2016/groups.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:46+00:00",
+      "bytes": 959,
+      "sha256": "d10e4d89a76a9d634d67f983eecb4c7ec01bb44810b6494e6f667624038ad56e"
+    },
+    "profile/2016/variables.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:46+00:00",
+      "bytes": 461674,
+      "sha256": "808d0474b853855818ba62e10cc10a19c26a9ed656cc57628d5f9c5ba50cd0bc"
+    },
+    "profile/2017/groups.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:47+00:00",
+      "bytes": 959,
+      "sha256": "7846bf0d023cc2e415c7d73ff1372ef7b747a440ea277ee5d14b7f993e7964be"
+    },
+    "profile/2017/variables.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:46+00:00",
+      "bytes": 475724,
+      "sha256": "acff63e83439e1fadede48615c60588192efaeeffb38708e8f220fb9de4df636"
+    },
+    "profile/2018/groups.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:47+00:00",
+      "bytes": 959,
+      "sha256": "847ab9bc3d64ee77d1079556f5ef40d6b1d0ba6e9b1ed760e1a5827a48c67723"
+    },
+    "profile/2018/variables.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:47+00:00",
+      "bytes": 457935,
+      "sha256": "d4d1531fb0c47391771adaafd48d29f2209a1e15f5c0d70bf5e59826fd17f973"
+    },
+    "profile/2019/groups.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:48+00:00",
+      "bytes": 959,
+      "sha256": "b615d34587982c2e34b553100aee5c373cc96273e1965d4dcfa6b79a698d6b3e"
+    },
+    "profile/2019/variables.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:47+00:00",
+      "bytes": 451773,
+      "sha256": "1960d19f25398cefd3d58feda07fc7c1fe62dcca1d5956548e2bebf2fadcfb7e"
+    },
+    "profile/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:48+00:00",
+      "bytes": 959,
+      "sha256": "1507d86c05140accba4e17c8f3398d9b4353897306bbac7c519bcfa68d745dfd"
+    },
+    "profile/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:48+00:00",
+      "bytes": 454327,
+      "sha256": "cc2083ded722b0a2577901e3142093ef3c6105869814ab16be5aaf61d9d1bfc5"
+    },
+    "profile/2021/groups.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:49+00:00",
+      "bytes": 959,
+      "sha256": "b3ec2008ed7fc7b1780dbf0f7432692b7b93d054bf461f2a39d711be5aefe35f"
+    },
+    "profile/2021/variables.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:48+00:00",
+      "bytes": 454327,
+      "sha256": "e65fe684bb7ea024ccc4429b8bc5ad5c05afc714444ec5b5bc3ce2f0c7db849c"
+    },
+    "profile/2022/groups.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:49+00:00",
+      "bytes": 959,
+      "sha256": "2a583d47d12242344906f68b13fa8f15eaeecd9118a11c92ddd31d9b5281e089"
+    },
+    "profile/2022/variables.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:49+00:00",
+      "bytes": 455669,
+      "sha256": "49769f204d01cba4413bcfd257c819b5f68cbc0accafc02da65073254e61b114"
+    },
+    "profile/2023/groups.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:50+00:00",
+      "bytes": 959,
+      "sha256": "a2778f9395fa02555583ceda92e92b082660a59dbd74f2cb3668b3a03cb5081f"
+    },
+    "profile/2023/variables.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:49+00:00",
+      "bytes": 458000,
+      "sha256": "0a928a03e1e3626f4ad9b7520d35b8ce264cdffb1d472fe6d955e3875a434709"
+    },
+    "profile/2024/groups.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/profile/groups.json",
+      "retrieved_at": "2026-11-02T02:38:50+00:00",
+      "bytes": 959,
+      "sha256": "d825043690f7874bab127d0bb81381107690dad2544f44140cf02741ab3cfe54"
+    },
+    "profile/2024/variables.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/profile/variables.json",
+      "retrieved_at": "2026-11-02T02:38:50+00:00",
+      "bytes": 466546,
+      "sha256": "3ffb9a501b65f8364544ae43097f028516765e90f53a79ea8159ffa64fee0a5d"
+    },
+    "subject/2010/groups.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:51+00:00",
+      "bytes": 13398,
+      "sha256": "851b9b054b31234720e77f51b0497a43fe3ca097163f8634de2fee432be90828"
+    },
+    "subject/2010/variables.json.gz": {
+      "url": "https://api.census.gov/data/2010/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:51+00:00",
+      "bytes": 5220475,
+      "sha256": "f5fc326f28a1afdd8cdcb1a4e1507d6faa69a2c2fb74950ad8d5e7901c346d07"
+    },
+    "subject/2011/groups.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:52+00:00",
+      "bytes": 13398,
+      "sha256": "fb3266acf7c2862bab00cda258ad4d298d0e2dc1f5e2d5b6b561e12470c6887d"
+    },
+    "subject/2011/variables.json.gz": {
+      "url": "https://api.census.gov/data/2011/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:52+00:00",
+      "bytes": 5231191,
+      "sha256": "16debec405022dd634e07bb96e9973b3c532681df4a4ccfc7e19f8ee5c5d532a"
+    },
+    "subject/2012/groups.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:53+00:00",
+      "bytes": 14413,
+      "sha256": "93493c8f5491b688239af891d7e1200ea9297060ceb1235514240f715c935cfb"
+    },
+    "subject/2012/variables.json.gz": {
+      "url": "https://api.census.gov/data/2012/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:53+00:00",
+      "bytes": 5461666,
+      "sha256": "b7b0fca6c77e3c7af529d6247363c876fc5a7a8a1739f37720d07fbed42e7cb0"
+    },
+    "subject/2013/groups.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:54+00:00",
+      "bytes": 14796,
+      "sha256": "21ce60c2f17a17e71d9d0382c2497d574a765e6fea7dcd916ad784707b22f07d"
+    },
+    "subject/2013/variables.json.gz": {
+      "url": "https://api.census.gov/data/2013/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:54+00:00",
+      "bytes": 5824059,
+      "sha256": "da2481e527dbf6932b8538ebc9bcaa6f14738bdd6826ad12928fd9bd418690bf"
+    },
+    "subject/2014/groups.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:55+00:00",
+      "bytes": 14796,
+      "sha256": "d602d440420003da711bafbe7f06e3700b3bedf93f4d5f2f94b7c17fb9cf88d1"
+    },
+    "subject/2014/variables.json.gz": {
+      "url": "https://api.census.gov/data/2014/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:54+00:00",
+      "bytes": 5824059,
+      "sha256": "ed97283fbba2db9b47bc12ad11120fb0b24c3ff27b86cd705b561dba70d4bf7b"
+    },
+    "subject/2015/groups.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:55+00:00",
+      "bytes": 16863,
+      "sha256": "d7ad0ef6cfcae953cff017ecbdc59adcd0e2275f98996facb23d98c88db5d6d9"
+    },
+    "subject/2015/variables.json.gz": {
+      "url": "https://api.census.gov/data/2015/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:55+00:00",
+      "bytes": 6472820,
+      "sha256": "e6ec62bbd91b5cabb5938b79d6e524258fe9b4cd8d1e832d996e3a699daa3367"
+    },
+    "subject/2016/groups.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:56+00:00",
+      "bytes": 16863,
+      "sha256": "7bf683a083043100e1e5d3b51a5a009c10ca27e15a946690aae6c3ee01c9db2c"
+    },
+    "subject/2016/variables.json.gz": {
+      "url": "https://api.census.gov/data/2016/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:56+00:00",
+      "bytes": 6473188,
+      "sha256": "227733f9db71d0714d04dc793345adfceb1d2c9bac9d4169f37ba05e48fde978"
+    },
+    "subject/2017/groups.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:57+00:00",
+      "bytes": 17723,
+      "sha256": "5e3133490f8d42511011ae681d887312e7b077dabf8581f61271bffae1bf106b"
+    },
+    "subject/2017/variables.json.gz": {
+      "url": "https://api.census.gov/data/2017/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:57+00:00",
+      "bytes": 7782163,
+      "sha256": "3f4707afca0a286f7d6740a8c8486584f8b6d761ee3dbc04b8e35615d8bf8f88"
+    },
+    "subject/2018/groups.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:38:59+00:00",
+      "bytes": 17930,
+      "sha256": "40c017d7fab98e2c446548a79e3a3d391e84cbd8a9d550018c692dc6e79eaa10"
+    },
+    "subject/2018/variables.json.gz": {
+      "url": "https://api.census.gov/data/2018/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:38:58+00:00",
+      "bytes": 7778852,
+      "sha256": "4c96df350948318db657f24c725925d6d64908f7eefd7bd539f84ae7c598c6b6"
+    },
+    "subject/2019/groups.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:00+00:00",
+      "bytes": 17930,
+      "sha256": "25cf6aa6ccd3e9ddac327746046e798865e8bd10556046b8ae2d5d3e883426ed"
+    },
+    "subject/2019/variables.json.gz": {
+      "url": "https://api.census.gov/data/2019/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:00+00:00",
+      "bytes": 7821004,
+      "sha256": "7e183ec5701717f98f86ebfccdd2f3aa0027aef73ab59a259f4f382af4d9881c"
+    },
+    "subject/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:01+00:00",
+      "bytes": 17930,
+      "sha256": "0b5bba712c1cb2180f1ecd1d92b92fe1b41a0d72bce40831a21289f4558ef40f"
+    },
+    "subject/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:01+00:00",
+      "bytes": 7822194,
+      "sha256": "53d24789f354c610e0f524b53f473326557b46916b626b55c5aa4f13e998dd80"
+    },
+    "subject/2021/groups.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:02+00:00",
+      "bytes": 17930,
+      "sha256": "5b3aef56df4130fb5924bad4323340f7af3f019cdf5fa7954571dd2618ca52ce"
+    },
+    "subject/2021/variables.json.gz": {
+      "url": "https://api.census.gov/data/2021/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:02+00:00",
+      "bytes": 7827369,
+      "sha256": "517bf2126eeb849a2c3cb02e19a349ec231ab5aeda4d0ab528e35d112dbf9fa2"
+    },
+    "subject/2022/groups.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:03+00:00",
+      "bytes": 17930,
+      "sha256": "ed6c13652660990758c0c052b1eaa2c056b297d5771aa6cd6230db4e8d7a87eb"
+    },
+    "subject/2022/variables.json.gz": {
+      "url": "https://api.census.gov/data/2022/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:03+00:00",
+      "bytes": 7827374,
+      "sha256": "a8d28dc09c52c2028a212254f2af8f99afd9fec87071e11d7c84de4209fe9b41"
+    },
+    "subject/2023/groups.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:04+00:00",
+      "bytes": 18104,
+      "sha256": "83fbde14f3097e2b30ca24d45e941a6ceea141ada48527afe3d24cc86097a673"
+    },
+    "subject/2023/variables.json.gz": {
+      "url": "https://api.census.gov/data/2023/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:04+00:00",
+      "bytes": 7940624,
+      "sha256": "d0512711fa7d0fad56040adfac0dd931c7d40417a68f20755951027ff810957a"
+    },
+    "subject/2024/groups.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/subject/groups.json",
+      "retrieved_at": "2026-11-02T02:39:05+00:00",
+      "bytes": 18104,
+      "sha256": "6659e0e2cd8dc300dc7474a376b755bcd1d49844d75d6e86896950f69645cdf9"
+    },
+    "subject/2024/variables.json.gz": {
+      "url": "https://api.census.gov/data/2024/acs/acs5/subject/variables.json",
+      "retrieved_at": "2026-11-02T02:39:05+00:00",
+      "bytes": 7938103,
+      "sha256": "9ee4b75e22e9305ecfdec4e27f780cd6a23946faedf4847ce8c5c38abe68ffb1"
+    }
+  },
+  "catalog_url": "https://api.census.gov/data.json",
+  "vintages": {
+    "acs5": [
+      2009,
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "profile": [
+      2009,
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "subject": [
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "cprofile": [
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ]
+  }
+}
