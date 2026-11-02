@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Census Bureau API client with retry, backoff, and optional local caching."""
 
 import os

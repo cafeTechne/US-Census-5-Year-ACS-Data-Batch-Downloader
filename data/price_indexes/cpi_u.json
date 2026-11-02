@@ -1,0 +1,23 @@
+{
+  "name": "CPI-U",
+  "series_id": "CUUR0000SA0",
+  "description": "CPI for All Urban Consumers, U.S. city average, all items, not seasonally adjusted",
+  "base_period": "1982-84=100",
+  "source": "https://api.bls.gov/publicAPI/v1/timeseries/data/CUUR0000SA0",
+  "method": "annual average = mean of 12 monthly indexes, rounded to 3 decimals",
+  "retrieved_at": "2026-11-02T02:51:45+00:00",
+  "raw_sha256": [
+    "7d881c77c07507ebff1eacb64fb264bb671da923969e7bd1849171a9bd470eea",
+    "0e4083e1845d194707d42dc51622dd270db6f6e424f997e81dce120cdae0ea53",
+    "be30241650a91dd045f0ce45e3fe82b64ad8889c63e5024c8cd1ea26ec594b07"
+  ],
+  "unpublished_months": [
+    "2025-M10"
+  ],
+  "note": "Years with an unpublished month have no computed annual average here.",
+  "csv_sha256": "33eb6812dcc92bf91c1235e36e26c846d840513716d87f427621ff04eddc9d65",
+  "years": [
+    2000,
+    2024
+  ]
+}

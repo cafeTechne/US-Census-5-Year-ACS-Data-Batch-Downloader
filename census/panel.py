@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Research output formats: tidy (GEOID, Year) panels, codebooks, and Parquet.
 
 All functions here operate on frames whose value columns still carry raw Census
@@ -7,7 +8,7 @@ variable codes (``B19013_001E``), plus optional derived columns produced by
 """
 
 import re
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -86,7 +87,11 @@ def base_label(base: str, is_percent: bool, metadata: Metadata) -> str:
     """Label of the underlying estimate (PE for percent pairs, else E)."""
     if is_percent:
         return _label_of(f"{base}PE", metadata) or _label_of(f"{base}E", metadata)
-    return _label_of(f"{base}E", metadata) or _label_of(f"{base}PE", metadata)
+    return (
+        _label_of(f"{base}E", metadata)
+        or _label_of(f"{base}PE", metadata)
+        or _label_of(f"{base}SS", metadata)
+    )
 
 
 def describe_column(col: str, metadata: Metadata) -> str:
@@ -164,7 +169,12 @@ def measurement_type(col: str) -> str:
     }[kind]
 
 
-def infer_unit(col: str, metadata: Metadata, inflation_base_year: Optional[int] = None) -> str:
+def infer_unit(
+    col: str,
+    metadata: Metadata,
+    inflation_base_year: Optional[int] = None,
+    price_index: str = "R-CPI-U-RS",
+) -> str:
     if col in IDENTIFIER_COLUMNS:
         return "Year" if col == "Year" else "Text"
     info = classify_column(col)
@@ -179,7 +189,7 @@ def infer_unit(col: str, metadata: Metadata, inflation_base_year: Optional[int] 
     entry = metadata.get(f"{base}E") or {}
     if is_dollar_variable(str(entry.get("label", "")), str(entry.get("concept", ""))):
         if inflation_base_year:
-            return f"Dollars (constant {inflation_base_year} dollars, CPI-U)"
+            return f"Dollars (constant {inflation_base_year} dollars, {price_index})"
         return "Dollars (nominal, period end-year dollars)"
     if "percent" in label.lower() or label.lower().rstrip().endswith("rate"):
         return "Percent"
@@ -254,6 +264,8 @@ def make_slug_map(
             stem = base.lower()
         else:
             stem = slugify(base_label(base, False, metadata), max_len) or base.lower()
+            if "__" in base:  # concept segment of a reused code
+                stem = f"{stem}_y{base.split('__', 1)[1]}"
         if stem in used_stems and used_stems[stem] != base:
             stem = f"{stem}_{base.rsplit('_', 1)[-1]}"
         if stem in used_stems and used_stems[stem] != base:
@@ -302,6 +314,12 @@ CODEBOOK_COLUMNS = [
     "Universe",
     "Unit",
 ]
+CONCORDANCE_CODEBOOK_COLUMNS = [
+    "Concept_ID",
+    "Years_Available",
+    "Source_Codes_By_Year",
+    "Concordance_Status",
+]
 
 
 def generate_codebook(
@@ -311,8 +329,18 @@ def generate_codebook(
     slug_map: Optional[Mapping[str, str]] = None,
     inflation_base_year: Optional[int] = None,
     slug_style: str = "label",
+    price_index: str = "R-CPI-U-RS",
+    concordance: Optional[Any] = None,
 ) -> pd.DataFrame:
-    """Build a data dictionary for the given output columns."""
+    """Build a data dictionary for the given output columns.
+
+    With a ``census.concordance.Concordance`` whose representative bases name
+    the columns, adds Concept_ID, Years_Available, Source_Codes_By_Year and
+    Concordance_Status.
+    """
+    rep_to_cid: Dict[str, str] = {}
+    if concordance is not None:
+        rep_to_cid = {b: cid for cid, b in concordance.representative_bases().items()}
     columns = [str(c) for c in columns]
     slugs = dict(slug_map) if slug_map else make_slug_map(columns, metadata, slug_style)
     rows: List[Dict[str, str]] = []
@@ -336,10 +364,22 @@ def generate_codebook(
                 "Full_Description": describe_column(col, metadata),
                 "Concept": concept,
                 "Universe": universe if info else "",
-                "Unit": infer_unit(col, metadata, inflation_base_year),
+                "Unit": infer_unit(col, metadata, inflation_base_year, price_index),
             }
         )
-    return pd.DataFrame(rows, columns=CODEBOOK_COLUMNS)
+        if concordance is not None:
+            cid = rep_to_cid.get(info[0], "") if info else ""
+            c = concordance.concepts.get(cid) if cid else None
+            rows[-1].update(
+                {
+                    "Concept_ID": cid,
+                    "Years_Available": ",".join(str(y) for y in c.years) if c else "",
+                    "Source_Codes_By_Year": ";".join(f"{y}:{c.codes[y]}" for y in c.years) if c else "",
+                    "Concordance_Status": ";".join(c.statuses) if c else "",
+                }
+            )
+    cols = CODEBOOK_COLUMNS + (CONCORDANCE_CODEBOOK_COLUMNS if concordance is not None else [])
+    return pd.DataFrame(rows, columns=cols)
 
 
 # ---------------------------------------------------------------------------

@@ -118,10 +118,29 @@ class TestMCPServer(unittest.TestCase):
         self.assertGreater(overlapped["z_statistic"], res["z_statistic"])
 
     def test_adjust_inflation(self):
-        res = srv.adjust_inflation(50000, 2010, 2022)
+        res = srv.adjust_inflation(50000, 2010, 2022, index="cpi-u")
         self.assertTrue(res["success"])
-        self.assertAlmostEqual(res["adjusted_value"], 50000 * 292.655 / 218.056)
-        self.assertFalse(srv.adjust_inflation(1, 1900, 2022)["success"])
+        self.assertAlmostEqual(res["adjusted_value"], 50000 * res["index_to"] / res["index_from"])
+        self.assertIn("api.bls.gov", res["source"])
+        bad = srv.adjust_inflation(1, 1900, 2022, index="cpi-u")
+        self.assertEqual(bad["error_code"], "PRICE_INDEX_UNAVAILABLE")
+        self.assertEqual(srv.adjust_inflation(1, 2010, 2022, index="ppi")["error_code"], "INVALID_INPUT")
+
+    def test_adjust_inflation_defaults_to_r_cpi_u_rs(self):
+        from census.inflation import load_price_index
+
+        fixture = os.path.join(self.test_dir, "idx")
+        os.makedirs(fixture)
+        with open(os.path.join(fixture, "r_cpi_u_rs.csv"), "w") as f:
+            f.write("year,value\n2010,320.0\n2022,432.0\n")  # fixture values
+        with patch.dict(os.environ, {"CENSUS_PRICE_INDEX_DIR": fixture}):
+            load_price_index.cache_clear()
+            try:
+                res = srv.adjust_inflation(100, 2010, 2022)
+            finally:
+                load_price_index.cache_clear()
+        self.assertEqual(res["index"], "r-cpi-u-rs")
+        self.assertAlmostEqual(res["adjusted_value"], 135.0)
 
     def test_list_zctas(self):
         res = srv.list_zctas(state_code="36", county_code="061")
@@ -175,11 +194,10 @@ class TestMCPServer(unittest.TestCase):
         self.assertEqual(res["dataset"], "profile")
         self.assertEqual(res["data"][0]["GEOID"], "36")
         row = res["data"][0]
-        # Without API labels, estimates keep their raw codes; derived columns
-        # are labelled from them.
-        self.assertIn("DP03_0009PE", row)
-        self.assertIn("Coefficient of Variation (%)!!DP03_0009PE", row)
-        self.assertAlmostEqual(row["Coefficient of Variation (%)!!DP03_0009PE"], 0.1 / 1.645 / 6.3 * 100)
+        # Labels come from the 2022 vintage in the offline archive.
+        cv_key = "Coefficient of Variation (%)!!EMPLOYMENT STATUS!!Civilian labor force!!Unemployment Rate"
+        self.assertIn("Percent!!EMPLOYMENT STATUS!!Civilian labor force!!Unemployment Rate", row)
+        self.assertAlmostEqual(row[cv_key], 0.1 / 1.645 / 6.3 * 100)
         urls = [c.args[0] for c in mock_get.call_args_list]
         self.assertTrue(any(u.endswith("/2022/acs/acs5/profile") for u in urls))
         self.assertFalse(srv.query_data_profile("DP99")["success"])
@@ -205,6 +223,7 @@ class TestMCPServer(unittest.TestCase):
             output_dir=self.test_dir,
             compute_reliability=True,
             inflation_base_year=2022,
+            price_index="cpi-u",
             include_codebook=True,
         )
         self.assertTrue(res["success"], res)
@@ -222,6 +241,69 @@ class TestMCPServer(unittest.TestCase):
             geo_level="place", output_dir=self.test_dir,
         )
         self.assertFalse(res["success"])
+
+
+    # ---- Round 6: protocol, vintages, concordance review ---------------------
+
+    def test_server_instructions_document_review(self):
+        text = srv.mcp.instructions
+        self.assertIn("plan_extraction", text)
+        self.assertIn("DIFFERENT identity", text)
+        protocol = srv.get_research_protocol()["protocol"]
+        self.assertIn("Reviewer (agent or human)", protocol)
+        self.assertIn("When in doubt, choose `split`", protocol)
+
+    def test_list_vintages_and_describe_variable(self):
+        v = srv.list_vintages("profile")
+        self.assertIn(2019, v["years"])
+        d2018 = srv.describe_variable("DP02_0002PE", 2018)
+        d2019 = srv.describe_variable("DP02_0002PE", 2019)
+        self.assertIn("Family households", d2018["label"])
+        self.assertIn("Married-couple", d2019["label"])
+
+    def test_list_variables_is_vintage_specific(self):
+        res = srv.list_variables("B19013", year=2015)
+        self.assertEqual(res["year"], 2015)
+        self.assertEqual(res["metadata_source"], "archive")
+
+    def test_check_variable_concordance(self):
+        res = srv.check_variable_concordance("B27001", 2016, 2017, variables=["B27001_006"])
+        self.assertTrue(res["success"])
+        self.assertEqual(res["issues"][0]["kind"], "relabeled")
+        self.assertIn("evidence", res["issues"][0])
+
+    @patch("requests.Session.get")
+    def test_plan_extraction_blocks_without_downloading(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.json.return_value = [["NAME", "us"], ["United States", "1"]]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+        plan = srv.plan_extraction(
+            state_code="36", table_code="B27001", start_year=2016, end_year=2017,
+            geo_level="state", variables=["B27001_006"],
+        )
+        self.assertTrue(plan["would_block"])
+        self.assertNotIn("_concordance", plan)
+        for call in mock_get.call_args_list:  # only national continuity calls
+            self.assertEqual(call.kwargs["params"]["for"], "us:1")
+
+    def test_draft_and_independent_agent_review(self):
+        xw = os.path.join(self.test_dir, "crosswalks")
+        with patch.dict(os.environ, {"CENSUS_CROSSWALK_DIR": xw}):
+            draft = srv.draft_crosswalk_override(
+                "B27001", ["2016:B27001_006", "2017:B27001_006"], "split",
+                drafted_by="agent:model-a/session-1",
+                rationale="Age band changed from 6-17 to 6-18; different measures.",
+            )
+            self.assertTrue(draft["success"])
+            row = draft["draft_rows"][0]
+            same = srv.record_crosswalk_review(row, "agent:model-a/session-1", "B27001")
+            self.assertFalse(same["success"])
+            ok = srv.record_crosswalk_review(row, "agent:model-b/session-2", "B27001")
+            self.assertTrue(ok["success"], ok.get("error"))
+            self.assertTrue(srv.validate_crosswalks()["valid"])
+        bad = srv.draft_crosswalk_override("B27001", ["B27001_006"], "split", "agent:x/1", "r")
+        self.assertEqual(bad["error_code"], "INVALID_INPUT")
 
 
 if __name__ == "__main__":

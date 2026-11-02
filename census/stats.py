@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Statistical methodology for ACS sampling error.
 
 Implements the Census Bureau's published guidance for working with ACS margins
@@ -50,7 +51,8 @@ ANNOTATION_CODES: Dict[str, str] = {
 # Variable code anatomy: <table>[_C<col> | _<period>]_<line><suffix>
 #   B19013_001E, B01001A_003M, DP03_0062PE, S1701_C01_001E, B19013_001EA,
 #   CP03_2017_001E, CP03_2022to2017_001SS (comparison-profile significance)
-BASE_PATTERN = r"[A-Z]+\d+[A-Z]*(?:_C\d+|_\d{4}(?:to\d{4})?)?_\d+"
+# Optional "__<first>_<last>" marks a concept segment (a reused code split by year).
+BASE_PATTERN = r"[A-Z]+\d+[A-Z]*(?:_C\d+|_\d{4}(?:to\d{4})?)?_\d+(?:__\d{4}_\d{4})?"
 VARIABLE_CODE_RE = re.compile(
     rf"^(?P<base>{BASE_PATTERN})(?P<suffix>PEA|PMA|PE|PM|EA|MA|SS|E|M)$"
 )

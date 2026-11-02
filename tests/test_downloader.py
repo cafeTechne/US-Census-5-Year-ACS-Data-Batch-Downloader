@@ -68,7 +68,7 @@ class TestACSDownloader(unittest.TestCase):
         self.assertNotIn("B01001_001E", formatted.columns)
 
     def test_load_tables_from_local(self):
-        groups_path = ad.get_resource_path("groups.json")
+        groups_path = ad.default_metadata_file("groups.json")
         tables = ad.load_tables_from_local(groups_path)
         self.assertIsInstance(tables, dict)
         self.assertIn("B01001", tables)

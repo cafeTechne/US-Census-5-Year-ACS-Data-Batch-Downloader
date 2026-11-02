@@ -28,3 +28,10 @@ env/
 
 # Default MCP batch download output
 downloads/
+
+# Regenerable audit detail (python scripts/audit_concordance.py)
+docs/audits/*.csv
+
+# Versioned data that must be committed despite *.csv above
+!data/price_indexes/*.csv
+!crosswalks/**/*.csv

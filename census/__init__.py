@@ -1,4 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Headless Census ACS data client and processing library."""
+
+__version__ = "0.6.0"
 
 from census.api import (
     DATASETS,
@@ -31,6 +34,8 @@ from census.tables import (
     SUBJECT_TABLES,
     VARIABLE_DEFINITIONS,
     get_variable_descriptions,
+    default_metadata_file,
+    load_table_catalog,
     load_table_universes,
     load_tables_from_local,
     load_variable_definitions,
@@ -57,10 +62,37 @@ from census.stats import (
 )
 from census.inflation import (
     CPI_U_ANNUAL,
+    DEFAULT_PRICE_INDEX,
+    PRICE_INDEXES,
+    PriceIndexUnavailable,
     adjust_inflation,
     boundary_shift_advisory,
     deflate_dataframe,
+    home_value_advisory,
+    load_price_index,
+    price_index_info,
 )
+from census.metadata import (
+    archived_vintages,
+    available_vintages,
+    describe_variable,
+    latest_vintage,
+    table_variables,
+    vintage_groups,
+    vintage_variables,
+)
+from census.concordance import (
+    Concordance,
+    apply_overrides,
+    build_concordance,
+    build_evidence,
+    canonical_label,
+    save_evidence,
+    validate_all_crosswalks,
+    validate_crosswalk_row,
+)
+from census.continuity import continuity_check
+from census import errors
 from census.panel import (
     build_tidy_panel,
     export_parquet,
@@ -68,11 +100,15 @@ from census.panel import (
     make_slug_map,
 )
 from census.pipeline import (
+    CONCORDANCE_MODES,
     OUTPUT_FORMATS,
     Entity,
     ResearchOptions,
+    apply_concordance,
     build_entities,
+    plan_extraction,
     prepare_frame,
+    public_plan,
     resolve_metadata,
     run_batch,
 )
@@ -113,6 +149,8 @@ __all__ = [
     "load_variable_definitions",
     "load_variable_metadata",
     "load_table_universes",
+    "load_table_catalog",
+    "default_metadata_file",
     "get_variable_descriptions",
     # export
     "format_dataframe",
@@ -136,6 +174,31 @@ __all__ = [
     "adjust_inflation",
     "deflate_dataframe",
     "boundary_shift_advisory",
+    "home_value_advisory",
+    "DEFAULT_PRICE_INDEX",
+    "PRICE_INDEXES",
+    "PriceIndexUnavailable",
+    "load_price_index",
+    "price_index_info",
+    # metadata
+    "archived_vintages",
+    "available_vintages",
+    "describe_variable",
+    "latest_vintage",
+    "table_variables",
+    "vintage_groups",
+    "vintage_variables",
+    # concordance
+    "Concordance",
+    "apply_overrides",
+    "build_concordance",
+    "build_evidence",
+    "canonical_label",
+    "save_evidence",
+    "validate_all_crosswalks",
+    "validate_crosswalk_row",
+    "continuity_check",
+    "errors",
     # panel
     "build_tidy_panel",
     "generate_codebook",
@@ -143,6 +206,10 @@ __all__ = [
     "export_parquet",
     # pipeline
     "OUTPUT_FORMATS",
+    "CONCORDANCE_MODES",
+    "apply_concordance",
+    "plan_extraction",
+    "public_plan",
     "Entity",
     "ResearchOptions",
     "build_entities",

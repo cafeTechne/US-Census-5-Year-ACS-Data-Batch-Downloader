@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """SQLite-backed local cache for Census API responses.
 
 Responses are keyed by the request endpoint and query parameters (excluding the

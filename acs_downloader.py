@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """US Census 5-Year ACS Data Batch Downloader.
 
 A desktop application to fetch, format, and export American Community Survey (ACS)
@@ -5,6 +6,10 @@ A desktop application to fetch, format, and export American Community Survey (AC
 county, tract, place, ZCTA, CBSA), with research options: MOE-derived standard
 errors and CVs, Census sentinel cleaning, CPI-U constant dollars, tidy panels,
 Parquet, and codebooks.
+
+Maintenance mode: no new features. The GUI runs the same pipeline as the
+library, MCP server and CLI, so it inherits their defaults (concordance_mode
+"fail", R-CPI-U-RS) and reports blocked runs in its log and error dialog.
 """
 
 from datetime import datetime
@@ -21,6 +26,9 @@ from tkinter import filedialog, messagebox, ttk
 
 from census import (
     CPI_U_ANNUAL,
+    DEFAULT_PRICE_INDEX,
+    archived_vintages,
+    load_price_index,
     DATASET_TABLES,
     CensusAPIClient,
     FIPS_MAPPING,
@@ -41,6 +49,8 @@ from census import (
     get_variable_descriptions,
     handle_duplicate_columns,
     load_places_from_local,
+    default_metadata_file,
+    load_table_catalog,
     load_tables_from_local,
     load_variable_definitions,
     VARIABLE_DEFINITIONS,
@@ -104,8 +114,12 @@ FORMAT_OPTIONS: List[Tuple[str, str]] = [
     ("Parquet (.parquet, tidy panel)", "parquet"),
 ]
 
-MIN_YEAR = 2009
-MAX_YEAR = 2024
+_VINTAGES = archived_vintages("acs5") or [2009, 2024]
+MIN_YEAR = min(_VINTAGES)
+MAX_YEAR = max(_VINTAGES)
+# Default constant-dollar index (R-CPI-U-RS, the Census Bureau standard); the
+# spinbox range falls back to CPI-U years until R-CPI-U-RS data is installed.
+_PRICE_YEARS = sorted(load_price_index(DEFAULT_PRICE_INDEX) or CPI_U_ANNUAL)
 
 
 class ACSDownloaderApp:
@@ -137,13 +151,11 @@ class ACSDownloaderApp:
         self.root.after(50, self._poll_queue)
 
     def _load_initial_data(self) -> None:
-        """Load table definitions from groups.json."""
+        """Load detailed-table definitions from the latest archived vintage."""
         try:
-            groups_file = get_resource_path("groups.json")
-            if os.path.exists(groups_file):
-                self.all_tables = load_tables_from_local(groups_file)
+            self.all_tables = load_table_catalog("acs5")
         except Exception as e:
-            print(f"Error loading initial groups.json: {e}")
+            print(f"Error loading table catalog: {e}")
 
     def _configure_styles(self) -> None:
         """Configure ttk styles with the Dracula color palette."""
@@ -457,13 +469,13 @@ class ACSDownloaderApp:
 
         ttk.Checkbutton(
             options_frame,
-            text="Adjust Financial Values to Constant Dollars (CPI-U), base year:",
+            text="Adjust Financial Values to Constant Dollars (R-CPI-U-RS), base year:",
             variable=self.inflation_var,
         ).grid(row=len(checks), column=0, sticky="w")
         self.inflation_year_spin = tk.Spinbox(
             options_frame,
-            from_=min(CPI_U_ANNUAL),
-            to=max(CPI_U_ANNUAL),
+            from_=min(_PRICE_YEARS),
+            to=max(_PRICE_YEARS),
             width=6,
             bg=SELECTION_COLOR,
             fg=FOREGROUND_COLOR,
@@ -471,7 +483,7 @@ class ACSDownloaderApp:
             highlightthickness=0,
         )
         self.inflation_year_spin.delete(0, tk.END)
-        self.inflation_year_spin.insert(0, str(max(CPI_U_ANNUAL)))
+        self.inflation_year_spin.insert(0, str(max(_PRICE_YEARS)))
         self.inflation_year_spin.grid(row=len(checks), column=1, sticky="w", padx=(4, 0))
 
         # 7. Call Estimation Banner
@@ -940,13 +952,13 @@ class ACSDownloaderApp:
             try:
                 base_year = int(self.inflation_year_spin.get())
             except ValueError:
-                messagebox.showerror("Error", "CPI-U base year must be an integer.")
+                messagebox.showerror("Error", "Base year must be an integer.")
                 return None
-            if base_year not in CPI_U_ANNUAL:
+            if not load_price_index(DEFAULT_PRICE_INDEX):
                 messagebox.showerror(
                     "Error",
-                    f"No CPI-U data for {base_year}. Available: "
-                    f"{min(CPI_U_ANNUAL)}-{max(CPI_U_ANNUAL)}.",
+                    "R-CPI-U-RS data is not installed. Run scripts/update_price_indexes.py "
+                    "(see its instructions) to enable constant-dollar conversion.",
                 )
                 return None
         return ResearchOptions(

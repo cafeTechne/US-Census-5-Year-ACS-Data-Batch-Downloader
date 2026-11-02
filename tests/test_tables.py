@@ -2,9 +2,10 @@
 
 import os
 import unittest
-from census.geo import get_resource_path
 from census.tables import (
     VARIABLE_DEFINITIONS,
+    default_metadata_file,
+    load_table_catalog,
     get_variable_descriptions,
     load_tables_from_local,
     load_variable_definitions,
@@ -13,7 +14,7 @@ from census.tables import (
 
 class TestCensusTables(unittest.TestCase):
     def test_load_tables_from_local(self):
-        groups_path = get_resource_path("groups.json")
+        groups_path = default_metadata_file("groups.json")
         tables = load_tables_from_local(groups_path)
         self.assertIsInstance(tables, dict)
         self.assertIn("B01001", tables)
@@ -35,6 +36,12 @@ class TestCensusTables(unittest.TestCase):
         self.assertIn("B01001_001E", filtered)
         self.assertIn("B01001_002E", filtered)
         self.assertNotIn("B02001_001E", filtered)
+
+    def test_table_catalog_per_vintage(self):
+        self.assertIn("B19013", load_table_catalog("acs5", 2015))
+        self.assertIn("DP03", load_table_catalog("profile"))
+        self.assertIn("S1701", load_table_catalog("subject"))
+        self.assertEqual(load_table_catalog("acs5", 1990), {})
 
     def test_invalid_table_code_type(self):
         with self.assertRaises(ValueError):

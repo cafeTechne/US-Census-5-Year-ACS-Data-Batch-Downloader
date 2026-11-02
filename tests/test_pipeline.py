@@ -9,6 +9,7 @@ import unittest
 import pandas as pd
 
 from census.api import CensusAPIClient
+from census.inflation import CPI_U_ANNUAL
 from census.pipeline import (
     ZCTA_CHUNK_SIZE,
     ResearchOptions,
@@ -41,7 +42,7 @@ class FakeClient(CensusAPIClient):
 
     def fetch(self, year, table_code, dataset=None, **kwargs):  # type: ignore[override]
         self.calls.append((year, table_code, dataset, kwargs))
-        if year in self.fail_years:
+        if year in self.fail_years and kwargs.get("geo_level") != "us":
             self.last_error = "HTTP 404"
             return None
         self.last_error = None
@@ -95,9 +96,11 @@ class TestBuildEntities(unittest.TestCase):
 class TestPrepareFrame(unittest.TestCase):
     def test_full_research_processing(self):
         meta = {"B19013_001E": {"label": "Median household income (dollars)", "concept": ""}}
-        opts = ResearchOptions(compute_reliability=True, inflation_base_year=2022)
+        opts = ResearchOptions(
+            compute_reliability=True, inflation_base_year=2022, price_index="cpi-u"
+        )
         df = prepare_frame(tract_payload(), 2010, opts, meta, "tract")
-        factor = 292.655 / 218.056
+        factor = CPI_U_ANNUAL[2022] / CPI_U_ANNUAL[2010]
         self.assertEqual(df["GEOID"].tolist(), ["36061000100", "36061000200"])
         self.assertAlmostEqual(df["B19013_001E"].iloc[0], 50000 * factor)
         self.assertAlmostEqual(df["B19013_001M"].iloc[0], 4935 * factor)
@@ -107,7 +110,7 @@ class TestPrepareFrame(unittest.TestCase):
 
     def test_inflation_never_scales_sentinels(self):
         meta = {"B19013_001E": {"label": "income (dollars)", "concept": ""}}
-        opts = ResearchOptions(clean_sentinels=False, inflation_base_year=2022)
+        opts = ResearchOptions(clean_sentinels=False, inflation_base_year=2022, price_index="cpi-u")
         df = prepare_frame(tract_payload(), 2010, opts, meta, "tract")
         self.assertTrue(pd.isna(df["B19013_001E"].iloc[1]))
 
@@ -169,12 +172,12 @@ class TestRunBatch(unittest.TestCase):
         self.assertTrue(os.path.exists(res["codebook_path"]))
 
     def test_inflation_applied_to_panel(self):
-        res = self._run("panel", inflation_base_year=2020)
+        res = self._run("panel", inflation_base_year=2020, price_index="cpi-u")
         panel = pd.read_csv(res["panel_path"], dtype={"geoid": str})
         col = "median_household_income_in_the_past_12_months_est"
         values = panel[panel["geoid"] == "36061000100"].set_index("year")[col]
         self.assertAlmostEqual(values[2020], 50000)
-        self.assertAlmostEqual(values[2018], 50000 * 258.811 / 251.107, places=3)
+        self.assertAlmostEqual(values[2018], 50000 * CPI_U_ANNUAL[2020] / CPI_U_ANNUAL[2018], places=3)
 
     def test_failed_calls_reported(self):
         res = self._run("panel", client=FakeClient(fail_years={2019}))

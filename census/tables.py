@@ -1,17 +1,39 @@
-"""Table groups and variable definitions loader for US Census ACS."""
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Table groups and variable definitions loader for US Census ACS.
 
+Defaults read the latest vintage in the offline metadata archive
+(metadata/<dataset>/<year>/*.json.gz). For multi-year work use
+census.metadata, which resolves metadata per vintage.
+"""
+
+import gzip
 import json
 import os
-from typing import Dict, Optional
-from census.geo import get_resource_path
+from typing import Any, Dict, Optional
+
+from census.metadata import archive_dir, latest_vintage
+
+
+def _read_json(path: str) -> Dict[str, Any]:
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as f:  # type: ignore[operator]
+        return json.load(f)
+
+
+def default_metadata_file(name: str, dataset: str = "acs5", year: Optional[int] = None) -> str:
+    """Archive path of ``name`` (variables.json / groups.json) for a vintage.
+
+    Defaults to the latest archived vintage of the dataset.
+    """
+    year = year or latest_vintage(dataset)
+    return os.path.join(archive_dir(), dataset, str(year), f"{name}.gz")
 
 VARIABLE_DEFINITIONS: Dict[str, str] = {}
 
 
 def load_tables_from_local(path: str) -> Dict[str, str]:
-    """Load table groups mapping (table code -> description) from groups.json."""
-    with open(path, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    """Load table groups mapping (table code -> description) from a groups.json(.gz)."""
+    data = _read_json(path)
     tables = {item["name"]: item["description"] for item in data.get("groups", [])}
     for key, value in tables.items():
         if not isinstance(key, str) or not isinstance(value, str):
@@ -29,14 +51,13 @@ def load_variable_definitions(
     if VARIABLE_DEFINITIONS and not force_reload:
         return VARIABLE_DEFINITIONS
 
-    target_path = filepath or get_resource_path("variables.json")
+    target_path = filepath or default_metadata_file("variables.json")
     if os.path.exists(target_path):
-        with open(target_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            VARIABLE_DEFINITIONS = {
-                var: details["label"]
-                for var, details in data.get("variables", {}).items()
-            }
+        data = _read_json(target_path)
+        VARIABLE_DEFINITIONS = {
+            var: str(details.get("label", "")).strip()
+            for var, details in data.get("variables", {}).items()
+        }
     return VARIABLE_DEFINITIONS
 
 
@@ -120,10 +141,9 @@ def load_variable_metadata(
     global VARIABLE_METADATA
     if VARIABLE_METADATA and not force_reload:
         return VARIABLE_METADATA
-    target_path = filepath or get_resource_path("variables.json")
+    target_path = filepath or default_metadata_file("variables.json")
     if os.path.exists(target_path):
-        with open(target_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_json(target_path)
         VARIABLE_METADATA = {
             var: {
                 "label": str(d.get("label", "")),
@@ -143,10 +163,9 @@ def load_table_universes(
     global TABLE_UNIVERSES
     if TABLE_UNIVERSES and not force_reload:
         return TABLE_UNIVERSES
-    target_path = filepath or get_resource_path("groups.json")
+    target_path = filepath or default_metadata_file("groups.json")
     if os.path.exists(target_path):
-        with open(target_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_json(target_path)
         result: Dict[str, str] = {}
         for item in data.get("groups", []):
             # groups.json uses the key "universe " (with trailing space)
@@ -162,3 +181,11 @@ def load_table_universes(
 def table_code_of(variable_code: str) -> str:
     """'B19013_001E' -> 'B19013'; 'S1701_C01_001E' -> 'S1701'."""
     return variable_code.split("_", 1)[0]
+
+
+def load_table_catalog(dataset: str = "acs5", year: Optional[int] = None) -> Dict[str, str]:
+    """Table code -> description for one vintage (default: latest archived)."""
+    path = default_metadata_file("groups.json", dataset, year)
+    if not os.path.exists(path):
+        return {}
+    return load_tables_from_local(path)

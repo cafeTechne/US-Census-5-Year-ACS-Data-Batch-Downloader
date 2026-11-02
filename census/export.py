@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Data transformation, formatting, and file export utilities for Census datasets."""
 
 import os
@@ -103,9 +104,20 @@ def process_data_and_save(
     # Wide format CSV export
     if output_format in ("both", "wide_only"):
         compiled_file_name = os.path.join(folder_name, "compiled_unmelted_data.csv")
-        write_headers = not os.path.exists(compiled_file_name)
-        with open(compiled_file_name, "a", newline="", encoding="utf-8") as f:
-            df.to_csv(f, header=write_headers, index=False)
+        if not os.path.exists(compiled_file_name):
+            df.to_csv(compiled_file_name, index=False, encoding="utf-8")
+        else:
+            existing_cols = list(pd.read_csv(compiled_file_name, nrows=0).columns)
+            if existing_cols == [str(c) for c in df.columns]:
+                with open(compiled_file_name, "a", newline="", encoding="utf-8") as f:
+                    df.to_csv(f, header=False, index=False)
+            else:
+                # Columns differ between years: realign by name instead of
+                # appending rows under the wrong headers.
+                existing = pd.read_csv(compiled_file_name, dtype=str, keep_default_na=False)
+                incoming = df.astype(object).where(df.notna(), "").astype(str)
+                combined = pd.concat([existing, incoming], ignore_index=True, sort=False)
+                combined.to_csv(compiled_file_name, index=False, encoding="utf-8")
 
     # Melted format CSV export
     id_vars = [

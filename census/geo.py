@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Geographic reference data and place parsing utilities for US Census ACS."""
 
 import json
