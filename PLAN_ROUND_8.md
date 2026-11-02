@@ -2,7 +2,7 @@
 
 **Planning Round:** 8
 **Date:** 2026-11-02
-**Status:** Draft for review (decisions in section 13)
+**Status:** Decisions made (section 13); ready to implement
 **Branch:** `phase8/inference-framework` (from `defaultBranch` after the Rounds 1–7 merge)
 
 ---
@@ -31,6 +31,10 @@ Round 8 delivers models that account for these, a pre-registration workflow that
 | P1 | E. Planning tools: minimum detectable differences and reliability screens | 7 |
 | P2 | G. Time and overlap-aware designs | 9 |
 | P0 | H. Agent interface and reporting | 10 |
+| P1 | I. Publication outputs: figures, correlation matrices, tables | 10a |
+| P0 | J. Local-model readiness: an MCP server small open models can use | 10b |
+
+The toolkit must remain usable after development without Claude: by researchers directly (library and CLI) and by agents running on local open-weights models through MCP. Workstream J makes that a tested requirement, not a hope.
 
 ---
 
@@ -40,7 +44,7 @@ Round 8 delivers models that account for these, a pre-registration workflow that
 2. **Prefer design-based variance.** Where Census publishes replicate estimates, sampling uncertainty in model coefficients comes from refitting on all 80 replicates, which requires no modeling assumptions about measurement error. Model-based corrections are the fallback, and results say which was used.
 3. **Validate inference, not just arithmetic.** A confidence-interval method is accepted only after simulation shows it covers the true value at close to the nominal rate under ACS-like error, and after it reproduces a published reference result where one exists.
 4. **Pre-register, then run.** Confirmatory analyses run from a locked manifest; anything not in the manifest is labeled exploratory in outputs.
-5. **Lean core, optional inference extra.** The data pipeline keeps its current dependencies. Modeling uses `statsmodels` and `scipy`, installed as an optional extra (decision 1).
+5. **Established libraries only.** Statistics come from `scipy` and `statsmodels`, figures from `matplotlib`: widely cited, peer-reviewed or long-standing projects with stable APIs (decision 1). We implement only what they lack (replicate variance, ACS-specific corrections, Fay–Herriot) and cross-check our code against them wherever they overlap.
 6. **Same discipline as before.** Census and published methodological sources are the specification, every result records its method and provenance, and agents can run every step through MCP or the CLI.
 
 ---
@@ -171,6 +175,9 @@ New MCP tools and CLI commands mirror each workstream:
 | Tool | Purpose |
 | :--- | :--- |
 | `build_analysis_frame` | Model-ready table with SEs, optional replicates, and a coverage report |
+| `correlation_matrix` | Correlations with intervals, replicate SEs, optional disattenuation |
+| `make_figure`, `make_table` | Publication figures and tables with captions and provenance |
+| `get_recipe` | Step-by-step workflow recipes for smaller models |
 | `fit_model` | Regression with replicate or model-based sampling error; returns coefficients, SE components, method |
 | `small_area_estimates` | Fay–Herriot EBLUPs with MSE, intervals, and shrinkage |
 | `minimum_detectable_difference`, `reliability_profile` | Planning |
@@ -180,6 +187,80 @@ New MCP tools and CLI commands mirror each workstream:
 `docs/agent_protocol.md` gains an inference section: when to use replicate inference, how to read SE components, the CV screen, overlap rules for trends, and the manifest workflow. Model results are written with the same provenance metadata as extractions, plus the model specification and the manifest hash when one was used.
 
 ---
+
+## 10a. Workstream I (P1): publication outputs
+
+Figures and tables suitable for journal submission, generated from results objects so that every number in a figure traces to a result and its provenance.
+
+### I1. Figures (`census/figures.py`, matplotlib)
+
+| Figure | Shows |
+| :--- | :--- |
+| Estimates with intervals | Point estimates with 90% intervals from MOEs (dot-and-whisker), sorted, with low-reliability estimates marked |
+| Coefficient plot | Model coefficients with intervals; naive vs corrected side by side to show attenuation |
+| Correlation matrix | Heatmap of correlations among ACS variables, with significance or interval information (I2) |
+| Forest plot | Many-area comparisons from `batch_significance`, highlighting results significant after correction |
+| Small-area shrinkage | Direct estimates vs Fay–Herriot EBLUPs with intervals, showing how much each area moved |
+| Trend plot | Non-overlapping periods with intervals and the trend test result |
+| Reliability profile | CV distribution by geography level (planning) |
+
+Requirements:
+
+- **Vector output** (PDF, SVG, EPS) plus PNG at a chosen DPI; sizes for one- and two-column journal widths; embedded fonts.
+- **Accessible defaults:** colorblind-safe palettes, line styles and markers that survive grayscale printing, readable minimum font sizes.
+- **Every figure ships with** a CSV of the plotted values, a caption draft stating the data source (releases, tables), interval level, and methods, and a JSON sidecar with provenance (result ID, manifest hash when used).
+- **Reproducible bytes:** fixed metadata (no creation timestamps; matplotlib's SVG hash salt fixed) so regenerating a figure from the same results gives an identical file.
+- **Tested by content, not by eye:** tests check plotted data, axis labels, interval endpoints, and caption text, and include a small set of image-regression baselines.
+
+### I2. Correlation matrices that respect sampling error
+
+Correlations between noisy estimates are biased toward zero (attenuation), and their uncertainty includes sampling error.
+
+- `correlation_matrix(frame, variables, method="pearson"|"spearman")` via `scipy.stats`, returning the matrix, pairwise n, p-values, and confidence intervals (Fisher z for Pearson).
+- With replicates: the correlation recomputed on each of the 80 replicates gives a design-based standard error for every coefficient.
+- Optional disattenuation (Spearman's correction using each variable's reliability, computed from its known sampling variance), reported alongside, never instead of, the observed correlation.
+- Multiple-comparison correction across the matrix (Round 7 `adjust_pvalues`).
+
+### I3. Tables
+
+- Regression, descriptive, and comparison tables as LaTeX (booktabs), Markdown, and CSV, with standard errors or intervals, significance markers after correction, notes on SE components, and the data citation.
+- A results bundle per analysis: tables, figures, captions, the methods section (workstream D), and provenance in one folder.
+
+## 10b. Workstream J (P0): local-model readiness
+
+Goal: an agent running on a local open-weights model (via Ollama, LM Studio, llama.cpp, or vLLM) can complete the standard workflows through MCP without Claude.
+
+Small models struggle with long tool lists, long descriptions, nested parameters, and ambiguous next steps. Today's server has 32 tools with long docstrings, written for a frontier model.
+
+### J1. Tool profiles
+
+- **`core` profile (default for local models, about 10 tools):** find a table, describe a variable, plan, download, derive, compare, fit a model, make a figure, run a manifest, get help. Each tool covers one task end to end.
+- **`full` profile:** everything, as today.
+- **`review` profile:** concordance review and rule tools only, for reviewer agents.
+- Selected with `python mcp_server.py --profile core` or an environment variable.
+
+### J2. Tool design rules (enforced by tests)
+
+- Descriptions: one sentence on what the tool does, one line per parameter, one example call; length budget enforced by a test.
+- Flat parameters with enums instead of free text where possible; no nested objects in the core profile.
+- Every result starts with a short `summary` sentence and, on success or failure, a `next_step` suggestion naming the tool to call next.
+- Errors: a fixed set of codes (already in place) plus a plain-language fix.
+- Large results are written to files and summarized; the tool returns the path and a preview, never thousands of rows.
+
+### J3. Workflow recipes
+
+Short, numbered recipes (for example "compare a rate between two counties", "map-free tract trend test", "pre-registered regression") returned by a `get_recipe` tool, so a small model follows steps instead of planning from scratch.
+
+### J4. Local-model evaluation harness
+
+- A scripted benchmark of tasks with known correct outcomes (for example "What was the poverty rate in Travis County in 2023, with its MOE?", "Is the change in median rent between 2018 and 2023 in county X significant?", "Fit the pre-registered model in this manifest").
+- Runs an MCP client against a local model through an OpenAI-compatible endpoint (Ollama and most local servers expose one), scores tool choice, argument correctness, and final answers, and writes `docs/audits/local_model_eval.md`.
+- Target: at least one widely available open-weights model in the 7–14B range completes the core recipes reliably (decision 7). The harness is model-agnostic so results can be compared across models.
+- The harness itself is optional to run (it needs a local model server) and is not part of CI.
+
+### J5. No Claude-specific dependencies
+
+The server, docs, and recipes avoid assumptions about a particular client: standard MCP over stdio, plain JSON results, and setup instructions for common local MCP clients alongside Claude Code.
 
 ## 11. Out of scope (Round 9 and later)
 
@@ -207,8 +288,11 @@ PHASE 8c: Discipline and proof
   c.1 manifests and methods-section generation (D)
   c.2 coverage studies and reference results for every method (F)
 
-PHASE 8d: Interface
-  d.1 MCP tools, CLI, protocol docs, README (H)
+PHASE 8d: Outputs and interface
+  d.1 figures, correlation matrices, tables, results bundles (I)
+  d.2 MCP tools, CLI, protocol docs, README (H)
+  d.3 tool profiles, design-rule tests, recipes (J1-J3)
+  d.4 local-model evaluation harness and first report (J4)
 ```
 
 8a comes first because every model consumes the analysis frame and every method is validated with the simulation harness.
@@ -217,13 +301,15 @@ PHASE 8d: Interface
 
 ## 13. Decisions
 
-| # | Question | Recommended default |
+| # | Question | Decision |
 | :--- | :--- | :--- |
-| 1 | Dependencies: `statsmodels`/`scipy` required, or an optional `inference` extra? | Optional extra (`requirements-inference.txt`); the data pipeline stays light, and inference tools return a clear error naming the extra when it is missing |
-| 2 | How to combine replicate (sampling) variance with model variance in regression | Report both and a total equal to their sum, with a note. The sampling component alone answers "how much would this coefficient change with a different ACS sample"; the total is conservative |
-| 3 | Where pre-registration hashes are recorded | In the repository (a commit containing the manifest) by default; external timestamping (for example OSF) optional and documented |
-| 4 | High-CV observations in models | Keep them and report the screen by default, since dropping noisy areas biases samples toward large places; a manifest can choose exclusion explicitly |
-| 5 | Validation target for Fay–Herriot | Published reference results (R `sae` package worked examples) reproduced in Python, without adding R as a dependency |
+| 1 | Dependencies | **Decided:** lean on established libraries as required dependencies: `scipy` (statistics), `statsmodels` (regression, GLMs, mixed models, multiple testing), `matplotlib` (figures). Considered and not adopted as dependencies: `seaborn` (convenience over matplotlib; not needed), `scikit-learn` (prediction-oriented), `linearmodels` (panel/IV; revisit if needed), `samplics` (SAE and replicate weights; used only as a test-time cross-check if installed), `pingouin` (less established) |
+| 2 | Combining replicate and model variance | **Decided:** report both and a total equal to their sum, with a note |
+| 3 | Recording pre-registration hashes | **Decided:** commit the manifest to the repository; external timestamping (for example OSF) optional |
+| 4 | High-CV observations | **Decided:** keep and report by default; manifests may exclude explicitly |
+| 5 | Fay–Herriot validation | **Decided:** reproduce published `sae` worked examples in Python, without R |
+| 6 | Figure style | Default: a neutral journal style (serif-free sans fonts, colorblind-safe palette, grayscale-safe markers) with presets for one- and two-column widths; journal-specific presets added on request |
+| 7 | Local-model target | Default: evaluate with Ollama against at least one open-weights model in the 7–14B range with tool-calling support (for example a current Qwen or Llama instruct model), chosen at implementation from what is available; tell us if you already run a particular model |
 
 ---
 
@@ -236,3 +322,6 @@ PHASE 8d: Interface
 5. Fay–Herriot EBLUP and MSE reproduce a published reference result to its published precision.
 6. A manifest runs end to end from MCP or the CLI, its hash appears in every output, and runs outside it are labeled exploratory.
 7. The Round 7 validation battery still passes; CI stays green on Linux and Windows, Python 3.10–3.12.
+8. Figures are produced as vector files with a values CSV, caption, and provenance sidecar, and regenerate byte-identically from the same results.
+9. Correlation matrices report intervals and, when replicates exist, design-based standard errors.
+10. The `core` MCP profile passes the design-rule tests, and the local-model evaluation reports a completion rate for each core recipe with at least one local model.
