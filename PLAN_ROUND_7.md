@@ -2,7 +2,7 @@
 
 **Planning Round:** 7
 **Date:** 2026-11-02
-**Status:** Implemented (see section 16 for status and findings that revised this plan)
+**Status:** Complete: implemented, validated, reviewed, and merged (sections 16, 16a, 16b)
 **Branch:** `phase7/inference-ready-statistics` (from `phase6/vintage-safe-pipeline`)
 
 ---
@@ -377,6 +377,22 @@ All ten checks pass live and offline (`docs/audits/validation_report.md`).
 - **F5 income criterion, changed after the first live run.** The plan's criterion (85% of counties within 2%) was set before measurement; 2023 measured 84.1%, because B19001's brackets are much coarser than Census's internal $2,500 distribution in small counties. Since a calculation error would push medians outside Census's own sampling error, the criterion is now: median relative error under 1% and at least 98% of counties within the published MOE. The 2% share is still reported. This change was made after seeing the result and is recorded here so reviewers can judge it.
 - **F6** asserts the 0.5% tolerance only for items Census converts with one constant factor; in the 2019 Comparison Profile, Census re-derived medians rather than scaling them (implied factors 1.0747–1.0838), which no deflator can reproduce; those items are reported, not asserted.
 - **F7** asserts the 98% agreement rate on decidable tests only; 174 tests straddle z = 1.645 within the rounding of the published values and are listed with their z ranges.
+
+### 16b. Code review and CI (PR #1)
+
+CI on its first run found two environment problems, both fixed: MCP SDK 2.x renamed `FastMCP` (pinned `mcp>=1.2.0,<2`), and pandas 3 renamed its string dtype (test made version-agnostic). A high-effort code review of the full branch found ten issues, all fixed with regression tests in `tests/test_review_fixes.py`:
+
+- replicate median MOEs summed every row of a whole-state replicate file instead of the selected geographies;
+- same-period comparisons applied an overlap factor of sqrt(0), marking every difference significant;
+- `z_test` mishandled controlled, sentinel, and missing MOEs;
+- aggregated zero-variance groups and zero replicate denominators did not follow the VRE documentation (Examples 5 and 7);
+- panels could be renamed with another table's codebook;
+- the exact-boundary median rule used a relative tolerance that misfired for large totals;
+- the 2010 boundary-change check ignored GEOIDs that had lost leading zeros;
+- the Connecticut 2022 planning-region change produced no advisory unless a span also crossed 2020;
+- the `mcp` lower bound allowed versions without `FastMCP`.
+
+Final state: 460 tests pass offline on Linux and Windows, Python 3.10–3.12; the validation battery passes live and offline.
 
 ## 17. Acceptance criteria
 
