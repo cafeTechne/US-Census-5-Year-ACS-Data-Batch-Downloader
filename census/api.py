@@ -113,3 +113,4 @@ def fetch_census_data(
         place_code=place_code,
         county_code=county_code,
     )
+
