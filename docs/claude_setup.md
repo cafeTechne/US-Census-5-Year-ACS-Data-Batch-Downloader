@@ -6,28 +6,51 @@ This guide details how to integrate the US Census ACS Data Batch Downloader with
 
 ## 1. Overview of MCP Tools
 
-The `mcp_server.py` server exposes the following tools to Claude:
+The server sends **instructions** to the client describing the extraction and review workflow. `get_research_protocol` returns the full protocol ([agent_protocol.md](agent_protocol.md)).
 
-| Tool Name | Parameters | Description |
+**Protocol and discovery**
+
+| Tool | Key parameters | Purpose |
 | :--- | :--- | :--- |
-| `list_states` | None | Lists all 50 states and territories with 2-digit FIPS codes. |
-| `list_places` | `state_code` (str), `search` (str), `limit` (int) | Lists incorporated cities, towns, and CDPs for a state. |
-| `search_tables` | `query` (str), `limit` (int) | Searches ACS 5-year table groups by code (e.g. `B01001`) or keywords (e.g. `poverty`). |
-| `list_variables` | `table_code` (str), `limit` (int) | Retrieves variables and human-readable definitions for a table. |
-| `fetch_table_data` | `year` (int), `state_code` (str), `table_code` (str), `geo_level` (str), `place_code` (opt), `county_code` (opt) | Queries live Census API with formatted headers and returns JSON records. |
-| `batch_download` | `state_code`, `table_code`, `start_year`, `end_year`, `geo_level`, `place_codes` / `county_codes` / `zcta_codes` / `msa_codes` (opt), `output_format`, `output_dir` (opt), `dataset`, `clean_sentinels`, `compute_reliability`, `inflation_base_year`, `include_codebook`, `use_cache`, `slug_style` | Batch-downloads multi-year data to wide/melted CSVs, Excel, a tidy `(GEOID, Year)` panel CSV, or Parquet, with optional codebook and extraction metadata. |
-| `list_counties` | `state_code` (str), `year` (int) | Lists counties with 3-digit FIPS and 5-digit GEOIDs. |
-| `list_tracts` | `state_code` (str), `county_code` (str), `year` (int) | Lists all Census tracts in a county with 11-digit GEOIDs. |
-| `list_zctas` | `state_code` (opt), `county_code` (opt), `zip_code` (opt) | Lists ZCTAs in a state/county, or resolves a ZIP code to its county via `zip2fips.json`. |
-| `query_data_profile` | `profile_code` (`DP02`–`DP05`), `year`, `state_code`, `geo_level`, entity filters, `compute_reliability` | Queries the Data Profile endpoint (pre-computed percentages `*PE` with MOEs `*PM`). |
-| `calculate_cv` | `estimate`, `moe` | Standard error (MOE/1.645), CV %, reliability flag (High ≤15%, Moderate ≤30%, Low >30%), 90% bounds. |
-| `calculate_significance` | `est1`, `moe1`, `est2`, `moe2`, `confidence_level`, `year1`/`year2` (opt) | Two-tailed Z-test with p-value and verdict; applies the Census overlapping-period adjustment when years are given. |
-| `adjust_inflation` | `value`, `from_year`, `to_year` | Converts dollars between years using the BLS CPI-U annual average. |
-| `generate_codebook` | `table_code`, `year`, `dataset`, `include_moe`, `include_reliability`, `output_path` (opt) | Emits a data dictionary (code, slug, measurement type, description, concept, universe, unit). |
+| `get_research_protocol` | none | Full agent protocol: workflow, concordance modes, issue kinds, draft/review rules |
+| `list_states` | none | States and territories with FIPS codes |
+| `list_vintages` | `dataset`, `refresh` | Release years per dataset (archive, optionally the live catalog) |
+| `list_places` | `state_code`, `search`, `limit` | Places, cities, and CDPs in a state |
+| `list_counties` | `state_code`, `year` | Counties with FIPS and GEOIDs |
+| `list_tracts` | `state_code`, `county_code`, `year` | Tracts in a county with 11-digit GEOIDs |
+| `list_zctas` | `state_code`, `county_code`, `zip_code` | ZCTAs in a state or county, or ZIP to county resolution |
+| `search_tables` | `query`, `limit`, `year` | Detailed, profile, subject, and comparison tables by code or keyword |
+| `list_variables` | `table_code`, `year`, `limit` | A table's variables and labels in one release |
+| `describe_variable` | `code`, `year` | Label, concept, and universe of a code in one release |
 
-**Geography levels** (`geo_level`): `us`, `state`, `county`, `tract`, `place`, `zcta`, `msa` (CBSA).
-**Datasets** (inferred from the table code): `acs5` (B/C detailed), `profile` (DP), `subject` (S), `cprofile` (CP).
-**Query cache:** responses are stored in `.cache/census_cache.db` (override with `CENSUS_CACHE_PATH`; disable with `CENSUS_CACHE_DISABLED=1`).
+**Data**
+
+| Tool | Key parameters | Purpose |
+| :--- | :--- | :--- |
+| `fetch_table_data` | `year`, `state_code`, `table_code`, `geo_level`, entity codes, `compute_reliability` | One release, one geography, with that release's labels |
+| `query_data_profile` | `profile_code`, `year`, `state_code`, `geo_level` | DP02–DP05 with percentages (`*PE`/`*PM`) |
+| `plan_extraction` | same as `batch_download` | Dry run: calls, cached calls, `selection`, issues, `would_block`, advisories |
+| `batch_download` | `state_code`, `table_code`, `start_year`, `end_year`, `geo_level`, `variables`, entity codes, `output_format`, `concordance_mode`, `inflation_base_year`, `price_index`, `include_codebook`, … | Multi-year extraction to CSV, Excel, tidy panel, or Parquet, with concordance, codebook, and metadata |
+
+**Concordance review**
+
+| Tool | Key parameters | Purpose |
+| :--- | :--- | :--- |
+| `check_variable_concordance` | `table_code`, `start_year`, `end_year`, `variables`, `include_nonblocking` | How variables line up across releases, with issues and evidence |
+| `draft_crosswalk_override` | `table_code`, `entries` (`YEAR:CODE`), `decision`, `drafted_by`, `rationale`, `source_url`, `target_concept_id` | Step 1: generate evidence and draft rows |
+| `record_crosswalk_review` | `row`, `reviewed_by`, `table_code` | Step 2: a different reviewer (agent or human) approves; validated before writing |
+| `validate_crosswalks` | none | Check all override files against the review requirements |
+
+**Statistics**
+
+| Tool | Key parameters | Purpose |
+| :--- | :--- | :--- |
+| `calculate_cv` | `estimate`, `moe` | SE, CV %, reliability flag, 90% bounds |
+| `calculate_significance` | `est1`, `moe1`, `est2`, `moe2`, `confidence_level`, `year1`/`year2` | Two-tailed Z-test with the overlapping-period adjustment |
+| `adjust_inflation` | `value`, `from_year`, `to_year`, `index` | Constant dollars with R-CPI-U-RS (default) or CPI-U |
+| `generate_codebook` | `table_code`, `year`, `include_moe`, `include_reliability`, `output_path` | Data dictionary for one release |
+
+Failed results carry `success: false`, an `error_code`, and `error`. **Geography levels:** `us`, `state`, `county`, `tract`, `place`, `zcta`, `msa`. **Datasets** (inferred): `acs5`, `profile`, `subject`, `cprofile`. **Query cache:** `.cache/census_cache.db` (`CENSUS_CACHE_PATH`, `CENSUS_CACHE_DISABLED=1`).
 
 ---
 
@@ -123,6 +146,8 @@ Once connected in Claude Code or Claude Desktop, you can ask questions directly:
 - *"Download table B01001 for Austin, Texas from 2018 to 2022 and export it as an Excel spreadsheet."*
 - *"Download median household income (B19013) for every tract in Travis County, TX from 2015 to 2022 as Parquet, in constant 2022 dollars, with CVs and a codebook."*
 - *"Is the change in Austin's median household income between the 2017 and 2022 ACS statistically significant?"*
+- *"Plan a 2015–2022 panel of DP02 average household size for all New York counties, review any concordance issues, and download it as Parquet."*
+- *"Draft an override for the B27001 age-band change in 2017; then, in a separate session, review and record it."*
 - *"Pull the DP03 economic profile for all counties in Ohio and flag estimates with low reliability."*
 - *"Which ZCTAs are in Manhattan (county 36061)? Get B01003 total population for them."*
 
