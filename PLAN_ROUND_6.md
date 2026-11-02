@@ -2,7 +2,8 @@
 
 **Planning Round:** 6
 **Date:** 2026-11-01
-**Status:** Implemented on `phase6/vintage-safe-pipeline` (see section 13), with one owner action outstanding
+**Status:** Implemented on `phase6/vintage-safe-pipeline` (see section 13). No owner actions outstanding.
+**Revised:** 2026-11-02 (R-CPI-U-RS data imported; licensing and copyright holder confirmed)
 **Branch:** `phase6/vintage-safe-pipeline` (from `phase5/research-grade-pipeline`)
 
 ---
@@ -12,7 +13,7 @@
 Round 5 produced a working research pipeline, but two of its assumptions are unsafe for multi-year research:
 
 1. **A variable code is assumed to mean the same thing in every year.** Panels are keyed by variable code, and labels come from one metadata vintage (bundled 2021 `variables.json` for detailed tables, the final requested year for profile and subject tables). If the Census Bureau renumbers a Data Profile or Subject table line, or reuses a code for a different measure, the panel silently merges different quantities into one column, or splits one quantity across two columns. Nothing in the output reveals this.
-2. **Constant dollars use CPI-U.** The Census Bureau uses CPI-U-RS for its own cross-year income comparisons. Our adjusted values will therefore not match Census-published comparisons.
+2. **Constant dollars use CPI-U.** The Census Bureau uses R-CPI-U-RS for all ACS years (its CPS-based income reports switched to C-CPI-U in 2023; ACS did not). Our adjusted values will therefore not match Census-published ACS comparisons.
 
 Round 6 fixes both and treats agents (MCP and CLI) as the primary interface. The GUI moves to maintenance mode.
 
@@ -173,12 +174,14 @@ The Census Bureau adjusts historical income for inflation with the CPI-U-RS rese
 
 ### B4. Year coverage
 
-R-CPI-U-RS annual values are published the spring after each year, before the corresponding ACS 5-year release, so coverage should not lag. If a needed year is missing, the run fails with a structured error (`PRICE_INDEX_YEAR_MISSING`) that names the update script.
+R-CPI-U-RS annual values are published the spring after each year, before the corresponding ACS 5-year release, so coverage should not lag. If a needed year is missing, the run fails with `PRICE_INDEX_UNAVAILABLE`, naming the update script.
+
+**Incomplete years.** BLS did not publish October 2025 (lapse in appropriations) and never will. The R-CPI-U-RS workbook nonetheless shows a 2025 average computed from 11 months. The importer excludes any year with an unpublished month, for both indexes, so 2025 is currently unavailable. This must be resolved before the 2025 ACS 5-year release can be deflated; see section 8.
 
 ### B5. Verification
 
-- Cross-check at least two adjustment factors against a Census Bureau publication that states its CPI-U-RS factors (to be identified during implementation; for example, an Income in the United States report table).
-- Confirm in Census documentation whether within-period ACS income is already adjusted with CPI-U-RS, and document the answer.
+- Confirmed: Census's [current vs. constant dollars guidance](https://census.gov/topics/income-poverty/income/guidance/current-vs-constant-dollars.html) states that for ACS "the Census Bureau continues to use the R-CPI-U-RS for all years", while CPS ASEC income uses C-CPI-U from 2000 onward ([Census blog, 2023](https://census.gov/newsroom/blogs/research-matters/2023/09/inflation-income-and-earnings-estimates.html)).
+- Open: cross-check at least two adjustment factors against a Census-published ACS constant-dollar comparison (acceptance criterion 6). Carried to Round 7.
 
 ---
 
@@ -242,6 +245,11 @@ Extraction metadata adds the package version and git commit (when available), th
 
 - **Geographic crosswalks across the 2010/2020 boundary change.** This means apportioning tract-level estimates using Census relationship files (or LTDB/NHGIS weights), including MOE propagation for apportioned values. It is a large methodological project, and today's advisory is the interim measure.
 - ACS 1-year data and the decennial census.
+- **Table-scoped rule overrides** for the subject-table redesigns (about 12,000 `relabeled` items; see section 13).
+- **2025 price-index policy.** Before the 2025 ACS 5-year release, decide whether to accept BLS's 11-month 2025 R-CPI-U-RS average with an advisory (likely what Census itself will use) or keep 2025 unavailable. Recommendation: accept it with an advisory, once Census documents what it used for the 2025 ACS.
+- **Optional C-CPI-U index**, for users who want to match CPS ASEC income reports.
+- **Acceptance criterion 6:** cross-check factors against a Census-published ACS constant-dollar comparison.
+- `CITATION.cff` and a README attribution section.
 - Derived ratio and proportion MOE formulas beyond sums.
 
 ---
@@ -287,7 +295,7 @@ PHASE 6d: Agent interface and validation
 3. A known renumbering from the audit yields one continuous column. A known code reuse yields two columns.
 4. Under the default `fail` mode, any unresolved drift item or continuity flag affecting the selected variables stops the run. Under `strict`, every such item appears in `concordance_issues`.
 5. Every `merge` override in `crosswalks/` passes the five review requirements in A5, enforced by CI.
-6. Constant-dollar values match a Census-published CPI-U-RS factor to within rounding.
+6. Constant-dollar values match a Census-published R-CPI-U-RS factor to within rounding. (Open; carried to Round 7.)
 7. Price-index data is reproducible from `update_price_indexes.py` and matches its recorded checksum.
 8. An agent can go from a plain-language request to a planned, reviewed, and executed extraction through MCP or the CLI alone.
 
@@ -304,6 +312,8 @@ PHASE 6d: Agent interface and validation
 | 4 | Interim behavior | Superseded: the full concordance shipped in this round. Single-year pulls never block, and agents may collate them, checking codes with `describe_variable` / `check_variable_concordance` against the archive | A6 |
 | 5 | License | AGPL-3.0-or-later with a Contributor License Agreement (`LICENSE`, `CLA.md`, `CONTRIBUTING.md`) | 12 |
 | 6 | Bare codes in `variables=` | Resolve in the latest requested year; `YEAR:CODE` pins a vintage, because a code can denote different measures in different years | A6 |
+| 7 | Copyright holder and CLA | Copyright holder is `cafeTechne` (the project's GitHub account). `CLA.md` is adopted as written | 12 |
+| 8 | Years with an unpublished month | Excluded from both price indexes, including BLS's 11-month 2025 R-CPI-U-RS average. Revisit before the 2025 ACS release (section 8) | B4 |
 
 ## 12. Licensing (decided: AGPL-3.0-or-later with a CLA; not legal advice)
 
@@ -325,7 +335,7 @@ Every common license, including permissive ones, already requires forks to keep 
 - a **`CITATION.cff`** file, so academic users cite the project, which matters more for research credit than the license itself;
 - a `NOTICE` or README attribution section naming the original author.
 
-Choosing and adding the license is an owner action and is not part of the implementation tasks.
+**Adopted (2026-11-02):** AGPL-3.0-or-later (`LICENSE`), the CLA in `CLA.md` as written, and `CONTRIBUTING.md`. The copyright holder is `cafeTechne`. `CITATION.cff` and a README attribution section remain recommended and are listed for Round 7.
 
 ## 13. Implementation status
 
@@ -340,7 +350,8 @@ Choosing and adding the license is an owner action and is not part of the implem
 | A7 audit | Done | `docs/audits/concordance_audit.md` (detail CSV is regenerable and gitignored) |
 | A8 tests | Done | Real fixtures: DP02 2018→2019 renumbering and code reuse; B27001 2016→2017 age-band change |
 | A9 continuity | Done | National Z-test plus magnitude thresholds; unverifiable merged concepts block |
-| B R-CPI-U-RS | Code done; **data pending owner action** | BLS blocks anonymous downloads of the Excel file. Download it in a browser and run `scripts/update_price_indexes.py --r-cpi-u-rs-xlsx <file>`. CPI-U comes from the BLS API (computed values match published ones to ±0.001; 2025 omitted because October 2025 was not published) |
+| B R-CPI-U-RS | Done | `data/price_indexes/r_cpi_u_rs.csv` (2000–2024) imported from the BLS workbook, which is kept in `data/price_indexes/source/` with its SHA-256 in the sidecar. 2025 excluded (October 2025 unpublished; the workbook's 11-month average is not used). CPI-U comes from the BLS API (computed values match published ones to ±0.001). Example: 2019 to 2024 factor is 1.2307 (R-CPI-U-RS) vs. 1.2270 (CPI-U) |
+| B5 verification | Partly done | ACS index choice confirmed in Census guidance; factor cross-check against a Census publication still open |
 | B5 home values | Done | Advisory for pre-2022 home-value tables (ACS user note 2023-07) |
 | C1–C5 agent interface | Done | `plan_extraction`, 22 MCP tools with server instructions, error codes, `python -m census`, provenance |
 | D validation | Done | `tests/test_live.py` (opt-in); all live contracts pass |

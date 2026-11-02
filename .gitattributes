@@ -1,0 +1,6 @@
+# Checksummed data: store byte-for-byte so SHA-256 sidecars match on every OS.
+data/price_indexes/*.csv -text
+data/price_indexes/*.json -text
+crosswalks/evidence/** -text
+*.xlsx binary
+*.gz binary

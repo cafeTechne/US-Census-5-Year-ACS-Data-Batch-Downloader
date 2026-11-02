@@ -1,0 +1,19 @@
+{
+  "name": "R-CPI-U-RS",
+  "description": "Retroactive CPI-U research series, all items (used by the Census Bureau for ACS inflation adjustment)",
+  "base_period": "December 1977=100",
+  "source": "https://www.bls.gov/cpi/research-series/r-cpi-u-rs-allitems.xlsx (downloaded manually)",
+  "method": "annual average column (AVG) from the BLS workbook, rounded to 3 decimals",
+  "retrieved_at": "2026-11-02T13:17:49+00:00",
+  "raw_sha256": "355ea8a14a6d07d777a17a1ddad526b8a199390a7c1bb8c7b58e2dec1a2544d8",
+  "raw_file": "data/price_indexes/source/r-cpi-u-rs-allitems.xlsx",
+  "unpublished_months": [
+    "2025-M10"
+  ],
+  "note": "Years with an unpublished month are excluded even if the workbook shows an AVG.",
+  "csv_sha256": "81662daf352fcf7d293f59dd56e9927a9eeee4fecf4bff2927d67f37e6431127",
+  "years": [
+    2000,
+    2024
+  ]
+}

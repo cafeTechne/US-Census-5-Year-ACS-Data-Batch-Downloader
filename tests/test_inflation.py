@@ -53,6 +53,46 @@ class TestVendoredCPIU(unittest.TestCase):
         years = sorted(load_price_index(CPI_U))
         self.assertEqual(years, list(range(years[0], years[-1] + 1)))
 
+    def test_r_cpi_u_rs_vendored(self):
+        path = os.path.join(price_index_dir(), "r_cpi_u_rs.csv")
+        with open(path, "rb") as f:
+            raw = f.read()
+        with open(os.path.join(price_index_dir(), "r_cpi_u_rs.json"), encoding="utf-8") as f:
+            sidecar = json.load(f)
+        self.assertNotIn(b"\r\n", raw)  # checksum must hold on every OS
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), sidecar["csv_sha256"])
+        index = load_price_index(R_CPI_U_RS)
+        years = sorted(index)
+        self.assertEqual(years, list(range(years[0], years[-1] + 1)))
+        # BLS workbook AVG column (December 1977=100)
+        self.assertAlmostEqual(index[2010], 319.8)
+        self.assertAlmostEqual(index[2022], 431.460)
+        self.assertNotIn(2025, index)  # October 2025 never published
+
+    def test_r_cpi_u_rs_parser_excludes_incomplete_years(self):
+        import importlib.util
+        import io
+
+        import openpyxl
+
+        spec = importlib.util.spec_from_file_location(
+            "update_price_indexes",
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "update_price_indexes.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Consumer Price Index Retroactive Series (R-CPI-U-RS)"])
+        ws.append(["YEAR", "JAN", "FEB", "MAR", "APR", "MAY", "JUNE", "JULY", "AUG", "SEP", "OCT", "NOV", "DEC", "AVG"])
+        ws.append([2024] + [460.0] * 12 + [460.0])
+        ws.append([2025] + [470.0] * 9 + ["-"] + [470.0] * 2 + [470.0])
+        buf = io.BytesIO()
+        wb.save(buf)
+        values, missing = module.parse_r_cpi_u_rs(buf.getvalue())
+        self.assertEqual(values, {2024: 460.0})
+        self.assertEqual(missing, ["2025-M10"])
+
     def test_cpi_u_conversion(self):
         cpi = load_price_index(CPI_U)
         adjusted = adjust_inflation(50000, 2010, 2022, index=CPI_U)

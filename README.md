@@ -23,13 +23,15 @@ cd US-Census-5-Year-ACS-Data-Batch-Downloader
 pip install -r requirements.txt
 ```
 
-**One-time step for constant-dollar conversion.** R-CPI-U-RS is published by BLS only as an Excel file, and BLS blocks anonymous scripted downloads. Download `https://www.bls.gov/cpi/research-series/r-cpi-u-rs-allitems.xlsx` in a browser, then run:
+Price-index data (R-CPI-U-RS and CPI-U, 2000–2024) ships with the repository, so constant-dollar conversion works out of the box.
+
+**Refreshing R-CPI-U-RS** (once a year, after BLS publishes a new annual average). BLS publishes the series only as an Excel file and blocks anonymous scripted downloads. Download `https://www.bls.gov/cpi/research-series/r-cpi-u-rs-allitems.xlsx` in a browser, save it over `data/price_indexes/source/r-cpi-u-rs-allitems.xlsx`, and run:
 
 ```bash
-python scripts/update_price_indexes.py --r-cpi-u-rs-xlsx path/to/r-cpi-u-rs-allitems.xlsx
+python scripts/update_price_indexes.py --r-cpi-u-rs-xlsx data/price_indexes/source/r-cpi-u-rs-allitems.xlsx
 ```
 
-Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a contact email (BLS's requirement for automated clients) and run the script without arguments. Until this is done, constant-dollar requests fail with `PRICE_INDEX_UNAVAILABLE`, unless `price_index="cpi-u"` is chosen.
+Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a contact email (BLS's requirement for automated clients) and run the script without arguments. A year the index does not cover fails with `PRICE_INDEX_UNAVAILABLE`.
 
 ## Configuration
 
@@ -162,7 +164,7 @@ Every run also writes `<table>_extraction_metadata.json`. It records the request
 | Sentinel values | Census jam values (`-999999999`, `-666666666`, …) become null | `census.stats.clean_census_sentinels` |
 | Constant dollars | `real = nominal × index_base / index_year` on dollar-valued estimates and MOEs (not counts in dollar brackets); default R-CPI-U-RS, optional CPI-U | `census.inflation.deflate_dataframe` |
 
-Price indexes live in `data/price_indexes/` and are generated from BLS sources by `scripts/update_price_indexes.py`, with checksums. CPI-U annual averages are computed from monthly values (they match BLS's published averages to ±0.001). 2025 is omitted because BLS did not publish October 2025.
+Price indexes live in `data/price_indexes/` and are generated from BLS sources by `scripts/update_price_indexes.py`, with checksums. R-CPI-U-RS values are the workbook's annual averages; the source workbook is kept in `data/price_indexes/source/` and its SHA-256 is recorded. CPI-U annual averages are computed from monthly values (they match BLS's published averages to ±0.001). 2025 is omitted from both because BLS did not publish October 2025; the R-CPI-U-RS workbook shows an 11-month 2025 average, which is deliberately not used. The Census Bureau switched its CPS income reports to C-CPI-U in 2023 but still uses R-CPI-U-RS for all ACS years.
 
 ## Advisories and known limitations
 

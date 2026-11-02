@@ -17,7 +17,8 @@ BLS blocks anonymous scripted downloads. Either:
 
 Usage:
     python scripts/update_price_indexes.py                         # CPI-U only
-    python scripts/update_price_indexes.py --r-cpi-u-rs-xlsx r.xlsx
+    python scripts/update_price_indexes.py --skip-cpi-u \
+        --r-cpi-u-rs-xlsx data/price_indexes/source/r-cpi-u-rs-allitems.xlsx
 """
 
 import argparse
@@ -50,14 +51,14 @@ def write_index(name: str, values: Dict[int, float], sidecar: Dict) -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, f"{name}.csv")
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerow(["year", "value"])
         for year in sorted(values):
             writer.writerow([year, f"{values[year]:.3f}"])
     with open(path, "rb") as f:
         sidecar["csv_sha256"] = hashlib.sha256(f.read()).hexdigest()
     sidecar["years"] = [min(values), max(values)]
-    with open(os.path.join(OUT_DIR, f"{name}.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(OUT_DIR, f"{name}.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(sidecar, f, indent=2)
         f.write("\n")
     print(f"wrote {path}: {min(values)}-{max(values)}")
@@ -97,8 +98,13 @@ def fetch_cpi_u() -> Tuple[Dict[int, float], List[str]]:
     return annual, digests
 
 
-def parse_r_cpi_u_rs(raw: bytes) -> Dict[int, float]:
-    """Read the annual average column from the BLS R-CPI-U-RS workbook."""
+def parse_r_cpi_u_rs(raw: bytes) -> Tuple[Dict[int, float], List[str]]:
+    """Read the annual average column from the BLS R-CPI-U-RS workbook.
+
+    Years with an unpublished month are excluded, even when the workbook shows
+    an AVG for them (BLS averaged 11 months for 2025), to match the CPI-U rule.
+    Returns (values, unpublished months as "YYYY-MNN").
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
@@ -106,6 +112,7 @@ def parse_r_cpi_u_rs(raw: bytes) -> Dict[int, float]:
     header_idx = None
     year_col = avg_col = None
     values: Dict[int, float] = {}
+    missing: List[str] = []
     for idx, row in enumerate(ws.iter_rows(values_only=True)):
         cells = [str(c).strip().upper() if c is not None else "" for c in row]
         if header_idx is None:
@@ -119,10 +126,18 @@ def parse_r_cpi_u_rs(raw: bytes) -> Dict[int, float]:
             value = float(row[avg_col])
         except (TypeError, ValueError):
             continue
+        gaps = [
+            f"{year}-M{m:02d}"
+            for m, cell in enumerate(row[year_col + 1 : avg_col], start=1)
+            if not isinstance(cell, (int, float))
+        ]
+        if gaps:
+            missing.extend(gaps)
+            continue
         values[year] = round(value, 3)
     if not values:
         raise RuntimeError("Could not find YEAR and AVG columns in the R-CPI-U-RS workbook.")
-    return values
+    return values, missing
 
 
 def main() -> int:
@@ -167,17 +182,21 @@ def main() -> int:
             file=sys.stderr,
         )
     if raw is not None:
+        r_values, r_missing = parse_r_cpi_u_rs(raw)
         write_index(
             "r_cpi_u_rs",
-            parse_r_cpi_u_rs(raw),
+            {y: v for y, v in r_values.items() if y >= START_YEAR},
             {
                 "name": "R-CPI-U-RS",
                 "description": "Retroactive CPI-U research series, all items (used by the Census Bureau for ACS inflation adjustment)",
                 "base_period": "December 1977=100",
                 "source": source,
-                "method": "annual average column (AVG) from the BLS workbook",
+                "method": "annual average column (AVG) from the BLS workbook, rounded to 3 decimals",
                 "retrieved_at": _now(),
                 "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                "raw_file": "data/price_indexes/source/r-cpi-u-rs-allitems.xlsx",
+                "unpublished_months": r_missing,
+                "note": "Years with an unpublished month are excluded even if the workbook shows an AVG.",
             },
         )
     return 0
