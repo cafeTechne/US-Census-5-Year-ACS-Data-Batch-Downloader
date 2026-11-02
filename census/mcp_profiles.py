@@ -16,6 +16,7 @@ The library functions are not changed; overrides live here only.
 
 import functools
 import inspect
+import math
 import os
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -200,13 +201,30 @@ def tools_for(profile: str, available: Sequence[str]) -> List[str]:
     return [name for name in wanted if name in have]
 
 
+def _fmt(value: Any, spec: str) -> Optional[str]:
+    """Format a number, or None when it is missing/NaN/non-numeric."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return format(v, spec) if math.isfinite(v) else None
+
+
 def _summary_for(name: str, out: Dict[str, Any]) -> str:
     if out.get("success") is False:
         return str(out.get("error") or "The call failed.")
     if name == "derive_estimate" and "estimate" in out:
-        return f"{out.get('method')} estimate {out['estimate']:.4g} with 90% MOE {out.get('moe', float('nan')):.4g}."
+        est, moe = _fmt(out.get("estimate"), ".4g"), _fmt(out.get("moe"), ".4g")
+        if est is None:
+            return f"{out.get('method')} estimate undefined (see notes)."
+        moe_txt = f"90% MOE {moe}" if moe is not None else "MOE undefined (see notes)"
+        return f"{out.get('method')} estimate {est} with {moe_txt}."
     if name == "calculate_significance" and "verdict" in out:
-        return f"Difference {out.get('difference', 0):.4g} (p={out.get('p_value', 0):.3g}). {out['verdict']}"
+        diff, p = _fmt(out.get("difference"), ".4g"), _fmt(out.get("p_value"), ".3g")
+        if diff is None:
+            return f"Difference undefined (see notes). {out['verdict']}"
+        p_txt = f"p={p}" if p is not None else "p undefined"
+        return f"Difference {diff} ({p_txt}). {out['verdict']}"
     if name == "plan_extraction" and "would_block" in out:
         return f"Plan ready; would_block={out['would_block']}."
     if "count" in out and "results" in out:

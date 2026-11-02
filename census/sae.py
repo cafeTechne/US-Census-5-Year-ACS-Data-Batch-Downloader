@@ -92,8 +92,22 @@ def _fh_moment_eq(A: float, y, X, D) -> float:
 
 def _maximize(fun, upper: float) -> float:
     """Maximize a 1-D function of A on [0, upper]: log grid, then bounded refine."""
+    raw = fun
+
+    def fun(a: float) -> float:
+        # An area with D_i = 0 (controlled estimate) makes the likelihood
+        # undefined at A = 0 (zero total variance); treat non-finite as -inf.
+        with np.errstate(all="ignore"):
+            try:
+                v = raw(a)
+            except np.linalg.LinAlgError:
+                return -np.inf
+        return v if np.isfinite(v) else -np.inf
+
     grid = np.concatenate([[0.0], np.geomspace(upper * 1e-8, upper, 400)])
     vals = np.array([fun(a) for a in grid])
+    if not np.isfinite(vals).any():
+        return 0.0
     k = int(np.argmax(vals))
     lo = grid[max(k - 1, 0)]
     hi = grid[min(k + 1, len(grid) - 1)]

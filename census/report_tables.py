@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .models import interval_se_column
 from .multitest import adjust_pvalues
 from .results import CorrelationResult, ModelResult
 from .variance import Z90
@@ -172,6 +173,7 @@ def regression_table(
             p_adj[fam] = np.asarray(adjust_pvalues(p[fam], correction), dtype=float)
         else:
             p_adj = p.copy()
+        se_col = interval_se_column(res)
         for i, row in c.iterrows():
             t = str(row["term"])
             if t not in terms:
@@ -179,7 +181,8 @@ def regression_table(
             data_rows.append({"model": mname, "term": t, "estimate": row["estimate"],
                               "se_model": row.get("se_model"), "se_sampling": row.get("se_sampling"),
                               "se_total": row.get("se_total"), "ci_lower": row["ci_lower"],
-                              "ci_upper": row["ci_upper"], "p_value": p[i], "p_adjusted": p_adj[i],
+                              "ci_upper": row["ci_upper"], "se_basis": se_col,
+                              "se_reported": row.get(se_col), "p_value": p[i], "p_adjusted": p_adj[i],
                               "marker": stars(p_adj[i]), "confidence_level": res.confidence_level,
                               "method": res.method, "n_obs": res.n_obs})
     data = pd.DataFrame(data_rows)
@@ -194,7 +197,7 @@ def regression_table(
                 continue
             r = r.iloc[0]
             top[m] = _fmt(r["estimate"], digits) + r["marker"]
-            bottom[m] = (f"({_fmt(r['se_total'], digits)})" if uncertainty == "se"
+            bottom[m] = (f"({_fmt(r['se_reported'], digits)})" if uncertainty == "se"
                          else f"[{_fmt(r['ci_lower'], digits)}, {_fmt(r['ci_upper'], digits)}]")
         disp += [top, bottom]
     disp.append({"Term": "N", **{m: f"{results[m].n_obs:,}" for m in models}})
@@ -205,8 +208,9 @@ def regression_table(
         notes.append(f"{m}: {res.method}; {se_desc} include {', '.join(res.uncertainty_sources)}"
                      + (f" ({'; '.join(res.notes)})" if res.notes else "") + ".")
     if uncertainty == "se":
-        notes.append("Standard errors in parentheses (se_total; components se_model and "
-                     "se_sampling in the CSV).")
+        bases = sorted({interval_se_column(r) for r in results.values()})
+        notes.append(f"Standard errors in parentheses ({', '.join(bases)}: the SE behind each model's "
+                     "p-values and intervals; se_model, se_sampling and se_total are in the CSV).")
     else:
         notes.append("Confidence intervals in brackets.")
     notes.append(_star_note(correction, "across each model's coefficients"

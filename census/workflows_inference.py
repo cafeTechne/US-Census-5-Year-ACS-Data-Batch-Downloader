@@ -11,10 +11,21 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from census import errors
 from census.workflows import ROOT, _jsonable, _load_frame, _records, _replicates_for, _write_frame
+
+try:  # statsmodels formulas raise patsy errors for bad formulas
+    from patsy import PatsyError as _PatsyError
+except ImportError:  # pragma: no cover
+    class _PatsyError(Exception):
+        pass
+
+# Errors from user input or numerically degenerate data -> INVALID_INPUT.
+_INPUT_ERRORS = (FileNotFoundError, OSError, KeyError, ValueError, TypeError, RuntimeError,
+                 ZeroDivisionError, np.linalg.LinAlgError, _PatsyError)
 
 _MODEL_METHODS = ("replicate", "regression_calibration", "simex", "fay_herriot")
 _FIGURE_KINDS = ("estimates", "forest", "trend")
@@ -82,17 +93,18 @@ def build_analysis_frame(
             rep = _replicates_for(table_code, year, df, list(df["GEOID"].astype(str)))
             frame, replicates = attach_replicates(frame, rep, derive=derive)
         report = coverage_report(frame, replicates)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     path = _write_frame(frame, output_path or os.path.join(ROOT, "downloads", "analysis_frame.parquet"),
                         "analysis_frame.parquet")
     rep_path = None
     if replicates is not None:
         rep_path = os.path.splitext(path)[0] + "_replicates.parquet"
         replicates.to_parquet(rep_path, index=False)
-    noisy = int((report.get("share_low_reliability", pd.Series(dtype=float)) > 0.25).sum()) if len(report) else 0
+    noisy = int((report.get("share_cv_over_threshold", pd.Series(dtype=float)) > 0.25).sum()) if len(report) else 0
     return _ok(
-        f"Analysis frame with {len(frame)} rows written; {noisy} variable(s) have over 25% low-reliability rows.",
+        f"Analysis frame with {len(frame)} rows written; {noisy} variable(s) have over 25% of rows with CV above the reliability threshold.",
         "fit_model (or correlation_matrix) with input_path=output_path"
         + (" and replicates_path" if rep_path else ""),
         output_path=path, replicates_path=rep_path, coverage=_records(report),
@@ -110,6 +122,9 @@ def fit_model(
     confidence_level: float = 0.90,
     figure_dir: Optional[str] = None,
     target: str = "population",
+    weights: Optional[str] = None,
+    exposure: Optional[str] = None,
+    trials: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fit a regression whose standard errors account for ACS sampling error.
 
@@ -128,7 +143,11 @@ def fit_model(
         se_col: Outcome SE column (fay_herriot).
         confidence_level: 0.90 matches ACS margins of error.
         figure_dir: Also write a coefficient plot here.
+        weights: Weight column (model="wls").
+        exposure: Exposure column (model="poisson"/"negbin").
+        trials: Trials column (model="binomial"; default effective sample size).
 
+    target applies to method="replicate" only; corrected methods report se_total.
     Results report se_model, se_sampling, se_total and which sources are included.
     Example: fit_model("downloads/analysis_frame.parquet", "rate ~ rent", replicates_path="...")
     """
@@ -136,22 +155,32 @@ def fit_model(
 
     if method not in _MODEL_METHODS:
         return _fail(errors.INVALID_INPUT, f"method must be one of {_MODEL_METHODS}.")
+    if method != "replicate" and target != "population":
+        return _fail(errors.INVALID_INPUT,
+                     f"target applies only to method='replicate'; {method} reports se_total.",
+                     "call fit_model again without target")
+    if method == "fay_herriot" and (weights or exposure or trials or model != "ols"):
+        return _fail(errors.INVALID_INPUT,
+                     "fay_herriot is a linear model with its own weights; model/weights/exposure/trials do not apply.",
+                     "call fit_model again without model, weights, exposure, trials")
+    extra = {"weights": weights, "exposure": exposure, "trials": trials}
     try:
         frame = _load_frame(input_path)
         if method == "replicate":
             result = models.fit_replicate(formula, frame, _read_replicates(replicates_path), model=model,
-                                          confidence_level=confidence_level, target=target)
+                                          confidence_level=confidence_level, target=target, **extra)
         elif method in ("regression_calibration", "simex"):
             if not error_covariates:
                 return _fail(errors.INVALID_INPUT, f"{method} needs error_covariates.")
             fn = models.regression_calibration if method == "regression_calibration" else models.simex
-            result = fn(formula, frame, error_covariates, model=model, confidence_level=confidence_level)
+            result = fn(formula, frame, error_covariates, model=model, confidence_level=confidence_level, **extra)
         else:
             if not se_col:
                 return _fail(errors.INVALID_INPUT, "fay_herriot needs se_col (the outcome's SE column).")
             result = sae.fh_regression(formula, frame, se_col, confidence_level=confidence_level)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     out = result.to_dict()
     if figure_dir:
         from census.figures import coefficient_plot
@@ -191,8 +220,9 @@ def small_area_estimates(
 
     try:
         res = fay_herriot(formula, _load_frame(input_path), se_col, method=method)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     path = _write_frame(res.estimates, output_path, "small_area_estimates.csv")
     payload: Dict[str, Any] = {"output_path": path, "sigma2_u": res.sigma2_u,
                                "coefficients": res.coefficients, "notes": res.notes,
@@ -236,8 +266,9 @@ def correlation_matrix(
     try:
         res = _corr(_load_frame(input_path), variables, method=method,
                     replicates=_read_replicates(replicates_path), disattenuate=disattenuate)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     payload = res.to_dict()
     if figure_dir:
         from census.figures import correlation_heatmap
@@ -282,8 +313,9 @@ def reliability_profile(input_path: str, variables: Optional[List[str]] = None) 
 
     try:
         res = _profile(_load_frame(input_path), variables)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     return _ok(f"Reliability profile for {len(res)} variable(s).",
                "build_analysis_frame with the reliable variables", profile=_records(res))
 
@@ -394,8 +426,9 @@ def make_table(kind: str, input_path: str, output_dir: Optional[str] = None,
         else:
             return _fail(errors.INVALID_INPUT, "kind must be 'descriptive' or 'comparison'.")
         written = table.write(folder, name)
-    except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except _INPUT_ERRORS as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                     "check the formula, column names, and input file, then retry")
     files = list(written.values()) if isinstance(written, dict) else written
     return _ok(f"Wrote {kind} table '{name}'.", "include the .tex or .md table in your write-up",
                table_paths=[str(p) for p in files], markdown=table.to_markdown())

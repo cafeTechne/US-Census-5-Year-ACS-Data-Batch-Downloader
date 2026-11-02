@@ -31,7 +31,7 @@ import pandas as pd
 
 from .aggregate import normalize_geoid
 from .derived import derive_columns, resolve_columns
-from .stats import CENSUS_SENTINELS, pair_estimates_and_moes, parse_variable_code
+from .stats import CENSUS_SENTINELS, moe_to_se, pair_estimates_and_moes, parse_variable_code
 from .variance import (
     METHOD_PUBLISHED,
     METHOD_REPLICATE,
@@ -138,8 +138,7 @@ def _clean(est: pd.Series, moe: Optional[pd.Series]) -> Tuple[np.ndarray, np.nda
     e = np.where(np.isin(e, sentinels), np.nan, e)
     if moe is None:
         return e, np.zeros_like(e)
-    m = pd.to_numeric(moe, errors="coerce").to_numpy(float)
-    se = np.where(m == CONTROLLED_MOE, 0.0, np.where((m < 0) | np.isin(m, sentinels), np.nan, m / Z90))
+    se = moe_to_se(moe, Z90)
     se = np.where(np.isfinite(e), se, np.nan)
     return e, se
 
@@ -286,12 +285,15 @@ def _rep_cube(frame: pd.DataFrame, reps: pd.DataFrame, keys: List[str], code: st
     return vals.T
 
 
-def _ratio_reps(num: np.ndarray, den: np.ndarray) -> np.ndarray:
+def _ratio_reps(num: np.ndarray, den: np.ndarray, zero_fill: bool = True) -> np.ndarray:
     with np.errstate(divide="ignore", invalid="ignore"):
         out = np.where(den != 0, num / den, np.nan)
-    full_ok = np.isfinite(out[0])
-    bad = ~np.isfinite(out[1:]) & full_ok[None, :]
-    out[1:][bad] = 0.0  # VRE documentation, Example 7
+    if zero_fill:
+        # VRE documentation, Example 7 (proportions/ratios). Not for percent
+        # change, where a 0 ratio would read as a -100% change.
+        full_ok = np.isfinite(out[0])
+        bad = ~np.isfinite(out[1:]) & full_ok[None, :]
+        out[1:][bad] = 0.0
     return out
 
 
@@ -314,7 +316,7 @@ def _eval_spec_replicates(entry: Mapping[str, Any], get) -> np.ndarray:
     if op == "product":
         return x * y
     if op == "percent_change":
-        return 100.0 * (_ratio_reps(x, y) - 1.0)
+        return 100.0 * (_ratio_reps(x, y, zero_fill=False) - 1.0)
     raise ValueError(f"unsupported op {op!r} for replicate evaluation")
 
 

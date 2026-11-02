@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 import pandas as pd
 
 from census.inflation import is_dollar_variable
-from census.stats import ACS_MOE_Z, BASE_PATTERN, CENSUS_SENTINELS, MEASUREMENT_TYPES, parse_variable_code
+from census.stats import ACS_MOE_Z, BASE_PATTERN, MEASUREMENT_TYPES, moe_to_se, parse_variable_code
 
 IDENTIFIER_COLUMNS: Dict[str, str] = {
     "GEOID": "Standard Census GEOID (TIGER/Line join key)",
@@ -446,8 +446,6 @@ def build_tidy_panel(
 
 def _add_se_columns(panel: pd.DataFrame) -> pd.DataFrame:
     """Insert ``<key>_SE`` after each ``<base>M`` / ``<base>PM`` column lacking one."""
-    controlled = -555555555
-    sentinels = [float(k) for k in CENSUS_SENTINELS]
     cols: List[str] = []
     new: Dict[str, pd.Series] = {}
     for col in panel.columns:
@@ -459,9 +457,7 @@ def _add_se_columns(panel: pd.DataFrame) -> pd.DataFrame:
         se_col = f"{key}_SE"
         if se_col in panel.columns:
             continue
-        moe = pd.to_numeric(panel[col], errors="coerce")
-        se = (moe.abs() / ACS_MOE_Z).mask(moe.isin(sentinels) | (moe < 0))
-        new[se_col] = se.mask(moe == controlled, 0.0)
+        new[se_col] = pd.Series(moe_to_se(panel[col].to_numpy(), ACS_MOE_Z), index=panel.index)
         cols.append(se_col)
     if not new:
         return panel

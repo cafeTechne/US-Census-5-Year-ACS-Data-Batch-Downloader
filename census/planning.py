@@ -23,7 +23,7 @@ from scipy import stats as sps
 
 from census.stats import (
     ACS_MOE_Z, CENSUS_SENTINELS, CV_HIGH_MAX, CV_MODERATE_MAX, acs5_overlap_years,
-    overlap_factor, pair_estimates_and_moes,
+    moe_to_se, overlap_factor, pair_estimates_and_moes,
 )
 
 ArrayLike = Union[float, Sequence[float], np.ndarray, pd.Series]
@@ -37,9 +37,7 @@ def _moe_to_se(moe: ArrayLike, moe_confidence: float) -> np.ndarray:
     z = float(sps.norm.ppf(1 - (1 - _level(moe_confidence)) / 2))
     if math.isclose(_level(moe_confidence), 0.90):
         z = ACS_MOE_Z  # Census convention: 1.645
-    arr = np.asarray(moe, dtype=float)
-    arr = np.where(np.isin(arr, list(CENSUS_SENTINELS)), np.nan, arr)
-    return np.abs(arr) / z
+    return moe_to_se(moe, z)
 
 
 def minimum_detectable_difference(
@@ -154,7 +152,8 @@ def reliability_profile(frame: pd.DataFrame, variables: Optional[Sequence[str]] 
     Accepts an analysis frame (``v`` with ``v_se``) or a raw ACS frame with
     ``...E``/``...M`` (or ``PE``/``PM``) column pairs. Reliability classes follow
     census.stats (High CV <= 15, Moderate <= 30, Low > 30); shares are of all
-    areas, with ``share_undefined`` for missing/zero estimates or sentinels.
+    areas, with ``share_undefined`` for missing/zero estimates or sentinels;
+    a controlled estimate (MOE ``-555555555``) has SE 0.
     """
     rows = []
     if variables is None:
@@ -171,8 +170,7 @@ def reliability_profile(frame: pd.DataFrame, variables: Optional[Sequence[str]] 
                 raise KeyError(f"no SE or MOE column found for {v!r}")
             pairs.append(found[0])
     for key, e, m in pairs:
-        moe = pd.to_numeric(frame[m], errors="coerce")
-        se = (moe.mask(moe.isin(list(CENSUS_SENTINELS)))).abs() / ACS_MOE_Z
+        se = pd.Series(moe_to_se(frame[m].to_numpy(), ACS_MOE_Z), index=frame.index)
         rows.append(_profile_rows(key, frame[e], se))
     if not rows:
         raise ValueError("no estimate/SE (v, v_se) or estimate/MOE (E/M) pairs found")

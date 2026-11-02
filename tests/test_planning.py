@@ -47,7 +47,8 @@ def test_reliability_profile_analysis_and_raw():
     assert (p["share_high"], p["share_moderate"], p["share_low"], p["share_undefined"]) == (0.25, 0.25, 0.25, 0.25)
     raw = pd.DataFrame({"B01003_001E": [1000.0, 50.0], "B01003_001M": [16.45, -555555555]})
     q = reliability_profile(raw).iloc[0]
-    assert q["variable"] == "B01003_001" and q["cv_median"] == pytest.approx(1.0)
-    assert q["share_undefined"] == 0.5
+    # controlled estimate (-555555555 MOE) has SE 0 -> CV 0, not undefined (census.stats.moe_to_se)
+    assert q["variable"] == "B01003_001" and q["cv_median"] == pytest.approx(0.5)
+    assert q["share_undefined"] == 0.0 and q["share_high"] == 1.0
     with pytest.raises(ValueError):
         reliability_profile(pd.DataFrame({"a": [1]}))

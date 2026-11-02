@@ -147,6 +147,29 @@ def tables_and_refs(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
 # ---------------------------------------------------------------------------
 
 
+_SPEC_KEYS = ("formula", "error_covariates", "variables", "variable", "geoid", "variable_1", "variable_2")
+
+
+def _normalize_analysis(a: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the analysis with spec keys (formula, variables, ...) lifted from
+    ``args`` to the top level, so either placement works the same way.
+    Duplicates (a key both top-level and in args) are a validation error."""
+    out = dict(a)
+    args = dict(a.get("args") or {})
+    for k in _SPEC_KEYS:
+        if k in args and k not in out:
+            out[k] = args.pop(k)
+        elif k in args:
+            args.pop(k)
+    out["args"] = args
+    return out
+
+
+def _duplicate_spec_keys(a: Mapping[str, Any]) -> List[str]:
+    args = a.get("args") or {}
+    return [k for k in _SPEC_KEYS if k in a and k in args]
+
+
 def _formula_names(formula: str) -> List[str]:
     """Identifiers in a patsy formula that are not function calls."""
     names = []
@@ -291,6 +314,9 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         errors.append("analyses: at least one analysis is required")
     ids = {}
     for i, a in enumerate(analyses):
+        for k in _duplicate_spec_keys(a):
+            errors.append(f"analyses[{i}]: {k!r} given both at the top level and in args; give it once")
+        a = _normalize_analysis(a)
         method = a.get("method")
         if method not in ANALYSIS_METHODS:
             errors.append(f"analyses[{i}]: unsupported method {method!r}; supported {sorted(ANALYSIS_METHODS)}")
@@ -299,11 +325,11 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
             errors.append(f"analyses[{i}]: id must be present and unique")
         ids[a.get("id")] = method
         for req in ANALYSIS_METHODS[method][0]:
-            if req not in a and req not in (a.get("args") or {}):
+            if req not in a:
                 errors.append(f"analyses[{i}] ({method}): {req!r} is required")
         used = _formula_names(a["formula"]) if a.get("formula") else []
         for key in ("variables", "error_covariates"):
-            used += list(a.get(key) or (a.get("args") or {}).get(key) or [])
+            used += list(a.get(key) or [])
         for key in ("variable", "variable_1", "variable_2"):
             if a.get(key):
                 used.append(a[key])
@@ -426,6 +452,7 @@ def _one_sided(p: float, estimate: float, direction: str) -> float:
 def _run_analysis(a: Mapping[str, Any], frame: pd.DataFrame, level: float, replicates: Any,
                   correction: str) -> Any:
     from . import correlation, models, multitest, sae, trends
+    a = _normalize_analysis(a)
     method, args = a["method"], dict(a.get("args") or {})
     for k in ("error_covariates", "variables", "variable", "geoid", "variable_1", "variable_2"):
         if k in a:
@@ -465,7 +492,10 @@ def _statistic(h: Mapping[str, Any], res: Any) -> Dict[str, Any]:
         if h["term"] not in c.index:
             raise KeyError(f"term {h['term']!r} not in model (terms: {list(c.index)})")
         row = c.loc[h["term"]]
-        return {"estimate": float(row["estimate"]), "se": float(row["se_total"]), "p_two_sided": float(row["p_value"]),
+        from .models import interval_se_column
+        se_col = interval_se_column(res)  # the SE behind p_value and the interval
+        return {"estimate": float(row["estimate"]), "se": float(row[se_col]), "se_basis": se_col,
+                "p_two_sided": float(row["p_value"]),
                 "ci_lower": float(row["ci_lower"]), "ci_upper": float(row["ci_upper"])}
     if stat == "correlation":
         a, b = h["variables"]
@@ -634,10 +664,11 @@ def run_manifest(
     available = set(columns) | {str(d["name"]) for d in m.get("derivations") or []}
     results: Dict[str, Any] = {}
     for a in m["analyses"]:
+        a = _normalize_analysis(a)
         aid = a["id"]
         needed = set(_formula_names(a.get("formula", "")))
         for k in ("variables", "error_covariates"):
-            needed |= set(a.get(k) or (a.get("args") or {}).get(k) or [])
+            needed |= set(a.get(k) or [])
         needed |= {a[k] for k in ("variable", "variable_1", "variable_2") if a.get(k)}
         if frame is None or not needed <= available:
             deviations.append({"kind": "analysis_not_run", "analysis": aid,
@@ -748,14 +779,16 @@ _METHOD_TEXT = {
     "fit_replicate": ("Coefficients were estimated with {model} regression (statsmodels) on the full-sample "
                       "estimates; sampling standard errors came from refitting on each of the 80 ACS replicate "
                       "estimates, Var = 4/80 sum (b_r - b)^2, combined with the model standard error as "
-                      "se_total = sqrt(se_model^2 + se_sampling^2). Without replicates only model standard "
+                      "se_total = sqrt(se_model^2 + se_sampling^2). Reported standard errors, intervals and p-values use "
+                      "the {target_se} ({target} target). Without replicates only model standard "
                       "errors are reported.", ["vre", "design", "statsmodels"]),
     "regression_calibration": ("Covariates measured with known ACS sampling error ({cov}) were corrected by "
                                "regression calibration with heteroscedastic known error variances; standard "
-                               "errors by row bootstrap re-estimating the calibration.", ["carroll"]),
+                               "errors (se_total, used for intervals and p-values) by row bootstrap "
+                               "re-estimating the calibration.", ["carroll"]),
     "simex": ("Covariates measured with known ACS sampling error ({cov}) were corrected by "
               "simulation-extrapolation (SIMEX, quadratic extrapolation) with the measurement-error jackknife "
-              "variance.", ["simex", "carroll"]),
+              "variance (se_total, used for intervals and p-values).", ["simex", "carroll"]),
     "fh_regression": ("The outcome's known sampling variance was modelled with an area-level Fay-Herriot model "
                       "(GLS coefficients, REML variance component).", ["fh"]),
     "fay_herriot": ("Small-area estimates are Fay-Herriot EBLUPs (REML) with Prasad-Rao/Datta-Lahiri MSE.",
@@ -812,9 +845,13 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
     lines.append("Rows with missing or undefined estimates were dropped analysis by analysis (complete cases).")
     lines += ["", "### Analyses", ""]
     for a in m.get("analyses", []):
+        a = _normalize_analysis(a)
         text, refs = _METHOD_TEXT[a["method"]]
         args = a.get("args") or {}
-        text = text.format(model=args.get("model", "ols").upper(),
+        tgt = args.get("target", "population")
+        text = text.format(model=args.get("model", "ols").upper(), target=tgt,
+                           target_se={"population": "model SE (se_model)", "these_areas": "replicate sampling SE "
+                                      "(se_sampling)", "conservative": "combined SE (se_total)"}.get(tgt, "se_total"),
                            cov=", ".join(a.get("error_covariates") or args.get("error_covariates") or []),
                            rep=" and replicate-based standard errors" if a.get("replicates") else "")
         target = a.get("formula") or a.get("variables") or a.get("variable")

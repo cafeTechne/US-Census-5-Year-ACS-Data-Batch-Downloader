@@ -358,6 +358,11 @@ def cmd_tool(args: argparse.Namespace) -> int:
         result = fn(**kwargs)
     except TypeError as exc:
         result = errors.error_result(errors.INVALID_INPUT, str(exc))
+    except Exception as exc:  # noqa: BLE001 - agents need a structured error, not a traceback
+        result = errors.error_result(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}",
+                                     error_type=type(exc).__name__)
+        result["summary"] = f"{args.name} failed: {type(exc).__name__}: {exc}"
+        result["next_step"] = "check the arguments (column names, formula, paths) and call again"
     return _emit(result, args.json)
 
 

@@ -175,6 +175,19 @@ def _z(confidence_level: float) -> float:
 INTERVAL_TARGETS = ("population", "these_areas", "conservative")
 
 
+_TARGET_SE = {"population": "se_model", "these_areas": "se_sampling", "conservative": "se_total"}
+
+
+def interval_se_column(result: Any) -> str:
+    """The SE column that a result's p-values and intervals are based on.
+
+    fit_replicate records ``diagnostics['interval_target']``; corrected
+    methods (regression calibration, SIMEX) and Fay-Herriot use se_total.
+    """
+    target = (getattr(result, "diagnostics", None) or {}).get("interval_target")
+    return _TARGET_SE.get(target, "se_total")
+
+
 def _table(params: pd.Series, se_model: pd.Series, se_sampling: pd.Series, confidence_level: float,
            target: str = "population") -> pd.DataFrame:
     se_total = np.sqrt(se_model.to_numpy(float) ** 2 + np.nan_to_num(se_sampling.to_numpy(float)) ** 2)
