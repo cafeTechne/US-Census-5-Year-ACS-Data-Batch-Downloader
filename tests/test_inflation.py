@@ -233,7 +233,10 @@ class TestAdvisories(unittest.TestCase):
 
     def test_boundary_within_vintage_no_warning(self):
         self.assertIsNone(boundary_shift_advisory(2012, 2019, "tract"))
-        self.assertIsNone(boundary_shift_advisory(2020, 2023, "tract"))
+        self.assertIsNone(boundary_shift_advisory(2020, 2021, "tract"))
+        self.assertIsNone(boundary_shift_advisory(2022, 2024, "tract"))
+        # 2020-2023 crosses Connecticut's 2022 planning-region change.
+        self.assertIn("CONNECTICUT", boundary_shift_advisory(2020, 2023, "tract"))
         self.assertIsNone(boundary_shift_advisory(2015, 2022, "state"))
 
     def test_home_value_advisory(self):

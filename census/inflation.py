@@ -129,6 +129,8 @@ _DOLLAR_RE = re.compile(r"\bdollars\b", re.IGNORECASE)
 # ACS 5-year datasets: tract and other small-area geographies were redrawn for
 # the 2020 Census and first appear in the 2020 (2016-2020) ACS 5-year release.
 BOUNDARY_VINTAGE_BREAK = 2020
+# Connecticut planning regions replace counties from the 2022 ACS release.
+CT_PLANNING_REGION_YEAR = 2022
 BOUNDARY_SENSITIVE_LEVELS = {"tract", "zcta", "place", "county", "msa"}
 
 # ACS user note 2023-07: home values are presented in current-year dollars
@@ -281,9 +283,26 @@ def deflate_dataframe(
 def boundary_shift_advisory(
     start_year: int, end_year: int, geo_level: str = ""
 ) -> Optional[str]:
-    """Warn when a multi-year request spans the 2010 -> 2020 boundary vintages."""
+    """Warn when a multi-year request spans a geography change.
+
+    Covers the 2010 -> 2020 Census geography change (2020 releases) and, for
+    county and tract levels, Connecticut's switch from eight counties to nine
+    planning regions in the 2022 release, which changes Connecticut county and
+    tract GEOIDs (ACS user note 2023-01).
+    """
+    ct = (
+        start_year < CT_PLANNING_REGION_YEAR <= end_year
+        and (not geo_level or geo_level in ("county", "tract"))
+    )
+    ct_msg = (
+        f"CONNECTICUT ADVISORY: from the {CT_PLANNING_REGION_YEAR} release, Connecticut is "
+        "tabulated by nine planning regions (county codes 09110-09190) instead of eight counties "
+        "(09001-09015), so Connecticut county and tract GEOIDs before and after do not match. "
+        "Tract panels can be recoded with harmonize_tracts_to. Source: "
+        "https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2023-01.html"
+    )
     if not (start_year < BOUNDARY_VINTAGE_BREAK <= end_year):
-        return None
+        return ct_msg if ct else None
     if geo_level and geo_level not in BOUNDARY_SENSITIVE_LEVELS:
         return None  # state / national boundaries are stable
     detail = {
@@ -304,4 +323,5 @@ def boundary_shift_advisory(
         f"2019/2020 ACS 5-year boundary vintage change (2010 Census geography -> "
         f"2020 Census geography)."
     )
-    return f"{msg} {detail}".strip()
+    out = f"{msg} {detail}".strip()
+    return f"{out} {ct_msg}" if ct else out

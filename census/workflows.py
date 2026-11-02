@@ -86,12 +86,18 @@ def _load_frame(path: str) -> pd.DataFrame:
     if any(str(c).endswith(("E", "M")) and "_" in str(c) and str(c)[:1].isupper() for c in df.columns):
         return df
     folder = os.path.dirname(os.path.abspath(path))
-    for name in sorted(os.listdir(folder)):
-        if name.endswith("_codebook.csv"):
-            book = pd.read_csv(os.path.join(folder, name), dtype=str)
-            if {"Variable_Code", "Variable_Slug"} <= set(book.columns):
-                mapping = dict(zip(book["Variable_Slug"], book["Variable_Code"]))
-                df = df.rename(columns={c: mapping.get(c, c) for c in df.columns})
+    # Panels are named <TABLE>_<geo>_panel_<span>; use only that table's codebook.
+    # Label slugs (e.g. total_est) repeat across tables, so applying every
+    # codebook in the folder could rename columns with another table's codes.
+    table = os.path.basename(path).split("_", 1)[0].upper()
+    books = [n for n in os.listdir(folder) if n.endswith("_codebook.csv")]
+    own = f"{table}_codebook.csv"
+    chosen = own if own in books else (books[0] if len(books) == 1 else None)
+    if chosen:
+        book = pd.read_csv(os.path.join(folder, chosen), dtype=str)
+        if {"Variable_Code", "Variable_Slug"} <= set(book.columns):
+            mapping = dict(zip(book["Variable_Slug"], book["Variable_Code"]))
+            df = df.rename(columns={c: mapping.get(c, c) for c in df.columns})
     rename = {c: c.upper() for c in df.columns if str(c).lower() in ("geoid", "name", "year")}
     rename = {c: ("Year" if v == "YEAR" else v) for c, v in rename.items()}
     return df.rename(columns=rename)

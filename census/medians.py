@@ -319,7 +319,10 @@ def _quantile_matrix(
     # and the next bracket(s) are empty: the quantile is the midpoint of the empty
     # gap, as Census publishes it (e.g. 2019 B25064 for Sterling County, TX:
     # 50.00% at $800 with $800-$899 empty -> $850). Found by validation check F5.
-    exact = (~top) & np.isclose(cum[rows, idx], target) & (idx < n - 1)
+    # Counts are (sums of) whole numbers; a fixed absolute tolerance avoids
+    # treating a cumulative count several units past the target as "exact"
+    # for large totals (np.isclose's default rtol would).
+    exact = (~top) & np.isclose(cum[rows, idx], target, rtol=0.0, atol=1e-6) & (idx < n - 1)
     if np.any(exact):
         later = filled[:, 1:] > 0  # later[r, j - 1] -> bracket j non-empty
         for r in np.flatnonzero(exact):
@@ -600,7 +603,13 @@ def _replicates_for(
     """
     frame = replicate_frame
     if geoids is not None:
-        frame = frame[frame["GEOID"].astype(str).isin([str(g) for g in geoids])]
+        wanted = {str(g) for g in geoids}
+        frame = frame[frame["GEOID"].astype(str).isin(wanted)]
+        absent = sorted(wanted - set(frame["GEOID"].astype(str)))
+        if absent:
+            # Summing replicates over fewer (or more) geographies than the
+            # estimate would give a meaningless "exact" MOE.
+            raise KeyError(f"replicate frame lacks GEOIDs: {absent[:10]}")
     frame = frame.assign(variable=frame["variable"].astype(str).str.rstrip("E"))
     summed = frame.groupby("variable")[REPLICATE_COLUMNS].sum(min_count=1)
     codes = [b[0] for b in brackets]
@@ -654,7 +663,9 @@ def median_for_group(
     group_note = [f"Distribution summed over {len(rows)} geographies before interpolation."]
 
     if replicate_frame is not None:
-        reps = _replicates_for(replicate_frame, brackets, geoids)
+        # Always restrict replicates to exactly the rows summed for the estimate.
+        selected = rows[geoid_column].astype(str).tolist()
+        reps = _replicates_for(replicate_frame, brackets, selected)
         result = median_moe_replicates(lo, hi, counts, reps, method=method)
     elif design_factor is not None:
         result = median_moe_approximate(lo, hi, counts, design_factor=design_factor, method=method)

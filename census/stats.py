@@ -180,9 +180,14 @@ def overlap_factor(overlap_years: int, period_years: int = 5) -> float:
     """sqrt(1 - C) where C is the share of overlapping sample years.
 
     Census guidance for comparing overlapping 5-year periods (e.g. 2015-2019 vs
-    2017-2021 share 3 years -> C = 3/5).
+    2017-2021 share 3 years -> C = 3/5) for the same geography.
+
+    Two estimates from the same period (overlap >= period) are comparisons of
+    different geographies or subgroups, which Census treats as independent:
+    the factor is 1, not sqrt(0), which would make every difference
+    "significant" with zero standard error.
     """
-    if overlap_years <= 0:
+    if overlap_years <= 0 or overlap_years >= period_years:
         return 1.0
     c = min(overlap_years, period_years) / period_years
     return math.sqrt(1.0 - c)
@@ -206,18 +211,56 @@ def z_test(
     Z = |X1 - X2| / sqrt(SE1^2 + SE2^2), with the denominator scaled by
     sqrt(1 - C) when the two 5-year periods overlap by ``overlap_years``.
     """
-    se1, se2 = standard_error(moe1), standard_error(moe2)
-    se_diff = math.sqrt(se1**2 + se2**2) * overlap_factor(overlap_years)
+    level = confidence_level if confidence_level <= 1 else confidence_level / 100
+    critical = _z_for_confidence(level)
+    label = f"{level * 100:g}%"
+    notes: List[str] = []
+
+    def _clean_moe(moe: float, which: str) -> float:
+        # Census sentinels: -555555555 marks a controlled estimate (no sampling
+        # error); every other sentinel or NaN makes the MOE undefined.
+        if moe is None or _isnan(moe):
+            notes.append(f"{which} MOE missing")
+            return math.nan
+        if int(float(moe)) == -555555555:
+            notes.append(f"{which} estimate is controlled (MOE 0)")
+            return 0.0
+        if int(float(moe)) in CENSUS_SENTINELS:
+            notes.append(f"{which} MOE is a Census sentinel ({int(float(moe))}): undefined")
+            return math.nan
+        return float(moe)
+
+    m1, m2 = _clean_moe(moe1, "first"), _clean_moe(moe2, "second")
     diff = float(est1) - float(est2)
+    if any(_isnan(v) for v in (est1, est2)) or any(
+        int(float(v)) in CENSUS_SENTINELS for v in (est1, est2) if not _isnan(v)
+    ):
+        m1 = math.nan
+        notes.append("an estimate is missing or a Census sentinel")
+    if _isnan(m1) or _isnan(m2):
+        return {
+            "difference": diff,
+            "se_difference": math.nan,
+            "z_statistic": math.nan,
+            "p_value": math.nan,
+            "confidence_level": level,
+            "critical_value": critical,
+            "significant": None,
+            "significant_at": {f"{int(lv * 100)}%": None for lv in Z_CRITICAL},
+            "overlap_years": overlap_years,
+            "notes": notes,
+            "verdict": "Not tested: " + "; ".join(notes) + ".",
+        }
+    se1, se2 = standard_error(m1), standard_error(m2)
+    se_diff = math.sqrt(se1**2 + se2**2) * overlap_factor(overlap_years)
+    if overlap_years >= 5:
+        notes.append("same period: treated as independent samples (no overlap adjustment)")
     if se_diff == 0:
         z = math.inf if diff != 0 else 0.0
     else:
         z = abs(diff) / se_diff
     p_value = two_tailed_p_value(z) if math.isfinite(z) else 0.0
-    level = confidence_level if confidence_level <= 1 else confidence_level / 100
-    critical = _z_for_confidence(level)
     significant = z >= critical
-    label = f"{level * 100:g}%"
 
     return {
         "difference": diff,
@@ -231,6 +274,7 @@ def z_test(
             f"{int(lv * 100)}%": bool(z >= zc) for lv, zc in Z_CRITICAL.items()
         },
         "overlap_years": overlap_years,
+        "notes": notes,
         "verdict": (
             f"Statistically significant difference at the {label} confidence level."
             if significant

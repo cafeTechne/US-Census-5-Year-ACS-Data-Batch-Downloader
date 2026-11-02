@@ -919,7 +919,10 @@ def harmonize_panel(
         _count(f"ct_to_{ct_coding}_coding", before, after)
     panel.loc[nat_mask, geoid_col] = after.values
 
-    boundary_hits = sorted(set(df[geoid_col].astype(str)) & set(ACS_2010_BOUNDARY_CHANGES))
+    # Compare normalized GEOIDs: a panel read without dtype=str loses leading zeros.
+    boundary_hits = sorted(
+        set(normalize_tract_geoids(df[geoid_col]).astype(str)) & set(ACS_2010_BOUNDARY_CHANGES)
+    )
     record: Dict[str, Any] = {
         "method": METHOD_APPORTIONED,
         "target_vintage": target_vintage,

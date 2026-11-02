@@ -237,10 +237,13 @@ def batch_z_test(
             k = acs5_overlap_years(int(y1[i]), int(y2[i]))
             overlap[i] = k
             factor[i] = overlap_factor(k)
-            if k > 0:
+            if 0 < k < 5:
                 notes[i].append(NOTE_OVERLAP.format(k=k))
             if k >= 5:
-                notes[i].append("both estimates are from the same period")
+                notes[i].append(
+                    "both estimates are from the same period: treated as independent samples "
+                    "(different geographies or subgroups), no overlap adjustment"
+                )
 
     diff = x1 - x2
     se_diff = np.sqrt((m1 / Z90) ** 2 + (m2 / Z90) ** 2) * factor

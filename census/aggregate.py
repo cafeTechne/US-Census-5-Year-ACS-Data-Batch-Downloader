@@ -289,6 +289,13 @@ def _replicate_coverage(
         if len(incomplete):
             reasons[base] = f"replicate values missing for member(s) {list(incomplete[:3])}"
             continue
+        # Published MOE and controlled flag travel with the replicates so that
+        # zero-variance groups can be handled as census.replicate does.
+        extra = sub.reindex(member_index)
+        if "moe" in extra:
+            values["moe"] = pd.to_numeric(extra["moe"], errors="coerce")
+        if "controlled" in extra:
+            values["controlled"] = extra["controlled"].fillna(False).astype(bool)
         covered[base] = values
     return covered, reasons
 
@@ -369,6 +376,36 @@ def _aggregate(
             est = sums["estimate"].to_numpy(float)
             reps = sums[REPLICATE_COLUMNS].to_numpy(float)
             moe = replicate_moe(est, reps)
+            group_notes = [[no_metadata_note] if no_metadata_note else [] for _ in group_order]
+            # Zero replicate variance needs the same handling as census.replicate:
+            # a zero total takes the largest published member MOE (VRE
+            # documentation, Example 5); a nonzero total built only from
+            # controlled cells has MOE 0; otherwise Census uses a model-based
+            # MOE we cannot reproduce, so the MOE is undefined.
+            published_moe = pd.to_numeric(values["moe"], errors="coerce") if "moe" in values else None
+            controlled = values["controlled"].astype(bool) if "controlled" in values else None
+            for gi, g in enumerate(group_order):
+                if not (np.isfinite(moe[gi]) and moe[gi] == 0):
+                    continue
+                members = labelled.index[labelled["_group"] == g]
+                if est[gi] == 0 and published_moe is not None:
+                    member_moes = published_moe.reindex(members)
+                    member_moes = member_moes[member_moes.notna() & ~member_moes.isin(_SENTINELS)]
+                    if len(member_moes):
+                        moe[gi] = float(member_moes.abs().max())
+                        group_notes[gi].append(
+                            "zero estimate with zero replicate variance: MOE is the largest published "
+                            "member MOE (VRE documentation, Example 5; may understate error)"
+                        )
+                        continue
+                if controlled is not None and bool(controlled.reindex(members).fillna(False).all()):
+                    group_notes[gi].append("all members are controlled estimates: no sampling error")
+                    continue
+                moe[gi] = np.nan
+                group_notes[gi].append(
+                    "zero replicate variance on an uncontrolled estimate: Census uses a model-based "
+                    "MOE here, which replicates cannot reproduce; MOE undefined"
+                )
             agg.rep_est[base] = est
             agg.rep_sums[base] = reps
             se = moe / Z90
@@ -379,7 +416,7 @@ def _aggregate(
             columns[f"{base}_SE"] = se
             columns[f"{base}_CV"] = cv
             columns[f"{base}_METHOD"] = [METHOD_REPLICATE] * len(group_order)
-            columns[f"{base}_NOTES"] = [no_metadata_note] * len(group_order)
+            columns[f"{base}_NOTES"] = ["; ".join(n) for n in group_notes]
             continue
         est, moe, notes_lists = _approximate_group_sums(
             frame, est_col, moe_col, group_order, zero_estimate_rule
@@ -592,7 +629,13 @@ def _replicate_entry(
                 est, reps = x * y, xr * yr
             else:
                 est = np.where(y != 0, x / y, np.nan)
-                reps = np.where(y[:, None] != 0, xr / yr, np.nan)
+                # A zero replicate denominator gives a replicate ratio of 0
+                # (VRE documentation, Example 7), as in census.replicate.
+                reps = np.where(yr != 0, xr / np.where(yr != 0, yr, 1.0), 0.0)
+                reps = np.where(y[:, None] != 0, reps, np.nan)
+                if np.any((yr == 0) & (y[:, None] != 0)):
+                    notes.append("some replicate denominators are 0; those replicate ratios set to 0 "
+                                 "(VRE documentation, Example 7)")
                 if entry.get("as_percent"):
                     est, reps = est * 100.0, reps * 100.0
     return est, reps, method, notes
