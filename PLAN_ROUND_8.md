@@ -346,5 +346,7 @@ PHASE 8d: Outputs and interface
 
 **Local-model evaluation.** Qwen3 8B (CPU with partial GPU offload) passed 5 of 6 tasks through the `core` profile, about 5–7 minutes per task. The failure (a multi-step question answered without the recipe) led to a recipe-first instruction; the run also exposed a misleading overlapping-trend error, now fixed.
 
-**Carried to Round 9:** spatial models and maps; slimmer core wrapper for `batch_download` (26 parameters); native `summary`/`next_step` in Round 7 tools; tract-level CV profiles from real tract MOEs for the simulations (currently assumed); rerun of the local-model evaluation with an 8K context.
+**Code review (PR #2).** Ten findings: nine fixed with regression tests (`tests/test_review_fixes_r8.py`), including a Fay–Herriot collapse when one area has zero sampling variance, non-JSON tool results, and SEs in tables that did not match the p-values. One is partial: pipeline outputs store controlled-estimate MOEs (-555555555) as missing rather than 0, because the Round 7 F1 check requires every sentinel to be removed; `census.stats.moe_to_se` now applies one rule everywhere it sees the raw code.
+
+**Carried to Round 9:** controlled-estimate MOEs preserved as 0 through the pipeline (with F1 updated to match); spatial models and maps; slimmer core wrapper for `batch_download` (26 parameters); native `summary`/`next_step` in Round 7 tools; tract-level CV profiles from real tract MOEs for the simulations (currently assumed); rerun of the local-model evaluation with an 8K context.
 
