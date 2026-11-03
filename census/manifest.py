@@ -562,7 +562,7 @@ def run_manifest(
     corr_method = corr.get("method", "holm")
     releases = [int(r) for r in m["releases"]]
     geo = m["geography"]
-    entities = build_entities(geo["level"], geo.get("state"), geo.get("codes"))
+    entities = build_entities(geo["level"], geo.get("state"), geo.get("codes"), years=releases)
     opts = ResearchOptions(use_cache=use_cache, include_codebook=True,
                            concordance_mode=m.get("concordance_mode", "fail"))
 

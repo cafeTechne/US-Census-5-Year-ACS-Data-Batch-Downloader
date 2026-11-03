@@ -797,8 +797,10 @@ def check_f1_pipeline_integrity(
         "F1",
         f"Every cell of run_batch output ({b.f1_table}, county level, releases "
         f"{', '.join(map(str, b.releases))}, concordance on; tidy CSV panel and Parquet) equals the "
-        "raw API cell for the same GEOID, year and source code (Census sentinels -> missing).",
-        tolerance="exact (float equality); sentinel codes and non-numeric cells must be missing in the output",
+        "raw API cell for the same GEOID, year and source code (Census sentinels -> missing, "
+        "except controlled MOEs -> 0 with <base>_CONTROLLED = True).",
+        tolerance="exact (float equality); sentinel codes and non-numeric cells must be missing in the output; "
+        "a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column",
     )
     res.census_source.append(f"{BASE_URL}/<year>/acs/acs5?get=NAME,group({b.f1_table})&for=county:...")
     failures: List[Dict[str, Any]] = []
@@ -819,8 +821,15 @@ def check_f1_pipeline_integrity(
         panel = panel.rename(columns={v: k for k, v in id_slugs.items()})
         panel["GEOID"] = panel["GEOID"].astype(str).str.zfill(5)
         slug_to_codes: Dict[str, Tuple[str, Dict[int, str]]] = {}
+        # Controlled-MOE flag columns (Round 9, G1): <base>_CONTROLLED -> slug.
+        controlled_slugs = {row["Variable_Code"][: -len("_CONTROLLED")]: row["Variable_Slug"]
+                            for _, row in codebook.iterrows()
+                            if str(row["Variable_Code"]).endswith("_CONTROLLED") and row["Variable_Slug"]}
+        slug_base: Dict[str, str] = {}
         for _, row in codebook.iterrows():
             parsed = parse_variable_code(row["Variable_Code"])
+            if parsed and parsed[1] == "M":
+                slug_base[row["Variable_Slug"]] = parsed[0]
             if not parsed or parsed[1] not in ("E", "M"):
                 continue
             by_year = {}
@@ -869,6 +878,7 @@ def check_f1_pipeline_integrity(
         cells = 0
         mism = 0
         names_bad = 0
+        n_controlled = 0
         for _, prow in panel.iterrows():
             year = int(prow["Year"])
             geoid = str(prow["GEOID"])
@@ -882,9 +892,18 @@ def check_f1_pipeline_integrity(
                     continue
                 code = by_year[year] + suffix
                 expected = _numeric([raw.at[geoid, code]])[0] if code in raw.columns else math.nan
+                is_controlled = (suffix == "M" and code in raw.columns
+                                 and _raw_float(raw.at[geoid, code]) == CONTROLLED_MOE)
+                if is_controlled:
+                    expected = 0.0  # documented representation: MOE 0 + controlled flag
                 got = _raw_float(prow[slug])
                 cells += 1
                 same = (math.isnan(expected) and math.isnan(got)) or expected == got
+                if is_controlled and same:
+                    flag_slug = controlled_slugs.get(slug_base.get(slug, ""))
+                    flag = prow.get(flag_slug) if flag_slug in panel.columns else None
+                    same = str(flag).strip().lower() in ("true", "1", "1.0")
+                    n_controlled += 1
                 if not same:
                     mism += 1
                     if len(failures) < MAX_FAILURE_SAMPLES:
@@ -903,6 +922,7 @@ def check_f1_pipeline_integrity(
             "rows_missing": len(lost),
             "rows_extra": len(extra),
             "raw_columns_unmapped": len(unmapped),
+            "controlled_moe_cells": n_controlled,
             "concordance_issue_count": r.get("concordance_issue_count"),
         }
     res.n_compared = n_compared

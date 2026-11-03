@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "census-acs-toolkit"
+dynamic = ["version"]
+description = "Research toolkit and MCP server for American Community Survey 5-year data: vintage-safe concordance, margins of error, replicate variance, inference, and maps."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{name = "cafeTechne"}]
+keywords = ["American Community Survey", "US Census Bureau", "margins of error", "survey statistics", "MCP"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+# Keep in sync with requirements.txt (tests/test_packaging.py checks it).
+dependencies = [
+    "requests>=2.31.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "python-dotenv>=1.0.0",
+    "mcp>=1.2.0,<2",
+    "pyarrow>=14.0.0",
+    "scipy>=1.10",
+    "statsmodels>=0.14.2",
+    "matplotlib>=3.7",
+    "geopandas>=0.14",
+    "pyogrio>=0.7",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "libpysal>=4.10",
+    "esda>=2.5",
+    "spreg>=1.4",
+    "mapclassify>=2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+census-acs = "census.__main__:main"
+census-acs-mcp = "mcp_server:main"
+
+[project.urls]
+Repository = "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader"
+Changelog = "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+py-modules = ["mcp_server"]
+# Install from a clone: `pip install -e .`. The data the toolkit reads
+# (metadata/, data/, crosswalks/, docs/recipes/, state_places/, zip2fips.json)
+# stays in the repository and is located via census.geo.get_resource_path, so
+# no generic top-level names such as `data` or `docs` are installed into
+# site-packages.
+packages = ["census"]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "census.__version__"}

@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from census.simulation import BAND, CV_PROFILES, FAST, FULL, NOMINAL, run_study  # noqa: E402
+from census.simulation import BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, run_study, spatial_config  # noqa: E402
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
@@ -104,6 +104,12 @@ def main() -> int:
     out = args.out or (None if args.fast else OUT_MD)
     t0 = datetime.now()
     df = run_study(cfg, studies=args.studies, log=lambda m: print(m, flush=True))
+    spatial = [s for s in SPATIAL_STUDIES if args.studies is None or s in args.studies]
+    if spatial:  # Round 9 spatial studies (own lattice configuration)
+        sdf = run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True))
+        import pandas as _pd
+
+        df = _pd.concat([df, sdf], ignore_index=True)
     secs = (datetime.now() - t0).total_seconds()
     if out:
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

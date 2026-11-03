@@ -152,7 +152,8 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
 
 
 def _entities(args: argparse.Namespace) -> Any:
-    return build_entities(args.geo, args.state, _list(args.codes), include_pr=args.include_pr)
+    years = _years(args.years) if getattr(args, "years", None) else None
+    return build_entities(args.geo, args.state, _list(args.codes), include_pr=args.include_pr, years=years)
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
@@ -339,15 +340,16 @@ def cmd_validate_census(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, default=str))
     else:
         print("Overall:", "PASS" if result["success"] else "FAIL " + ", ".join(
-            result["summary"]["failed"] + result["summary"]["errors"]))
+            result["checks_summary"]["failed"] + result["checks_summary"]["errors"]))
     return EXIT_OK if result["success"] else EXIT_FAILURE
 
 
 def cmd_tool(args: argparse.Namespace) -> int:
     """Run any shared workflow tool by name with JSON arguments."""
-    from census import workflows_inference
+    from census import workflows_geo, workflows_inference
 
-    fn = getattr(workflows_inference, args.name, None) or getattr(workflows, args.name, None)
+    fn = (getattr(workflows_geo, args.name, None) or getattr(workflows_inference, args.name, None)
+          or getattr(workflows, args.name, None))
     if fn is None or args.name.startswith("_") or not callable(fn):
         return _emit(errors.error_result(errors.INVALID_INPUT, f"Unknown tool '{args.name}'."), args.json)
     try:

@@ -1,0 +1,6 @@
+{
+  "source_url": "https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST10.zip",
+  "sha256": "1b6a57234e45b8c3549b9be3b5575d5b1661f72321d73e745ea55ffb6bf660c4",
+  "size_bytes": 58638,
+  "note": "subset of Delaware (10) for tests: 2010 tracts 10001041100, 10003014300 and every 2020 tract they touch"
+}

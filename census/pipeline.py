@@ -17,12 +17,19 @@ import os
 import subprocess
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import pandas as pd
 
 from census import errors
-from census.api import CensusAPIClient, DATASETS, infer_dataset
+from census.api import (
+    BLOCK_GROUP,
+    BLOCK_GROUP_FIRST_YEAR,
+    CensusAPIClient,
+    DATASETS,
+    infer_dataset,
+    normalize_geo_level,
+)
 from census.cache import get_default_cache
 from census.concordance import (
     ISSUE_METADATA_UNAVAILABLE,
@@ -69,7 +76,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.8.0"
+PACKAGE_VERSION = "0.9.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
@@ -78,7 +85,10 @@ LEGACY_FORMATS = ("both", "wide_only", "melted_only", "excel")
 PANEL_FORMATS = ("panel", "parquet")
 OUTPUT_FORMATS = LEGACY_FORMATS + PANEL_FORMATS
 
-GEO_LEVEL_NAMES = ("us", "state", "county", "tract", "place", "zcta", "msa")
+GEO_LEVEL_NAMES = ("us", "state", "county", "tract", "block group", "place", "zcta", "msa")
+# Release whose county list enumerates block-group requests when no counties
+# are given (one API request per county).
+BLOCK_GROUP_COUNTY_LIST_YEAR = 2023
 
 # ZCTAs per API request when querying explicit ZCTA lists
 ZCTA_CHUNK_SIZE = 50
@@ -149,10 +159,17 @@ class Entity:
     zcta_code: Optional[str] = None
     msa_code: Optional[str] = None
     group: str = ""  # output folder label; chunks of one request share a group
+    # Releases this target exists in (None = every release). Block-group county
+    # lists differ by release (Connecticut planning regions from 2022, Alaska
+    # 02261 split in 2020, South Dakota 46113 -> 46102 in 2015).
+    years: Optional[Tuple[int, ...]] = None
 
     def __post_init__(self) -> None:
         if not self.group:
             self.group = self.name
+
+    def applies(self, year: int) -> bool:
+        return self.years is None or int(year) in self.years
 
     def request_kwargs(self) -> Dict[str, Any]:
         return {
@@ -209,8 +226,65 @@ def expand_states(state_code: Optional[str], include_pr: bool = False) -> List[s
     return out
 
 
+def _county_codes(state_code: str, client: Optional[CensusAPIClient],
+                  year: int = BLOCK_GROUP_COUNTY_LIST_YEAR) -> List[str]:
+    """County FIPS codes of a state in release ``year`` from the API (empty list
+    when unavailable)."""
+    if client is None:
+        client = CensusAPIClient(cache=get_default_cache())
+    try:
+        rows = client.list_geographies(int(year), "county", state_code=state_code)
+    except Exception:  # noqa: BLE001 - network or parsing failure: caller falls back
+        return []
+    return sorted({str(r.get("county", "")).zfill(3) for r in rows if r.get("county")})
+
+
+def _block_group_entities(
+    state_code: str,
+    codes: Optional[Sequence[str]],
+    names: Mapping[str, str],
+    client: Optional[CensusAPIClient],
+    group: str = "",
+    years: Optional[Sequence[int]] = None,
+) -> List[Entity]:
+    """One request per county (block groups nest in tracts within counties).
+
+    Without ``codes`` the county list comes from the API for each release in
+    ``years`` (default ``BLOCK_GROUP_COUNTY_LIST_YEAR``), so counties that
+    exist only in some releases are requested only for those; a year whose
+    list cannot be fetched gets one state-wide request (``county:*``).
+    """
+    state_name = STATE_MAPPING.get(state_code, f"State_{state_code}")
+    if not group:
+        group = f"{state_name}_Block_Groups" if codes else f"{state_name}_All_Block_Groups"
+
+    def county_entity(c: str, yrs: Optional[Tuple[int, ...]] = None) -> Entity:
+        return Entity(f"{names.get(c, state_name + '_County_' + c)}_Block_Groups", BLOCK_GROUP, state_code,
+                      county_code=c, group=group, years=yrs)
+
+    if codes:
+        return [county_entity(str(c).strip().zfill(3)) for c in codes]
+    list_years = sorted({int(y) for y in years}) if years else [BLOCK_GROUP_COUNTY_LIST_YEAR]
+    by_year = {y: _county_codes(state_code, client, y) for y in list_years}
+    unlisted = tuple(y for y in list_years if not by_year[y])
+    listed = [y for y in list_years if by_year[y]]
+    out: List[Entity] = []
+    if unlisted:
+        out.append(Entity(f"{state_name}_All_Block_Groups", BLOCK_GROUP, state_code, county_code="*",
+                          group=group, years=unlisted if listed else None))
+    county_years: Dict[str, List[int]] = {}
+    for y in listed:
+        for c in by_year[y]:
+            county_years.setdefault(c, []).append(y)
+    for c in sorted(county_years):
+        yrs = tuple(county_years[c])
+        out.append(county_entity(c, None if len(yrs) == len(list_years) else yrs))
+    return out
+
+
 def _nationwide_entities(
-    geo_level: str, codes: Optional[Sequence[str]], include_pr: bool
+    geo_level: str, codes: Optional[Sequence[str]], include_pr: bool,
+    client: Optional[CensusAPIClient] = None, years: Optional[Sequence[int]] = None,
 ) -> List[Entity]:
     """Entities for state_code='all'.
 
@@ -222,7 +296,7 @@ def _nationwide_entities(
     states = expand_states(NATIONWIDE, include_pr)
     joined = ",".join(states)
     label = NATIONWIDE_LABEL + ("_and_PR" if include_pr else "")
-    if geo_level in ("county", "place", "tract") and codes:
+    if geo_level in ("county", "place", "tract", BLOCK_GROUP) and codes:
         raise ValueError(
             f"{geo_level} codes are only unique within a state; with state_code='all' "
             "omit the codes (all geographies nationwide) or give a single state."
@@ -239,6 +313,12 @@ def _nationwide_entities(
             Entity(f"{STATE_MAPPING[s]}_All_Tracts", "tract", s, county_code="*", group=group)
             for s in states
         ]
+    if geo_level == BLOCK_GROUP:
+        out: List[Entity] = []
+        for s in states:
+            out.extend(_block_group_entities(s, None, {}, client, group=f"{label}_All_Block_Groups",
+                                             years=years))
+        return out
     # us, msa, zcta are national requests already; the state filter does not apply.
     return build_entities(geo_level, None, codes)
 
@@ -249,13 +329,21 @@ def build_entities(
     codes: Optional[Sequence[str]] = None,
     names: Optional[Mapping[str, str]] = None,
     include_pr: bool = False,
+    client: Optional[CensusAPIClient] = None,
+    years: Optional[Sequence[int]] = None,
 ) -> List[Entity]:
     """Translate a geography selection into API request entities.
+
+    ``years`` (block groups without county codes): list counties for each
+    release so county changes between releases are requested correctly.
 
     codes meaning by level:
         place  -> place FIPS codes (required; one request each)
         county -> county FIPS codes (optional; default all counties in state)
         tract  -> county FIPS codes whose tracts to fetch (default: all counties)
+        block group (aliases block_group, bg, 150) -> county FIPS codes; one
+                  request per county (default: every county, listed with
+                  ``client``); GEOIDs are 12 digits
         zcta   -> 5-digit ZCTAs (default: ZIPs in state via zip2fips.json, or
                   all ZCTAs nationally when no state is given)
         msa    -> CBSA codes (default: all metro/micro areas)
@@ -266,15 +354,24 @@ def build_entities(
     per state per year for tract; us, msa and zcta are national regardless.
     """
     names = names or {}
+    geo_level = normalize_geo_level(geo_level)
     if geo_level not in GEO_LEVEL_NAMES:
         raise ValueError(
             f"Unsupported geo_level: {geo_level}. Choose from {list(GEO_LEVEL_NAMES)}."
         )
     if is_nationwide(state_code):
-        return _nationwide_entities(geo_level, codes, include_pr)
+        return _nationwide_entities(geo_level, codes, include_pr, client, years)
     state_name = STATE_MAPPING.get(state_code or "", f"State_{state_code}")
-    if geo_level in ("place", "county", "tract", "state") and not state_code:
+    if geo_level in ("place", "county", "tract", "state", BLOCK_GROUP) and not state_code:
         raise ValueError(f"state_code is required for geo_level '{geo_level}'.")
+    if geo_level == BLOCK_GROUP:
+        bg_states = expand_states(state_code)
+        if len(bg_states) > 1 and codes:
+            raise ValueError("block-group county codes need a single state_code.")
+        bg: List[Entity] = []
+        for st in bg_states:
+            bg.extend(_block_group_entities(st, codes, names, client, years=years))
+        return bg
 
     if geo_level == "place":
         if not codes:
@@ -362,7 +459,15 @@ def prepare_frame(
     df = pd.DataFrame(raw[1:], columns=raw[0])
     # get=NAME,group(X) returns NAME twice; keep the first of any duplicate.
     df = df.loc[:, ~df.columns.duplicated()]
-    df = add_geoid_column(df, geo_level)
+    if geo_level == BLOCK_GROUP and {"state", "county", "tract", BLOCK_GROUP}.issubset(df.columns):
+        geoid = (
+            df["state"].astype(str).str.zfill(2) + df["county"].astype(str).str.zfill(3)
+            + df["tract"].astype(str).str.zfill(6) + df[BLOCK_GROUP].astype(str).str[-1:]
+        )
+        df = df.drop(columns=["GEOID"], errors="ignore")
+        df.insert(0, "GEOID", geoid.values)
+    else:
+        df = add_geoid_column(df, geo_level)
     if options.clean_sentinels:
         df = clean_census_sentinels(df, add_notes=options.add_sentinel_notes)
     if options.inflation_base_year:
@@ -394,7 +499,7 @@ def _rename_column(col: str, mapping: Mapping[str, str]) -> Optional[str]:
         base, suffix = parsed
         return f"{mapping[base]}{suffix}" if base in mapping else None
     info = classify_column(col)
-    if info and info[1] in ("SE", "CV", "RELIABILITY"):
+    if info and info[1] in ("SE", "CV", "RELIABILITY", "CONTROLLED"):
         base, kind, pct = info
         return f"{mapping[base]}{'P' if pct else ''}_{kind}" if base in mapping else None
     return col  # identifiers and geography columns
@@ -457,6 +562,16 @@ def _price_index_error(options: ResearchOptions, years: Sequence[int]) -> Option
     return None
 
 
+def _errata_summary(table_code: str, years: Sequence[int]) -> Any:
+    """Census errata and user notes affecting this table and these releases."""
+    try:
+        from census.errata import errata_summary
+
+        return errata_summary(table_code, years)
+    except Exception as exc:  # noqa: BLE001 - errata lookup must never block a plan
+        return {"error": f"errata lookup unavailable: {exc}"}
+
+
 def plan_extraction(
     table_code: str,
     entities: Sequence[Entity],
@@ -515,6 +630,20 @@ def plan_extraction(
                 f"harmonize_tracts_to requires a panel output format {sorted(PANEL_FORMATS)}.",
             )
 
+    if geo_level == BLOCK_GROUP:
+        if dataset != "acs5":
+            return errors.error_result(
+                errors.INVALID_GEO_LEVEL,
+                f"Block groups are published only in the detailed tables (acs5), not '{dataset}'.",
+            )
+        early = [y for y in years if y < BLOCK_GROUP_FIRST_YEAR]
+        if early:
+            return errors.error_result(
+                errors.INVALID_GEO_LEVEL,
+                f"Block groups are in the ACS 5-year API from the {BLOCK_GROUP_FIRST_YEAR} release; "
+                f"not available for {early}.",
+            )
+
     conc = build_concordance(table_code, dataset, years, client)
     override_report = apply_overrides(conc, client)
     if not conc.concepts:
@@ -543,8 +672,10 @@ def plan_extraction(
     advisories: List[str] = []
     for adv in (
         (
-            f"Tract panel will be harmonized to {options.harmonize_tracts_to} tracts by land-area "
-            "apportionment (census.geo_crosswalk); see tract_harmonization in the extraction metadata. "
+            f"Tract panel will be harmonized to {options.harmonize_tracts_to} tracts with block-population "
+            "weights (housing-unit weights for household and housing tables; land-area weights where block "
+            "data cannot be fetched; census.geo_crosswalk / census.block_weights; first use downloads and "
+            "caches the states' block files); see tract_harmonization in the extraction metadata. "
             "Apportioned MOEs assume independent components and exact weights."
             if options.harmonize_tracts_to and geo_level == "tract"
             else boundary_shift_advisory(years[0], years[-1], geo_level)
@@ -570,6 +701,25 @@ def plan_extraction(
             "drift can block the run. Name the variables your analysis uses."
         )
 
+    block_group_availability: Dict[str, Any] = {}
+    if geo_level == BLOCK_GROUP:
+        block_group_availability = probe_block_group_availability(client, table_code, years, entities)
+        missing = block_group_availability["unpublished_years"]
+        if missing:
+            return errors.error_result(
+                errors.INVALID_GEO_LEVEL,
+                f"{table_code} is not published at block-group level for {missing} (the API returns "
+                "only empty values); use tracts or a table published for block groups.",
+                block_group_availability=block_group_availability,
+            )
+        advisories.append(
+            "Block-group estimates carry large MOEs, and many detailed tables are not published for "
+            "block groups (this table was probed: "
+            + ("published in every checked year" if not block_group_availability["unchecked_years"]
+               else f"unchecked for {block_group_availability['unchecked_years']}")
+            + "). One API request per county per year."
+        )
+
     would_block = False
     block_reason = ""
     if options.concordance_mode == "code" and multi_year and not options.allow_unverified_concordance:
@@ -582,6 +732,8 @@ def plan_extraction(
     cached = 0
     for year in years:
         for ent in entities:
+            if not ent.applies(year):
+                continue
             calls += 1
             if cache is not None:
                 try:
@@ -607,6 +759,7 @@ def plan_extraction(
         "cached_calls": cached,
         "request_targets": len(entities),
         "states_covered": _states_covered(entities),
+        "block_group_availability": block_group_availability or None,
         "selected_concepts": len(selected),
         "selection": resolution,
         "concordance_summary": conc.summary(),
@@ -616,6 +769,7 @@ def plan_extraction(
         "would_block": would_block,
         "block_reason": block_reason,
         "advisories": advisories,
+        "errata": _errata_summary(table_code, years),
         "overrides": override_report,
         "continuity": {
             "checked_concepts": len(continuity_report),
@@ -625,6 +779,40 @@ def plan_extraction(
         "_selected": selected,
         "_continuity": continuity_report,
     }
+
+
+def probe_block_group_availability(
+    client: CensusAPIClient, table_code: str, years: Sequence[int],
+    entity: Union[Entity, Sequence[Entity]],
+) -> Dict[str, Any]:
+    """Is ``table_code`` published for block groups? One (cached) request per year.
+
+    Requests the table for the first block-group target (one county). The API
+    answers tables that are not published for block groups with rows of empty
+    values, so a year is unpublished when every estimate is null. Years whose
+    probe fails (e.g. offline) are listed under ``unchecked_years``.
+    """
+    targets = [entity] if isinstance(entity, Entity) else list(entity)
+    unpublished: List[int] = []
+    unchecked: List[int] = []
+    for year in years:
+        ent = next((e for e in targets if e.applies(year)), None)
+        if ent is None:
+            unchecked.append(year)
+            continue
+        endpoint, params = client.build_request(
+            year=year, table_code=table_code, dataset="acs5", **ent.request_kwargs()
+        )
+        payload = client._get_json(endpoint, params)
+        if not payload or len(payload) < 2:
+            unchecked.append(year)
+            continue
+        header = [str(h) for h in payload[0]]
+        est = [i for i, h in enumerate(header) if h.startswith(table_code + "_") and h.endswith("E")]
+        if est and all(row[i] in (None, "") for row in payload[1:] for i in est):
+            unpublished.append(year)
+    return {"probed_entity": targets[0].name if targets else "",
+            "unpublished_years": unpublished, "unchecked_years": unchecked}
 
 
 def _states_covered(entities: Sequence[Entity]) -> int:
@@ -716,12 +904,15 @@ def run_batch(
     log: Optional[LogFn] = None,
     progress: Optional[ProgressFn] = None,
     variables: Optional[Sequence[str]] = None,
+    plan: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Plan, then download ``table_code`` for every entity x year and write outputs.
 
     Never raises on API failures; check ``success``, ``error_code`` and
     ``failed_calls``. When the plan blocks, the concordance and issue files are
-    still written to ``output_dir`` for review.
+    still written to ``output_dir`` for review. ``plan`` reuses the result of
+    :func:`plan_extraction` for the same arguments (skips planning again:
+    concordance build and block-group probes run once).
     """
     options = options or ResearchOptions()
     emit: LogFn = log or (lambda _msg: None)
@@ -729,9 +920,10 @@ def run_batch(
     if client is None:
         client = CensusAPIClient(cache=get_default_cache() if options.use_cache else None)
 
-    plan = plan_extraction(
-        table_code, entities, years, output_format, options, dataset, variables, client
-    )
+    if plan is None:
+        plan = plan_extraction(
+            table_code, entities, years, output_format, options, dataset, variables, client
+        )
     if not plan.get("success"):
         return plan
     years = plan["years"]
@@ -787,7 +979,7 @@ def run_batch(
         )
 
     is_panel = output_format in PANEL_FORMATS
-    total_calls = len(entities) * len(years)
+    total_calls = sum(1 for y in years for e in entities if e.applies(y))
     call_index = 0
     successful_calls = 0
     failed_calls: List[Dict[str, Any]] = []
@@ -823,6 +1015,8 @@ def run_batch(
                 base: rep for base, rep in conc.rename_map(year).items() if code_map[base] in selected
             }
             for ent in members:
+                if not ent.applies(year):
+                    continue
                 call_index += 1
                 if progress:
                     progress(call_index, total_calls, ent.name, year)

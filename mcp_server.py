@@ -60,7 +60,7 @@ from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs5_overlap_years
-from census import mcp_profiles, recipes, workflows, workflows_inference
+from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference
 
 load_dotenv()
 
@@ -1022,6 +1022,7 @@ for _tool in (
     workflows.draft_rule_override,
     workflows.record_rule_review,
     workflows.run_validation,
+    workflows.download_table,
     workflows_inference.build_analysis_frame,
     workflows_inference.fit_model,
     workflows_inference.small_area_estimates,
@@ -1034,6 +1035,12 @@ for _tool in (
     recipes.get_recipe,
     workflows_inference.create_manifest,
     workflows_inference.run_manifest,
+    workflows_geo.get_boundaries,
+    workflows_geo.make_map,
+    workflows_geo.spatial_autocorrelation,
+    workflows_geo.spatial_regression,
+    workflows_geo.spatial_small_area_estimates,
+    workflows_geo.custom_area_mapping,
 ):
     mcp.tool()(_tool)
 
@@ -1048,6 +1055,7 @@ replay_extraction = workflows.replay_extraction
 draft_rule_override = workflows.draft_rule_override
 record_rule_review = workflows.record_rule_review
 run_validation = workflows.run_validation
+download_table = workflows.download_table
 build_analysis_frame = workflows_inference.build_analysis_frame
 fit_model = workflows_inference.fit_model
 small_area_estimates = workflows_inference.small_area_estimates
@@ -1059,6 +1067,12 @@ make_figure = workflows_inference.make_figure
 make_table = workflows_inference.make_table
 create_manifest = workflows_inference.create_manifest
 run_manifest = workflows_inference.run_manifest
+get_boundaries = workflows_geo.get_boundaries
+make_map = workflows_geo.make_map
+spatial_autocorrelation = workflows_geo.spatial_autocorrelation
+spatial_regression = workflows_geo.spatial_regression
+spatial_small_area_estimates = workflows_geo.spatial_small_area_estimates
+custom_area_mapping = workflows_geo.custom_area_mapping
 get_recipe = recipes.get_recipe
 
 

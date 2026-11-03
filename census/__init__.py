@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Headless Census ACS data client and processing library."""
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from census.api import (
     DATASETS,
@@ -184,6 +184,13 @@ from census.correlation import correlation_matrix
 from census.report_tables import results_bundle
 from census.manifest import create_manifest, label_exploratory, manifest_hash, methods_section, run_manifest, validate_manifest
 from census.models import INTERVAL_TARGETS
+from census.boundaries import equal_area_crs, get_boundaries, join_boundaries, write_geo
+from census.maps import choropleth, class_separability, significance_map, uncertainty_map
+from census.spatial import local_morans, morans_i, spatial_regression, spatial_weights
+from census.sae_spatial import spatial_fay_herriot
+from census.block_weights import tract_weights
+from census.custom_areas import aggregate_custom_areas, allocate_units, read_areas
+from census.errata import errata_for, errata_summary
 
 __all__ = [
     # api
@@ -387,4 +394,24 @@ __all__ = [
     "run_manifest",
     "validate_manifest",
     "INTERVAL_TARGETS",
+    # Round 9: geography, maps, spatial
+    "equal_area_crs",
+    "get_boundaries",
+    "join_boundaries",
+    "write_geo",
+    "choropleth",
+    "class_separability",
+    "significance_map",
+    "uncertainty_map",
+    "local_morans",
+    "morans_i",
+    "spatial_regression",
+    "spatial_weights",
+    "spatial_fay_herriot",
+    "tract_weights",
+    "aggregate_custom_areas",
+    "allocate_units",
+    "read_areas",
+    "errata_for",
+    "errata_summary",
 ]

@@ -43,9 +43,14 @@ so the weights of each source sum to 1. A source with no land (water-only
 tracts) falls back to total area (land + water) of the parts, and a source
 with no area at all to an equal split; both are counted in the crosswalk's
 ``attrs["fallbacks"]``. Land-area weights assume people are spread evenly over
-each source tract's land; population-based weights (for example NHGIS
-block-based crosswalks, which have their own terms of use) are more accurate
-and can be supplied with :func:`load_weight_file`.
+each source tract's land. ``weight="population"`` / ``"housing_units"``
+build block-based weights from decennial block counts and the Census
+2010-2020 block relationship files (:mod:`census.block_weights`); states whose
+block data cannot be fetched fall back to land-area weights with a note.
+:func:`harmonize_panel` uses block weights by default (``weight="auto"``:
+housing-unit weights for household and housing tables, population weights
+otherwise). Other crosswalks (e.g. NHGIS) can be supplied with
+:func:`load_weight_file`.
 
 Apportioned estimate and MOE (method ``apportioned``):
 
@@ -87,7 +92,10 @@ DIRECTIONS = ("2010_to_2020", "2020_to_2010")
 WEIGHT_LAND = "land_area"
 WEIGHT_TOTAL = "total_area"
 WEIGHT_POPULATION = "population"
+WEIGHT_HOUSING = "housing_units"
+WEIGHT_AUTO = "auto"
 AREA_WEIGHTS = (WEIGHT_LAND, WEIGHT_TOTAL)
+BLOCK_WEIGHT_TYPES = (WEIGHT_POPULATION, WEIGHT_HOUSING)
 
 CROSSWALK_COLUMNS = ["source_geoid", "target_geoid", "weight"]
 TRACT_GEOID_LENGTH = 11
@@ -315,12 +323,19 @@ def tract_crosswalk(
     weight: str = WEIGHT_LAND,
     weights_file: Optional[str] = None,
     relationships: Optional[pd.DataFrame] = None,
+    states: Optional[Sequence[str]] = None,
+    block_fallback: bool = True,
 ) -> pd.DataFrame:
     """Weights table ``source_geoid, target_geoid, weight`` (+ ``part_area``).
 
     ``direction``: ``"2010_to_2020"`` or ``"2020_to_2010"`` (Census codes).
-    ``weight``: ``"land_area"`` (default), ``"total_area"`` (land + water), or
-    ``"population"`` with ``weights_file`` (see :func:`load_weight_file`).
+    ``weight``: ``"land_area"`` (default here), ``"total_area"`` (land +
+    water), ``"population"`` or ``"housing_units"`` (block-count weights from
+    :mod:`census.block_weights` for ``states``, default all 52; downloads and
+    caches block files), or any label with ``weights_file`` (see
+    :func:`load_weight_file`). With ``block_fallback`` (default), states whose
+    block data cannot be fetched use land-area weights and ``notes`` and
+    ``fallbacks["block_data_unavailable"]`` say so; otherwise ValueError.
     Weights of every source tract sum to 1. ``part_area`` is the area of each
     intersection used for weighting; :func:`apportion` uses it to measure how
     much of a target tract the input covers.
@@ -330,22 +345,22 @@ def tract_crosswalk(
     """
     if direction not in DIRECTIONS:
         raise ValueError(f"direction must be one of {DIRECTIONS}")
-    if weights_file is not None or weight == WEIGHT_POPULATION:
-        if weights_file is None:
-            raise ValueError(
-                "weight='population' needs weights_file= (e.g. an NHGIS block-based tract "
-                "crosswalk with columns source_geoid, target_geoid, weight)"
-            )
+    if weights_file is None and weight in BLOCK_WEIGHT_TYPES:
+        return _block_crosswalk(direction, weight, states, relationships, block_fallback)
+    if weights_file is not None:
         cw = load_weight_file(weights_file)
         cw.attrs.update(
-            weight_type=weight if weight not in AREA_WEIGHTS else "user-supplied",
+            # the file's weights are whatever the user built; never report a default label
+            weight_type="user-supplied",
+            weight_label=None if weight in AREA_WEIGHTS else weight,
             direction=direction,
             fallbacks={},
-            notes=[f"weights from user-supplied file {os.path.basename(weights_file)}"],
+            notes=[f"weights from user-supplied file {os.path.basename(weights_file)}"
+                   + (f" (labelled '{weight}' by the user)" if weight not in AREA_WEIGHTS else "")],
         )
         return cw
     if weight not in AREA_WEIGHTS:
-        raise ValueError(f"weight must be one of {AREA_WEIGHTS + (WEIGHT_POPULATION,)}")
+        raise ValueError(f"weight must be one of {AREA_WEIGHTS + BLOCK_WEIGHT_TYPES}")
 
     rel = relationships if relationships is not None else load_tract_relationships()
     src, tgt = ("geoid_2010", "geoid_2020") if direction == "2010_to_2020" else ("geoid_2020", "geoid_2010")
@@ -385,6 +400,46 @@ def tract_crosswalk(
         fallbacks={"total_area": n_total, "equal_split": n_equal},
         notes=notes,
         source=relationship_source(),
+    )
+    return out
+
+
+def _block_crosswalk(
+    direction: str,
+    weight: str,
+    states: Optional[Sequence[str]],
+    relationships: Optional[pd.DataFrame],
+    block_fallback: bool,
+) -> pd.DataFrame:
+    from . import block_weights as bw
+
+    cw = bw.tract_weights(states, direction, weight, on_error="skip")
+    failed: Dict[str, str] = dict(cw.attrs.get("failed_states", {}))
+    notes = list(cw.attrs.get("notes", []))
+    fallbacks = dict(cw.attrs.get("fallbacks", {}))
+    parts = [cw[CROSSWALK_COLUMNS + ["part_area"]]] if len(cw) else []
+    if failed:
+        reason = "; ".join(f"{st}: {msg}" for st, msg in sorted(failed.items())[:3])
+        if not block_fallback:
+            raise ValueError(f"block data unavailable for state(s) {sorted(failed)} ({reason})")
+        land = tract_crosswalk(direction, WEIGHT_LAND, relationships=relationships)
+        parts.append(land.loc[land["source_geoid"].str[:2].isin(set(failed))])
+        notes.append(
+            f"block data unavailable for state(s) {', '.join(sorted(failed))} ({reason}); "
+            f"land-area weights used there instead of {weight} weights"
+        )
+        notes.append(NOTE_LAND)
+    cols = CROSSWALK_COLUMNS + ["part_area"]
+    out = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=cols)
+    out = out.sort_values(["source_geoid", "target_geoid"]).reset_index(drop=True)
+    fallbacks["block_data_unavailable"] = sorted(failed)
+    out.attrs.update(
+        weight_type=weight if len(cw) else WEIGHT_LAND,
+        requested_weight=weight,
+        direction=direction,
+        fallbacks=fallbacks,
+        notes=notes,
+        source=cw.attrs.get("source", {}),
     )
     return out
 
@@ -709,6 +764,8 @@ def apportion(
     result = result.loc[~low].drop(columns="coverage").reset_index(drop=True)
 
     weight_type = crosswalk.attrs.get("weight_type", "user-supplied")
+    if crosswalk.attrs.get("weight_label"):
+        weight_type = f"{weight_type} ({crosswalk.attrs['weight_label']})"
     notes = [
         f"apportioned with {weight_type} weights; estimate = sum(w * X)",
         NOTE_INDEPENDENCE,
@@ -830,7 +887,7 @@ def _recompute_reliability(panel: pd.DataFrame, rows: pd.Index) -> None:
 def harmonize_panel(
     df: pd.DataFrame,
     target_vintage: int = 2020,
-    weight: str = WEIGHT_LAND,
+    weight: str = WEIGHT_AUTO,
     weights_file: Optional[str] = None,
     crosswalk: Optional[pd.DataFrame] = None,
     geoid_col: str = "GEOID",
@@ -861,6 +918,13 @@ def harmonize_panel(
     region codes when ``ct_coding`` is ``"2022"`` (``"auto"``: when the panel
     has a 2022+ release) and the former county codes when ``"2020"``.
 
+    Weights (``weight``): ``"auto"`` (default) uses block housing-unit weights
+    for household and housing tables (``census.block_weights.weight_for_variable``)
+    and block population weights otherwise, built only for the panel's states;
+    ``"population"``, ``"housing_units"``, ``"land_area"`` or ``"total_area"``
+    apply one weight to every column. States without block data fall back to
+    land-area weights (noted in the record).
+
     The returned frame's ``attrs["harmonization"]`` (and the second element
     when ``return_record=True``) is a JSON-ready record for run metadata.
     """
@@ -878,8 +942,21 @@ def harmonize_panel(
     if ct_coding not in ("2020", "2022"):
         raise ValueError("ct_coding must be 'auto', '2020', or '2022'")
 
+    if crosswalk is None and weights_file is None and weight == WEIGHT_AUTO:
+        split = _split_by_weight(df, geoid_col, year_col, long_format)
+        if len(split) > 1:
+            return _harmonize_split(split, df, geoid_col, year_col, long_format, return_record, dict(
+                target_vintage=target_vintage, geoid_col=geoid_col, year_col=year_col, metadata=metadata,
+                assume_additive=assume_additive, non_additive=non_additive, min_coverage=min_coverage,
+                zero_estimate_rule=zero_estimate_rule, ct_coding=ct_coding,
+            ))
+        weight = next(iter(split)) if split else WEIGHT_POPULATION
     if crosswalk is None:
-        crosswalk = tract_crosswalk(direction, weight=weight, weights_file=weights_file)
+        states = sorted({g[:2] for g in normalize_tract_geoids(df[geoid_col]).astype(str)})
+        crosswalk = tract_crosswalk(
+            direction, weight=weight, weights_file=weights_file,
+            states=(states or None) if weight in BLOCK_WEIGHT_TYPES else None,
+        )
     cw = crosswalk.copy()
     cw.attrs = dict(crosswalk.attrs)
 
@@ -928,8 +1005,11 @@ def harmonize_panel(
         "target_vintage": target_vintage,
         "direction": direction,
         "weight_type": cw.attrs.get("weight_type", "user-supplied"),
+        "requested_weight": cw.attrs.get("requested_weight", cw.attrs.get("weight_type", "user-supplied")),
+        "block_data_unavailable": list(cw.attrs.get("fallbacks", {}).get("block_data_unavailable", [])),
         "weights_file": os.path.basename(weights_file) if weights_file else None,
         "relationship_file": relationship_source() if weights_file is None else None,
+        "block_source": cw.attrs.get("source") if cw.attrs.get("requested_weight") in BLOCK_WEIGHT_TYPES else None,
         "years_native": native_years,
         "years_apportioned": src_years,
         "connecticut_coding": ct_coding if target_vintage == 2020 else "2020 county-based",
@@ -984,6 +1064,84 @@ def harmonize_panel(
     return (out, record) if return_record else out
 
 
+def _weight_kind(item: str) -> str:
+    from .block_weights import weight_for_variable
+
+    base = _DERIVED_SUFFIX_RE.sub(r"\g<key>", item)
+    base = base[: -len("_NOTE")] if base.endswith("_NOTE") else base
+    return weight_for_variable(base) if parse_variable_code(base) else WEIGHT_POPULATION
+
+
+def _split_by_weight(df: pd.DataFrame, geoid_col: str, year_col: str, long_format: bool) -> Dict[str, List[str]]:
+    """weight type -> variables (long) or columns (wide) for ``weight="auto"``."""
+    items = [str(v) for v in pd.unique(df["variable"])] if long_format else [
+        str(c) for c in df.columns if c not in (geoid_col, year_col)
+    ]
+    groups: Dict[str, List[str]] = {}
+    for item in items:
+        groups.setdefault(_weight_kind(item), []).append(item)
+    if not long_format and len(groups) > 1:
+        pop_values = [c for c in groups[WEIGHT_POPULATION] if parse_variable_code(_DERIVED_SUFFIX_RE.sub(r"\g<key>", c))]
+        if not pop_values:  # only NAME-like columns besides housing variables
+            return {WEIGHT_HOUSING: groups[WEIGHT_HOUSING] + groups[WEIGHT_POPULATION]}
+    return groups
+
+
+def _harmonize_split(
+    split: Dict[str, List[str]],
+    df: pd.DataFrame,
+    geoid_col: str,
+    year_col: str,
+    long_format: bool,
+    return_record: bool,
+    kwargs: Dict[str, Any],
+) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
+    """Harmonize each weight group separately and recombine (``weight="auto"``)."""
+    results: List[pd.DataFrame] = []
+    records: Dict[str, Dict[str, Any]] = {}
+    for kind, items in split.items():
+        if long_format:
+            part = df.loc[df["variable"].astype(str).isin(items)]
+        else:
+            part = df[[geoid_col, year_col] + items]
+        res, rec = harmonize_panel(part, weight=kind, return_record=True, **kwargs)  # type: ignore[misc]
+        results.append(res)
+        records[kind] = rec
+    if long_format:
+        out = pd.concat(results, ignore_index=True, sort=False)
+        out = out.sort_values([geoid_col, year_col, "variable"]).reset_index(drop=True)
+    else:
+        out = results[0]
+        for res in results[1:]:
+            out = out.merge(res, on=[geoid_col, year_col], how="outer")
+        out = out[[c for c in df.columns if c in out.columns]]
+        out = out.sort_values([geoid_col, year_col]).reset_index(drop=True)
+    record = dict(next(iter(records.values())))
+    merged: Dict[str, Dict[str, Any]] = {"unmatched_geoids": {}, "dropped_columns": {}, "incomplete_targets": {}}
+    for r in records.values():
+        for key, acc in merged.items():
+            for k, v in r.get(key, {}).items():
+                if isinstance(v, list):
+                    acc[k] = sorted(set(acc.get(k, [])) | set(v))
+                elif isinstance(v, (int, float)):
+                    acc[k] = max(acc.get(k, 0), v)
+                else:
+                    acc[k] = v
+    record.update(merged)
+    record.update(
+        weight_type=WEIGHT_AUTO,
+        requested_weight=WEIGHT_AUTO,
+        weights_by_variable={k: list(v) for k, v in split.items()},
+        block_data_unavailable=sorted({s for r in records.values() for s in r.get("block_data_unavailable", [])}),
+        weight_records={k: {"weight_type": r["weight_type"], "notes": r["notes"]} for k, r in records.items()},
+        notes=list(dict.fromkeys(n for r in records.values() for n in r["notes"])),
+        rows_in=int(len(df)),
+        rows_out=int(len(out)),
+    )
+    out.attrs["harmonization"] = record
+    return (out, record) if return_record else out
+
+
 def _apportion_wide_panel_rows(
     rows: pd.DataFrame, cw: pd.DataFrame, year_col: str, kwargs: Dict[str, Any]
 ) -> pd.DataFrame:
@@ -1030,4 +1188,7 @@ __all__ = [
     "relationship_source",
     "tract_crosswalk",
     "tract_vintage",
+    "BLOCK_WEIGHT_TYPES",
+    "WEIGHT_AUTO",
+    "WEIGHT_HOUSING",
 ]

@@ -1,0 +1,14 @@
+grapes.csv, grapesprox_nonzero.csv
+  Converted (pyreadr, values exact as stored) from the read-only GitHub mirror of CRAN package sae:
+  https://raw.githubusercontent.com/cran/sae/master/data/grapes.rda
+  https://raw.githubusercontent.com/cran/sae/master/data/grapesprox.rda
+  grapesprox_nonzero.csv lists the nonzero entries (1-based row, col) of the 274 x 274 row-standardized proximity matrix.
+
+grapes_reference.json
+  Published printed output of the sae help-page examples (eblupSFH: ML and REML; mseSFH: REML analytic MSE),
+  as rendered by rdrr.io ("sae documentation built on March 26, 2020"):
+  https://rdrr.io/cran/sae/man/eblupSFH.html
+  https://rdrr.io/cran/sae/man/mseSFH.html
+  Example call published in Molina & Marhuenda (2015), The R Journal 7(1):81-98, Example 2
+  (https://journal.r-project.org/archive/2015/RJ-2015-007/RJ-2015-007.pdf); the paper itself shows the results only as a figure.
+  Retrieved 2026-11-02.

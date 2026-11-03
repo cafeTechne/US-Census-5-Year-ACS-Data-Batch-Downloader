@@ -7,9 +7,10 @@ failure, ``error_code`` (census.errors). The MCP server registers these
 functions directly as tools, so their docstrings are the tool descriptions.
 """
 
+import functools
 import math
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -46,6 +47,59 @@ def _default_year(dataset: str = "acs5") -> int:
 
 def _client(use_cache: bool = True) -> CensusAPIClient:
     return CensusAPIClient(cache=get_default_cache() if use_cache else None)
+
+
+_FIX_NEXT_STEP = "fix the arguments as described in `error` and call again, or get_recipe for the standard steps"
+
+
+def _guided(summary: Callable[[Dict[str, Any]], str], next_step: Union[str, Callable[[Dict[str, Any]], str]]):
+    """Give a workflow result native ``summary`` (one sentence) and ``next_step``.
+
+    Errors (``success`` False with ``error``/``error_code``) get the error message
+    as summary and a fix-and-retry next step; other unsuccessful results (e.g.
+    failed validation checks) keep the workflow's own summary and next step.
+    The wrapped function keeps its name, docstring and signature (MCP schema).
+    """
+
+    def decorate(fn: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            out = fn(*args, **kwargs)
+            if not isinstance(out, dict):
+                return out
+            if out.get("success") is False and (out.get("error") or out.get("error_code") or out.get("message")):
+                text, step = str(out.get("error") or out.get("message") or "The call failed."), _FIX_NEXT_STEP
+            else:
+                try:
+                    text = summary(out)
+                except (KeyError, TypeError, ValueError, IndexError):
+                    text = "Done."
+                step = next_step(out) if callable(next_step) else next_step
+            rest = {k: v for k, v in out.items() if k not in ("summary", "next_step")}
+            return {"summary": out["summary"] if isinstance(out.get("summary"), str) else text,
+                    "next_step": out.get("next_step") or step, **rest}
+
+        return wrapper
+
+    return decorate
+
+
+def _num(value: Any, spec: str = ".4g") -> str:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "undefined"
+    return format(v, spec) if math.isfinite(v) else "undefined"
+
+
+def _derived_summary(out: Dict[str, Any]) -> str:
+    if "estimate" in out:
+        est, moe = _num(out.get("estimate")), _num(out.get("moe"))
+        if est == "undefined":
+            return f"{out.get('method', 'derived')} estimate undefined (see notes)."
+        moe_txt = f"90% MOE {moe}" if moe != "undefined" else "MOE undefined (see notes)"
+        return f"{out.get('method', 'derived')} estimate {est} with {moe_txt}."
+    return f"{len(out.get('results') or [])} row(s) computed."
 
 
 _DERIVE_OPS = ("proportion", "ratio", "product", "difference", "percent_change", "sum")
@@ -132,6 +186,7 @@ def _derived_result(result: Any) -> Dict[str, Any]:
     return {"success": True, "results": _records(result)}
 
 
+@_guided(_derived_summary, "calculate_significance to compare this estimate with another")
 def derive_estimate(
     operation: str,
     estimates: List[float],
@@ -185,6 +240,13 @@ def derive_estimate(
     return _derived_result(res)
 
 
+@_guided(
+    lambda o: ("Replicate tables are available." if o.get("available") else
+               f"Replicate tables are not available: {o.get('reason', '')}".rstrip(": ") + "."),
+    lambda o: ("aggregate_geographies or median_from_distribution with use_replicates=True for exact MOEs"
+               if o.get("available") else
+               "use the approximate formulas (derive_estimate; aggregate_geographies method='approximate')"),
+)
 def check_replicate_availability(table_code: str, year: int, geo_level: str) -> Dict[str, Any]:
     """Whether the Census Bureau publishes Variance Replicate Estimate tables
     (80 replicates, exact variances) for a detailed table, ACS 5-year release, and
@@ -200,6 +262,10 @@ def check_replicate_availability(table_code: str, year: int, geo_level: str) -> 
         return errors.error_result(errors.INVALID_INPUT, str(exc))
 
 
+@_guided(
+    lambda o: f"Aggregated into {o['groups']} group(s); written to {o['output_path']}.",
+    "derive_estimate for rates, or batch_significance on output_path to compare groups",
+)
 def aggregate_geographies(
     input_path: str,
     groups: Dict[str, str],
@@ -300,6 +366,7 @@ def _replicates_for(table_code: str, year: int, df: pd.DataFrame, geoids: List[s
     return fetch_vre(table_code.upper(), year, level)
 
 
+@_guided(_derived_summary, "calculate_significance to compare this median with another")
 def median_from_distribution(
     table_code: str,
     year: int,
@@ -378,6 +445,11 @@ def median_from_distribution(
     return _derived_result(res)
 
 
+@_guided(
+    lambda o: (f"{o['significant_adjusted']} of {o['family_size']} geographies differ significantly after "
+               f"{o['correction']} correction ({o['significant_raw']} before correction)."),
+    "report significant_adjusted (not significant_raw) and name the correction",
+)
 def batch_significance(
     input_path: str,
     est1: str,
@@ -426,21 +498,26 @@ def batch_significance(
     }
 
 
+@_guided(
+    lambda o: f"Harmonized {o['rows']} row(s) to one tract vintage; written to {o['output_path']}.",
+    "build_analysis_frame or batch_significance on output_path",
+)
 def apportion_tracts(
     input_path: str,
     target_vintage: int = 2020,
-    weight: str = "land_area",
+    weight: str = "auto",
     weights_file: Optional[str] = None,
     output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Harmonize a tract panel across the 2010/2020 tract boundary change.
 
     ACS releases through 2019 use 2010 tracts; 2020 onward use 2020 tracts.
-    Rows from releases on the other tract vintage are apportioned with the Census
-    tract relationship file: estimate = sum(w * X), MOE = sqrt(sum((w * MOE)^2)).
-    Land-area weights assume people are spread evenly over land; pass an
-    NHGIS-style weights_file (source_geoid, target_geoid, weight) for
-    population-based weights. Connecticut's 2022 planning-region GEOIDs are
+    Rows from releases on the other tract vintage are apportioned:
+    estimate = sum(w * X), MOE = sqrt(sum((w * MOE)^2)). weight="auto" (default)
+    uses decennial block weights (housing units for household/housing tables,
+    population otherwise), falling back to land area with a note when block data
+    cannot be fetched; "population", "housing_units", "land_area", or an
+    NHGIS-style weights_file (source_geoid, target_geoid, weight) are also accepted. Connecticut's 2022 planning-region GEOIDs are
     handled. Medians, means, and percentages are refused: apportion counts, then
     re-derive. Prefer batch_download(harmonize_tracts_to=...) for new extractions.
     """
@@ -458,6 +535,12 @@ def apportion_tracts(
     return {"success": True, "output_path": path, "rows": int(len(out)), "harmonization": _jsonable(record)}
 
 
+@_guided(
+    lambda o: ("Replay verified: outputs match the original extraction." if o.get("verified")
+               else "Replay finished; outputs differ from the original or were not verified (see explanation)."),
+    lambda o: ("cite the replay in your methods" if o.get("verified")
+               else "report provenance_differences and the changed cells; they are not errors"),
+)
 def replay_extraction(
     metadata_path: str, verify: bool = True, output_dir: Optional[str] = None, refresh: bool = False
 ) -> Dict[str, Any]:
@@ -528,6 +611,12 @@ def record_rule_review(row: Dict[str, str], reviewed_by: str, dataset: str = "")
     return _jsonable(_record_rule(row, reviewed_by, dataset, client=_client()))
 
 
+@_guided(
+    lambda o: ("All validation checks passed." if o.get("success") else
+               "Validation failed: " + ", ".join(o["checks_summary"]["failed"] + o["checks_summary"]["errors"]) + "."),
+    lambda o: ("cite docs/audits/validation_report.md" if o.get("success")
+               else "inspect failures of each failed check in results"),
+)
 def run_validation(
     checks: Optional[str] = None,
     live: bool = False,
@@ -552,7 +641,8 @@ def run_validation(
             files are written; docs/audits/validation_report.md holds the latest
             committed live report.
 
-    Returns success (all checks passed), summary, and per-check results with
+    Returns success (all checks passed), summary (one line), checks_summary
+    (passed/failed/errors), and per-check results with
     n_compared, n_failed, max errors, tolerance, Census sources, and failures.
     """
     from census import validation
@@ -564,4 +654,85 @@ def run_validation(
     payload = validation.run_validation(
         checks=parsed, live=live, output_dir=output_dir, write_reports=bool(output_dir)
     )
+    # The per-check tally is ``checks_summary``; ``summary`` is the one-line text.
+    payload["checks_summary"] = payload.pop("summary")
     return _jsonable(payload)
+
+
+# ---------------------------------------------------------------------------
+# Round 9 (G2): slim download for the core MCP profile
+# ---------------------------------------------------------------------------
+
+def _parse_geography(geography: str) -> tuple:
+    """'county' -> ('county', None); 'county:453,201' -> ('county', ['453', '201'])."""
+    level, _, codes = str(geography or "").partition(":")
+    code_list = [c.strip() for c in codes.split(",") if c.strip()] or None
+    return level.strip().lower(), code_list
+
+
+@_guided(
+    lambda o: (f"Downloaded {o['table_code']} {o.get('years_requested')}: {o['successful_calls']} of "
+               f"{o['total_calls_attempted']} call(s) succeeded; panel at {o.get('panel_path')}."),
+    "derive_estimate for rates, or build_analysis_frame(input_path=panel_path) for models",
+)
+def download_table(
+    table_code: str,
+    geography: str,
+    state_code: Optional[str] = None,
+    years: Optional[List[int]] = None,
+    variables: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Download one ACS 5-year table to a tidy panel (CSV) with codebook, SE/CV
+    and reliability columns. Plans first and stops if the plan would block.
+
+    Args:
+        table_code: e.g. 'B17001', 'DP03', 'S1701'.
+        geography: 'us', 'state', 'county', 'tract', 'place', 'zcta' or 'msa';
+            add ':codes' to pick areas, e.g. 'county:453,201' or 'place:35000'.
+        state_code: 2-digit state FIPS (required for county, tract, place).
+        years: ACS 5-year releases, e.g. [2018, 2023] (default: latest).
+        variables: Codes the analysis uses, e.g. ['B17001_001', 'B17001_002']
+            (default: the whole table, which blocks more often across years).
+        output_dir: Destination folder (default downloads/).
+
+    Tract releases spanning 2019 and 2020 are apportioned to 2020 tracts. For
+    any other option use batch_download (full profile).
+    """
+    from census.pipeline import ResearchOptions, build_entities, plan_extraction, public_plan, run_batch
+
+    try:
+        level, codes = _parse_geography(geography)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
+    table = str(table_code).strip().upper()
+    year_list = sorted({int(y) for y in years}) if years else [_default_year(infer_dataset(table))]
+    options = ResearchOptions(compute_reliability=True, include_codebook=True)
+    if level == "tract" and year_list[0] <= 2019 < year_list[-1]:
+        options.harmonize_tracts_to = 2020  # releases span the 2010/2020 tract change
+    client = _client()
+    try:
+        entities = build_entities(level, state_code, codes, client=client, years=year_list)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
+    plan = plan_extraction(table, entities, year_list, "panel", options, None, variables, client)
+    if not plan.get("success"):
+        return _jsonable(plan)
+    if plan.get("would_block"):
+        info = public_plan(plan)
+        return {
+            "success": False,
+            "error_code": errors.CONCORDANCE_REVIEW_REQUIRED,
+            "error": f"Plan would block: {plan.get('block_reason') or 'unresolved concordance issues'}.",
+            "would_block": True,
+            "issues": _jsonable(info.get("issues", [])[:10]),
+            "issue_count": info.get("issue_count"),
+            "next_step": "name fewer variables (variables=[...]) or fewer years, or use check_variable_concordance",
+        }
+    base_dir = output_dir or os.path.join(ROOT, "downloads")
+    out = run_batch(table, entities, year_list, base_dir, "panel", options, None, client, variables=variables,
+                    plan=plan)
+    out = _jsonable(out)
+    if isinstance(out, dict) and out.get("success"):
+        out["years_requested"] = year_list
+    return out

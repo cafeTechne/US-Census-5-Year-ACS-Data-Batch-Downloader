@@ -149,11 +149,14 @@ def test_reverse_direction(sample_rel):
     assert rows[["target_geoid", "weight"]].values.tolist() == [[SPLIT_2010, 1.0]]
 
 
-def test_invalid_arguments():
+def test_invalid_arguments(monkeypatch, tmp_path):
     with pytest.raises(ValueError):
         gc.tract_crosswalk("2000_to_2010")
-    with pytest.raises(ValueError, match="weights_file"):
-        gc.tract_crosswalk(weight="population")
+    # Round 9: population weights come from block data; offline with no cache -> error when no fallback.
+    monkeypatch.setenv("CENSUS_BLOCK_DIR", str(tmp_path))
+    monkeypatch.setenv("CENSUS_BLOCK_OFFLINE", "1")
+    with pytest.raises(ValueError, match="block data unavailable"):
+        gc.tract_crosswalk(weight="population", states=["10"], block_fallback=False)
     with pytest.raises(ValueError):
         gc.tract_crosswalk(weight="housing")
 
@@ -198,7 +201,8 @@ def test_population_weights_via_tract_crosswalk(tmp_path):
     path = tmp_path / "pop.csv"
     path.write_text("source_geoid,target_geoid,weight\n01001020500,01001020501,0.5\n01001020500,01001020502,0.5\n")
     cw = gc.tract_crosswalk(weight="population", weights_file=str(path))
-    assert cw.attrs["weight_type"] == "population"
+    assert cw.attrs["weight_type"] == "user-supplied"  # a file is never reported as Census block weights
+    assert cw.attrs["weight_label"] == "population"
     out = gc.apportion(_frame([[SPLIT_2010, 100, 20]]), cw, metadata=COUNT_META, min_coverage=0)
     assert out["B01003_001E"].tolist() == [50.0, 50.0]
     assert "population" in out.attrs["notes"][0]

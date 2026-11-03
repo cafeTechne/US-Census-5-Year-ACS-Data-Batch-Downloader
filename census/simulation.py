@@ -10,9 +10,12 @@ ACS-like error
 --------------
 * CVs are drawn from log-normal profiles (:data:`CV_PROFILES`). ``county``
   matches the published county MOEs in ``tests/fixtures/validation`` (79,444
-  estimate/MOE pairs: CV quartiles 5.8 / 14.3 / 30.4 %); ``tract`` is an
-  assumption (median CV 22%, no tract fixture is archived) and the covariate
-  profile used for measurement-error studies.
+  estimate/MOE pairs: CV quartiles 5.8 / 14.3 / 30.4 %); ``tract`` is derived
+  by :func:`derive_cv_profile` from real 2023 tract MOEs in
+  ``tests/fixtures/cv_profile`` (4,917 estimate/MOE pairs from 1,278 tracts in
+  six counties: B17001 totals and poverty counts, B19013 and B25064 medians;
+  CV quartiles 8.4 / 13.4 / 26.2 %) and is the profile used for
+  measurement-error studies.
 * Standard errors are CV x the variable's population mean scale (so error
   does not depend on the true value), and sampling errors of the variables in
   one unit can be correlated.
@@ -45,11 +48,38 @@ BAND = (0.88, 0.92)
 CV_PROFILES = {
     "county": {"median": 14.3, "sigma": 1.23, "clip": (0.5, 100.0),
                "source": "tests/fixtures/validation county MOEs (quartiles 5.8/14.3/30.4%)"},
-    "tract": {"median": 22.0, "sigma": 0.6, "clip": (3.0, 100.0),
-              "source": "assumed tract profile (no tract fixture archived)"},
+    "tract": {"median": 13.4, "sigma": 0.84, "clip": (2.4, 79.2),
+              "source": "tests/fixtures/cv_profile/tract_moes_2023.csv (derive_cv_profile; "
+                        "quartiles 8.4/13.4/26.2%, 1st/99th percentiles 2.4/79.2%)"},
     "county_covariate": {"median": 8.0, "sigma": 0.6, "clip": (1.0, 60.0),
                          "source": "lower-CV share of the county profile (derived-rate covariates)"},
 }
+
+
+def derive_cv_profile(path: str, z: float = 1.645) -> Dict[str, Any]:
+    """Log-normal CV profile from a CSV of raw Census ``<base>E``/``<base>M`` columns.
+
+    CV (percent) = (MOE / z) / estimate x 100 over every pair with a positive
+    estimate and a published (non-negative) MOE, pooled across variables.
+    median = median CV; sigma = IQR of log CV / 1.349 (robust to the long
+    tail); clip = 1st and 99th percentiles.
+    """
+    df = pd.read_csv(path, dtype=str)
+    cvs = []
+    for col in df.columns:
+        if col.endswith("E") and f"{col[:-1]}M" in df.columns:
+            est = pd.to_numeric(df[col], errors="coerce")
+            moe = pd.to_numeric(df[f"{col[:-1]}M"], errors="coerce")
+            ok = (est > 0) & (moe >= 0)
+            cvs.append((moe[ok] / z / est[ok] * 100).to_numpy())
+    cv = np.concatenate(cvs) if cvs else np.array([])
+    cv = cv[cv > 0]
+    if not len(cv):
+        raise ValueError(f"No usable estimate/MOE pairs in {path}.")
+    q1, q25, q50, q75, q99 = np.percentile(cv, [1, 25, 50, 75, 99])
+    return {"median": float(q50), "sigma": float((np.log(q75) - np.log(q25)) / 1.349),
+            "clip": (float(q1), float(q99)), "quartiles": (float(q25), float(q50), float(q75)),
+            "n_pairs": int(len(cv))}
 
 
 def draw_cv(n: int, profile: str, rng: np.random.Generator) -> np.ndarray:
@@ -367,3 +397,145 @@ def run_study(cfg: SimConfig = FULL, studies: Optional[Sequence[str]] = None,
 
 def fast_config(**overrides: Any) -> SimConfig:
     return replace(FAST, **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Round 9 (PLAN_ROUND_9 sec. 5): spatially correlated populations
+# ---------------------------------------------------------------------------
+# Registered in STUDIES but given no default reps, so run_study(FULL/FAST)
+# output is unchanged; use spatial_config() to run them, e.g.
+# run_study(spatial_config(fast=True), studies=list(SPATIAL_STUDIES)).
+
+SPATIAL_REPS_FULL = {"spatial_fay_herriot": 1000, "morans_i_replicate_se": 2000}
+SPATIAL_REPS_FAST = {"spatial_fay_herriot": 40, "morans_i_replicate_se": 150}
+SAR_RHO = 0.5           # SAR(1) autocorrelation of area effects (spatial FH study)
+MORAN_RHO = 0.6         # SAR(1) autocorrelation of the true-value surface (Moran study)
+MORAN_SIGNAL_SD = 15.0  # SD of the SAR innovations (true-value surface, mean 50)
+
+
+def lattice_weights(side: int, ids: Optional[Sequence[str]] = None):
+    """Rook-contiguity libpysal W on a side x side lattice (ids = GEOIDs), row-standardized."""
+    import libpysal
+
+    ids = list(ids) if ids is not None else _geoids(side * side)
+    nb: Dict[str, List[str]] = {}
+    for r in range(side):
+        for c in range(side):
+            nb[ids[r * side + c]] = [ids[rr * side + cc] for rr, cc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
+                                     if 0 <= rr < side and 0 <= cc < side]
+    w = libpysal.weights.W(nb, id_order=ids, silence_warnings=True)
+    w.transform = "r"
+    return w
+
+
+def sar_field(W: np.ndarray, rho: float, sd: float, rng: np.random.Generator, size: Optional[int] = None) -> np.ndarray:
+    """Draws of u = (I - rho W)^-1 eps, eps ~ N(0, sd^2 I); shape (m,) or (size, m)."""
+    from scipy import linalg as sla
+
+    Binv = sla.inv(np.eye(W.shape[0]) - rho * W)
+    out = (sd * rng.standard_normal((size or 1, W.shape[0]))) @ Binv.T
+    return out[0] if size is None else out
+
+
+def study_spatial_fay_herriot(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Spatial FH (REML, analytic MSE) coverage of area means under SAR(1) area effects."""
+    from .sae import fay_herriot
+    from .sae_spatial import spatial_fay_herriot
+    rng = np.random.default_rng(cfg.seed + 9)
+    side = max(int(round(math.sqrt(cfg.fh_areas))), 5)
+    m = side * side
+    g = _geoids(m)
+    W = lattice_weights(side, g).full()[0]
+    x = rng.uniform(0, 10, m)
+    beta0, beta1, A = 15.0, 1.5, 9.0
+    D = np.clip((draw_cv(m, "county", rng) / 100 * (beta0 + beta1 * 5)) ** 2, 0.5, 400.0)
+    covered = np.zeros((reps, m), bool)
+    fh_cov = np.zeros((reps, m), bool)
+    sq, est_mse, fh_sq, rhos = np.zeros((reps, m)), np.zeros((reps, m)), np.zeros((reps, m)), []
+    for r in range(reps):
+        theta = beta0 + beta1 * x + sar_field(W, SAR_RHO, math.sqrt(A), rng)
+        y = theta + np.sqrt(D) * rng.standard_normal(m)
+        frame = pd.DataFrame({"GEOID": g, "y": y, "y_se": np.sqrt(D), "x": x})
+        res = spatial_fay_herriot("y ~ x", frame, "y_se", W, confidence_level=NOMINAL)
+        e = res.estimates
+        covered[r] = (e["ci_lower"].to_numpy() <= theta) & (theta <= e["ci_upper"].to_numpy())
+        sq[r] = (e["eblup"].to_numpy() - theta) ** 2
+        est_mse[r] = e["mse"].to_numpy()
+        rhos.append(res.provenance["rho"])
+        f = fay_herriot("y ~ x", frame, "y_se", confidence_level=NOMINAL).estimates
+        fh_cov[r] = (f["ci_lower"].to_numpy() <= theta) & (theta <= f["ci_upper"].to_numpy())
+        fh_sq[r] = (f["eblup"].to_numpy() - theta) ** 2
+    emp = sq.mean(axis=0)
+    rel = est_mse.mean(axis=0) / emp - 1
+    row = coverage_summary(f"spatial_fay_herriot EBLUP (REML, analytic MSE), {side}x{side} rook lattice",
+                           f"area mean theta_i, SAR rho={SAR_RHO}", covered.ravel(),
+                           {"rho_mean": float(np.mean(rhos)),
+                            "rho_sd": float(np.std(rhos, ddof=1)) if reps > 1 else float("nan"),
+                            "mse_rel_bias_mean": float(rel.mean()), "mse_rel_bias_median": float(np.median(rel)),
+                            "eblup_mse_vs_direct": float(emp.mean() / D.mean()),
+                            "eblup_mse_vs_fh": float(emp.mean() / fh_sq.mean()),
+                            "min_area_coverage": float(covered.mean(axis=0).min())})
+    # areas within a replicate share one fit: MC SE from between-replicate variation
+    row["mc_se"] = float(covered.mean(axis=1).std(ddof=1) / math.sqrt(reps)) if reps > 1 else float("nan")
+    fh_row = coverage_summary("fay_herriot EBLUP (non-spatial) on the same data", f"area mean theta_i, SAR rho={SAR_RHO}",
+                              fh_cov.ravel(), {"mse_vs_spatial": float(fh_sq.mean() / emp.mean())}, gated=False)
+    return [row, fh_row]
+
+
+def study_morans_i_replicate_se(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Replicate SE of Moran's I: coverage of E[I(ACS estimates) | true surface].
+
+    The true surface (SAR, 10x10 rook lattice) and the SEs (tract CV profile)
+    are fixed; each repetition draws new sampling errors and replicates. The
+    target is the mean of I over repeated samples (20,000 draws), which is
+    what a design-based SE describes; I of the true values is reported
+    (ungated) to show the attenuation from sampling noise.
+    """
+    from .spatial import _moran_vector, morans_i
+    rng = np.random.default_rng(cfg.seed + 10)
+    side = 10
+    m = side * side
+    g = _geoids(m)
+    w = lattice_weights(side, g)
+    Ws = w.sparse.tocsr()
+    mu = 50.0
+    theta = mu + sar_field(w.full()[0], MORAN_RHO, MORAN_SIGNAL_SD, rng)
+    se = draw_cv(m, "tract", rng) / 100 * mu
+    I_true = float(_moran_vector(theta[:, None], Ws)[0])
+    I_big = _moran_vector(theta[:, None] + se[:, None] * rng.standard_normal((m, 20000)), Ws)
+    target, sd_I = float(I_big.mean()), float(I_big.std(ddof=1))
+    covered, covered_true, ses = [], [], []
+    for _ in range(reps):
+        y = theta + se * rng.standard_normal(m)
+        R = make_replicates(y[:, None], se[:, None], rng)
+        res = morans_i(acs_frame(g, {"y": y}, {"y": se}), "y", w, permutations=0,
+                       replicates=replicate_long(g, ["y"], y[:, None], R), confidence_level=NOMINAL, seed=None)
+        covered.append(res.ci_lower <= target <= res.ci_upper)
+        covered_true.append(res.ci_lower <= I_true <= res.ci_upper)
+        ses.append(res.se_replicate)
+    extra = {"I_true_values": I_true, "E_I_estimates": target, "sd_I": sd_I,
+             "se_ratio": float(np.mean(ses) / sd_I), "attenuation": float(target - I_true)}
+    label = "morans_i replicate SE (80 replicate maps), 10x10 rook lattice"
+    # Not gated: the replicate SE of Moran's I is conservative (validated finding,
+    # se_ratio ~1.1-1.5 under ACS-like CVs; exact as CVs -> 0). Evaluating the
+    # gradient of a quadratic-form statistic at the noisy estimates adds the
+    # variance of the gradient to the replicate variance.
+    return [coverage_summary(label, f"E[Moran's I of ACS estimates | true surface] ({target:.3f})", covered,
+                             {**extra, "conservative": bool(np.mean(ses) > sd_I)}, gated=False),
+            coverage_summary(label, f"Moran's I of true values ({I_true:.3f}): attenuated, not a target",
+                             covered_true, {"attenuation": extra["attenuation"]}, gated=False)]
+
+
+SPATIAL_STUDIES: Dict[str, Callable[[SimConfig, int], List[Dict[str, Any]]]] = {
+    "spatial_fay_herriot": study_spatial_fay_herriot,
+    "morans_i_replicate_se": study_morans_i_replicate_se,
+}
+STUDIES.update(SPATIAL_STUDIES)
+
+
+def spatial_config(fast: bool = True, **overrides: Any) -> SimConfig:
+    """Config that runs only the Round 9 spatial studies (7x7 lattice fast, 10x10 full)."""
+    base = FAST if fast else FULL
+    reps = {k: 0 for k in base.reps}
+    reps.update(SPATIAL_REPS_FAST if fast else SPATIAL_REPS_FULL)
+    return replace(base, reps=reps, fh_areas=49 if fast else 100, **overrides)
