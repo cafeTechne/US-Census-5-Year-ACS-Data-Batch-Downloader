@@ -2,7 +2,7 @@
 
 **Planning Round:** 10
 **Date:** 2026-11-03
-**Status:** Draft for review (decisions in section 11)
+**Status:** Decisions made (section 11); in implementation
 **Branch:** `phase10/microdata-and-designs` (from `defaultBranch` after the Round 9 merge)
 
 ---
@@ -96,13 +96,13 @@ Census publishes verification files for every PUMS release: selected estimates a
 
 ## 11. Decisions
 
-| # | Question | Recommended default |
+| # | Question | Decision |
 | :--- | :--- | :--- |
-| 1 | PUMS access | Download full state files on demand (cached, checksummed) for tabulation; use the PUMS API only for small targeted pulls |
-| 2 | Small-cell flag | Flag estimates from fewer than 30 unweighted records and any with CV > 30%; do not suppress, since PUMS is already public |
-| 3 | 2020 1-year experimental estimates | Unavailable by default; opt-in with an advisory |
-| 4 | Multilevel and DiD SEs | Same interval targets as Round 8 (population by default, these-areas with replicates), validated by simulation before becoming defaults |
-| 5 | Cost-of-living adjustment | Optional and never applied by default; results state when RPPs were used |
+| 1 | PUMS access | **Decided:** download full state files on demand (cached, checksummed) for tabulation; use the PUMS API only for small targeted pulls |
+| 2 | Small-cell flag | **Decided:** flag estimates from fewer than 30 unweighted records and any with CV > 30%; do not suppress, since PUMS is already public |
+| 3 | 2020 1-year experimental estimates | **Decided:** unavailable by default; opt-in with an advisory |
+| 4 | Multilevel and DiD SEs | **Decided:** same interval targets as Round 8 (population by default, these-areas with replicates), validated by simulation before becoming defaults |
+| 5 | Cost-of-living adjustment | **Decided:** optional and never applied by default; results state when RPPs were used |
 
 ---
 
