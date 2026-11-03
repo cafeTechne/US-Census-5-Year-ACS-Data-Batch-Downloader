@@ -69,7 +69,7 @@ class TestPyproject(unittest.TestCase):
 
 class TestVersion(unittest.TestCase):
     def test_versions_agree(self):
-        self.assertRegex(census.__version__, r"^d+.d+.d+$")
+        self.assertRegex(census.__version__, r"^\d+\.\d+\.\d+$")
         self.assertEqual(pipeline.PACKAGE_VERSION, census.__version__)
         self.assertRegex(_read("CITATION.cff"), rf'(?m)^version: "{re.escape(census.__version__)}"$')
         self.assertIn(f"## {census.__version__} ", _read("CHANGELOG.md"))
