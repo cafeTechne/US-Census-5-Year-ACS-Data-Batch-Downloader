@@ -2,7 +2,7 @@
 
 **Planning Round:** 9
 **Date:** 2026-11-02
-**Status:** Implemented (section 14)
+**Status:** Complete: implemented, validated, reviewed, and merged (section 14)
 **Branch:** `phase9/geography-and-maps` (from `defaultBranch` after the Round 8 merge)
 
 ---
