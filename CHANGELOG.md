@@ -5,7 +5,7 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
-## 0.9.1
+## 0.9.1 (hotfix): Zenodo metadata
 
 - Zenodo archiving: add `.zenodo.json` with an explicit creator name (Zenodo could not build creators from the alias-only `CITATION.cff` author), so releases are archived and receive a DOI. No code changes.
 
