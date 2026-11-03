@@ -30,6 +30,7 @@ GEO_LEVELS: Dict[str, Tuple[str, str]] = {
     "state": ("state", "040"),
     "county": ("county", "050"),
     "tract": ("tract", "140"),
+    "block group": ("block group", "150"),
     "place": ("place", "160"),
     "msa": ("metropolitan statistical area/micropolitan statistical area", "310"),
     "zcta": ("zip code tabulation area", "860"),
@@ -38,6 +39,20 @@ GEO_LEVELS: Dict[str, Tuple[str, str]] = {
 # ZCTAs were nested within states (summary level 871) through the 2019 ACS
 # 5-year release; from 2020 they are only available nationally (level 860).
 ZCTA_STATE_NESTING_LAST_YEAR = 2019
+
+# Block groups (summary level 150) are in the ACS 5-year API from the 2013
+# release (2009-2012 return "unknown/unsupported geography hierarchy"), and
+# only in the detailed tables (acs5); subject and profile tables are not
+# published for block groups. GEOIDs are 12 digits: SS CCC TTTTTT G.
+BLOCK_GROUP = "block group"
+BLOCK_GROUP_ALIASES = ("block group", "block_group", "blockgroup", "bg", "150")
+BLOCK_GROUP_FIRST_YEAR = 2013
+
+
+def normalize_geo_level(geo_level: str) -> str:
+    """Canonical geography level name (``'block_group'``/``'bg'`` -> ``'block group'``)."""
+    key = str(geo_level).strip().lower()
+    return BLOCK_GROUP if key in BLOCK_GROUP_ALIASES else key
 
 
 def infer_dataset(table_code: str) -> str:
@@ -61,6 +76,7 @@ def build_geo_params(
     zcta_code: Optional[str] = None,
     msa_code: Optional[str] = None,
     year: Optional[int] = None,
+    block_group_code: Optional[str] = None,
 ) -> Dict[str, str]:
     """Build the Census API ``for`` / ``in`` predicates for a geography level.
 
@@ -70,6 +86,20 @@ def build_geo_params(
     'state' in geography hierarchy"), so tract queries need explicit states.
     """
     params: Dict[str, str] = {}
+    geo_level = normalize_geo_level(geo_level)
+    if geo_level == BLOCK_GROUP:
+        if not state_code or "*" in state_code or "," in state_code:
+            raise ValueError("Block-group queries need exactly one state; request one state at a time.")
+        if year is not None and year < BLOCK_GROUP_FIRST_YEAR:
+            raise ValueError(
+                f"Block groups are in the ACS 5-year API from the {BLOCK_GROUP_FIRST_YEAR} release; got {year}."
+            )
+        params["for"] = f"block group:{block_group_code or '*'}"
+        inn = f"state:{state_code} county:{county_code or '*'}"
+        if tract_code:
+            inn += f" tract:{tract_code}"
+        params["in"] = inn
+        return params
     if geo_level == "place":
         if not place_code:
             raise ValueError("place_code is required for place-level query.")
@@ -156,6 +186,7 @@ class CensusAPIClient:
         zcta_code: Optional[str] = None,
         msa_code: Optional[str] = None,
         get: Optional[str] = None,
+        block_group_code: Optional[str] = None,
     ) -> Tuple[str, Dict[str, str]]:
         """Return the (endpoint URL, query params) for a data request."""
         dataset = dataset or infer_dataset(table_code)
@@ -170,6 +201,7 @@ class CensusAPIClient:
                 zcta_code=zcta_code,
                 msa_code=msa_code,
                 year=year,
+                block_group_code=block_group_code,
             )
         )
         if self.api_key:
@@ -208,7 +240,8 @@ class CensusAPIClient:
     ) -> Optional[List[List[str]]]:
         """Fetch ACS 5-year data for a specific year, geography, and table.
 
-        Geography levels: 'us', 'state', 'county', 'tract', 'place', 'zcta', 'msa'.
+        Geography levels: 'us', 'state', 'county', 'tract', 'block group'
+        (one county per request; 2013+ releases, acs5 only), 'place', 'zcta', 'msa'.
         Dataset ('acs5', 'profile', 'subject', 'cprofile') is inferred from the
         table code when not given.
         """

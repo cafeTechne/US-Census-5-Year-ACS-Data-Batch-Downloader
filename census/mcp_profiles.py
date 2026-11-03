@@ -31,7 +31,7 @@ PROFILES: Dict[str, Optional[List[str]]] = {
         "search_tables",
         "describe_variable",
         "plan_extraction",
-        "batch_download",
+        "download_table",  # Round 9 G2: slim download; full profile keeps batch_download
         "derive_estimate",
         "calculate_significance",
         "trend_test",
@@ -39,6 +39,7 @@ PROFILES: Dict[str, Optional[List[str]]] = {
         "build_analysis_frame",
         "fit_model",
         "make_figure",
+        "make_map",
         "run_manifest",  # registered by workstream D; skipped while absent
     ],
     "review": [
@@ -84,11 +85,19 @@ DESCRIPTION_OVERRIDES: Dict[str, str] = {
         "Example: describe_variable(code=\"B17001_002E\", year=2023)"
     ),
     "plan_extraction": (
-        "Dry run of batch_download: API calls, concordance issues, would_block. Downloads nothing.\n"
+        "Dry run of a download: API calls, concordance issues, would_block. Downloads nothing.\n"
         "state_code: 2-digit FIPS. table_code: e.g. 'B17001'. start_year, end_year: releases.\n"
         "geo_level: us|state|county|tract|place|zcta|msa. variables: codes used. county_codes: 3-digit FIPS.\n"
         "Example: plan_extraction(state_code=\"48\", table_code=\"B17001\", start_year=2018, "
         "end_year=2023, geo_level=\"county\", variables=[\"B17001_001\", \"B17001_002\"])"
+    ),
+    "download_table": (
+        "Download one table to a panel CSV with codebook and SE/CV columns; plans first, stops if blocked.\n"
+        "table_code: e.g. 'B17001'. geography: us|state|county|tract|place|zcta|msa, optional "
+        "':codes' e.g. 'county:453,201'.\n"
+        "state_code: 2-digit FIPS. years: releases (default latest). variables: codes used.\n"
+        "Example: download_table(table_code=\"B17001\", geography=\"county:453\", state_code=\"48\", "
+        "years=[2023], variables=[\"B17001_001\", \"B17001_002\"])"
     ),
     "batch_download": (
         "Download a table across years and geographies to files; same arguments as plan_extraction.\n"
@@ -137,6 +146,13 @@ DESCRIPTION_OVERRIDES: Dict[str, str] = {
         "Example: fit_model(input_path=\"downloads/analysis_frame.parquet\", "
         "formula=\"poverty_rate ~ median_rent\")"
     ),
+    "make_map": (
+        "Write a journal-ready map (PDF, SVG, PNG) of one variable with Census boundaries.\n"
+        "input_path: CSV/Parquet with GEOID. column: variable. level: tract | county | state | place.\n"
+        "year: ACS release. se_col or moe_col: marks unreliable areas. kind: estimate | uncertainty | significance.\n"
+        "Example: make_map(input_path=\"frame.parquet\", column=\"poverty_rate\", level=\"county\", "
+        "year=2023, se_col=\"poverty_rate_se\")"
+    ),
     "make_figure": (
         "Write a journal-ready figure (PDF, SVG, PNG) with values CSV and caption.\n"
         "kind: estimates | forest | trend. input_path: CSV/Parquet. label_col, estimate_col, "
@@ -150,7 +166,7 @@ DESCRIPTION_OVERRIDES: Dict[str, str] = {
 NEXT_STEPS: Dict[str, str] = {
     "search_tables": "describe_variable on the codes you need, then plan_extraction",
     "describe_variable": "plan_extraction with these codes in variables=[...]",
-    "plan_extraction": "if would_block is false, batch_download with the same arguments",
+    "plan_extraction": "if would_block is false, download_table for the same table, geography and years",
     "batch_download": "derive_estimate for rates, or build_analysis_frame for models",
     "derive_estimate": "calculate_significance to compare this estimate with another",
     "calculate_significance": "report the difference, its p_value and the verdict",
@@ -164,7 +180,7 @@ US Census ACS 5-year data tools. Every result has `summary` and `next_step`.
 3. Rates: derive_estimate(operation='proportion') when the numerator is part of
    the denominator. Compare two estimates with calculate_significance.
 4. Trends need non-overlapping releases (e.g. 2013, 2018, 2023): trend_test.
-5. Before batch_download, call plan_extraction; stop if would_block is true.
+5. Download with download_table (it plans first); stop if would_block is true.
 6. On failure read error_code and fix; do not guess numbers.
 """
 

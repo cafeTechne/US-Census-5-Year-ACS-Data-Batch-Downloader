@@ -1,0 +1,21 @@
+{
+  "kind": "acs_errata",
+  "retrieved": "2026-11-02",
+  "sources": [
+    {
+      "listing": "https://www.census.gov/programs-surveys/acs/technical-documentation/errata.html",
+      "list_id": "text-list-078687eae7",
+      "notes_listed": 145
+    },
+    {
+      "listing": "https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes.html",
+      "list_id": "text-list-7ec39f62a7",
+      "notes_listed": 113
+    }
+  ],
+  "records": 258,
+  "errata_notes": 145,
+  "user_notes": 113,
+  "sha256": "4124c177cc8b79c17d63e1c4aa414f52d016c380bc4cc8610f8f2604019b0c9d",
+  "generator": "scripts/fetch_acs_errata.py"
+}

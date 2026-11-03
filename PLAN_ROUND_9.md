@@ -2,7 +2,7 @@
 
 **Planning Round:** 9
 **Date:** 2026-11-02
-**Status:** Decisions made (section 12); in implementation
+**Status:** Implemented (section 14)
 **Branch:** `phase9/geography-and-maps` (from `defaultBranch` after the Round 8 merge)
 
 ---
@@ -149,3 +149,22 @@ The Census Bureau publishes errata and user notes for ACS releases (tables withd
 7. Errata affecting a requested table appear in the plan and in manifest outputs.
 8. Outputs open in ArcGIS Pro and QGIS (GeoPackage), verified by reading them back with GDAL.
 9. CI stays green on Linux and Windows, Python 3.10–3.12.
+
+---
+
+## 14. Implementation status
+
+| Workstream | Files | Result |
+| :--- | :--- | :--- |
+| A Boundaries | `census/boundaries.py` | Cartographic and TIGER/Line URL patterns verified by year (national tract and block-group cartographic files exist from 2019; ZCTA cartographic files are `zcta510` 2013–2019 and `zcta520` for 2020); vintage checks; GeoPackage default |
+| B Maps | `census/maps.py` | Quantile default, natural breaks, equal interval, exact separability-optimal breaks (85k tracts in 0.05 s); separability in every legend; reliability hatching; uncertainty and significance maps; insets |
+| C Spatial | `census/spatial.py`, `census/sae_spatial.py` | PySAL references reproduced (SIDS, STL, Columbus, Baltimore); spatial Fay–Herriot reproduces R `sae` grapes (REML and ML to 1e-5); coverage 0.891. Moran's I replicate SE is conservative (coverage 0.987; SE 1.1–1.5x true SD), reported but not gated |
+| D Block weights | `census/block_weights.py`, `census/geo_crosswalk.py` | 2010/2020 block relationship files and decennial counts; weights by population or housing units; Delaware: population-weight apportionment error 444 vs 624 (land area); county totals within 3 people |
+| E Block groups, custom areas | `census/api.py`, `census/pipeline.py`, `census/custom_areas.py` | Block groups from 2013 (acs5 only; unpublished tables detected); polygon allocation by area or block population |
+| F Errata | `census/errata.py`, `data/acs_errata.json` | 258 notes (145 errata, 113 user notes); included in every plan |
+| G Carryovers | `census/stats.py`, `census/validation.py`, `census/workflows.py`, `census/mcp_profiles.py`, `census/simulation.py` | Controlled MOEs kept as 0 with a flag (F1 updated); `download_table` in the core profile; native summary/next_step in Round 7 tools; tract CV profile from 1,278 real tracts (median 13.4% vs assumed 22%) |
+| H Packaging | `pyproject.toml`, `CHANGELOG.md`, `.github/workflows/release.yml` | Editable install from the clone (no generic top-level packages); release workflow; Zenodo DOI after the owner enables the integration |
+| Interfaces | `census/workflows_geo.py` | Six geography tools (51 total); `make_map` added to the core profile pending the local-model rerun |
+
+**Not built:** ZCTA and place crosswalks from blocks (need block-to-ZCTA/place assignment files); interactive HTML maps (P2).
+

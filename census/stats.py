@@ -343,30 +343,45 @@ def _isnan(value: object) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def controlled_column(moe_col: str) -> Optional[str]:
+    """``<base>_CONTROLLED`` (``<base>P_CONTROLLED`` for a PM column) for an MOE column."""
+    parsed = parse_variable_code(str(moe_col))
+    if not parsed or parsed[1] not in ("M", "PM"):
+        return None
+    base, suffix = parsed
+    return f"{base}{'P' if suffix == 'PM' else ''}_CONTROLLED"
+
+
 def clean_census_sentinels(
     df: pd.DataFrame,
     columns: Optional[Iterable[str]] = None,
     add_notes: bool = False,
+    preserve_controlled: bool = True,
 ) -> pd.DataFrame:
     """Convert value columns to numeric and replace Census sentinel codes with NaN.
 
-    This includes ``-555555555`` in MOE columns (controlled estimate: no
-    sampling error), which becomes NaN like every other sentinel; validation
-    check F1 relies on that contract. To keep the controlled status, use
-    ``add_notes=True`` (the ``_NOTE`` column records it) or convert raw MOEs
-    with :func:`moe_to_se`, which maps a controlled MOE to SE 0.
+    Controlled estimates are the documented exception (Round 9, G1). The
+    Census Bureau publishes ``-555555555`` in an MOE column when the estimate
+    is controlled to an independent population estimate and has no sampling
+    error. By default that MOE becomes ``0`` and a boolean
+    ``<base>_CONTROLLED`` column (``<base>P_CONTROLLED`` for percent MOEs) is
+    added, True on controlled rows, whenever the column contains at least one
+    controlled cell. Validation check F1 accepts exactly this representation.
+    ``preserve_controlled=False`` restores the Round 8 behavior (NaN, no flag).
 
     Args:
         df: Frame with raw Census variable-code columns (strings or numbers).
         columns: Columns to clean. Defaults to all estimate/MOE/percent columns.
         add_notes: If True, add a ``<column>_NOTE`` column describing each
             replaced sentinel (and top/bottom coding read from EA annotations).
+        preserve_controlled: Keep controlled MOEs as 0 with a flag column.
     """
     out = df.copy()
     targets = list(columns) if columns is not None else [
         c for c in out.columns if is_value_column(str(c))
     ]
     sentinel_values = list(CENSUS_SENTINELS.keys())
+    flags: Dict[str, pd.Series] = {}
 
     for col in targets:
         numeric = pd.to_numeric(out[col], errors="coerce")
@@ -381,8 +396,17 @@ def clean_census_sentinels(
                     notes = notes.where(notes != "", coded)
             if (notes != "").any():
                 out[f"{col}_NOTE"] = notes
-        out[col] = numeric.mask(mask)
+        flag_col = controlled_column(str(col)) if preserve_controlled else None
+        controlled = numeric == CONTROLLED_MOE
+        if flag_col and controlled.any():
+            out[col] = numeric.mask(mask & ~controlled).where(~controlled, 0.0)
+            flags[flag_col] = controlled.astype(bool)
+        else:
+            out[col] = numeric.mask(mask)
 
+    if flags:
+        keep = out.drop(columns=[c for c in flags if c in out.columns])
+        out = pd.concat([keep, pd.DataFrame(flags, index=out.index)], axis=1)
     return out
 
 

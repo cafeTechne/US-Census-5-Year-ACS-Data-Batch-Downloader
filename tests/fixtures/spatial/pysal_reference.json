@@ -1,0 +1,50 @@
+{
+  "description": "Published PySAL reference results (docstring examples and package unit tests) transcribed for census.spatial validation. Data are the libpysal example datasets bundled with libpysal (columbus, sids2, baltim); no network access is needed.",
+  "moran_sids2": {
+    "source": "esda.Moran docstring, 'SIDS example replicating OpenGeoda' (esda 2.9)",
+    "url": "https://github.com/pysal/esda/blob/main/esda/moran.py",
+    "data": "libpysal examples sids2.dbf (SIDR74), weights sids2.gal",
+    "I_rounded_3": 0.248,
+    "p_norm": 0.0001158330781489969
+  },
+  "moran_stl": {
+    "source": "esda.Moran docstring (esda 2.9)",
+    "url": "https://github.com/pysal/esda/blob/main/esda/moran.py",
+    "data": "libpysal examples stl_hom.txt (HR8893), weights stl.gal",
+    "I_rounded_3": 0.244,
+    "EI": -0.012987012987012988,
+    "p_norm": 0.00027147862770937614
+  },
+  "gm_lag_columbus": {
+    "source": "spreg.GM_Lag docstring (spreg 1.9): GM_Lag(y=HOVAL, X=[INC, CRIME], w=Rook.from_shapefile(columbus.shp) row-standardized, w_lags=2)",
+    "url": "https://github.com/pysal/spreg/blob/main/spreg/twosls_sp.py",
+    "betas": [45.30170561, 0.62088862, -0.48072345, 0.02836221],
+    "se": [17.91278862, 0.52486082, 0.1822815, 0.31740089]
+  },
+  "gm_error_het_columbus": {
+    "source": "spreg.GM_Error_Het docstring (spreg 1.9): HOVAL ~ INC + CRIME, rook from columbus.shp, step1c=True",
+    "url": "https://github.com/pysal/spreg/blob/main/spreg/error_sp_het.py",
+    "betas": [47.9963, 0.7105, -0.5588, 0.4118],
+    "se": [11.479, 0.3681, 0.1616, 0.168]
+  },
+  "ml_lag_baltim": {
+    "source": "spreg unit test spreg/tests/test_ml_lag.py (spreg 1.9): PRICE ~ NROOM + AGE + SQFT, baltim_q.gal row-standardized, method='full'",
+    "url": "https://github.com/pysal/spreg/blob/main/spreg/tests/test_ml_lag.py",
+    "betas": [-6.04040164, 3.48995114, -0.20103955, 0.65462382, 0.62351143],
+    "vm_diag": [28.57288755, 1.42341656, 0.00288068, 0.02956392, 0.00332139]
+  },
+  "ml_error_baltim": {
+    "source": "spreg unit test spreg/tests/test_ml_error.py (spreg 1.9): PRICE ~ NROOM + AGE + SQFT, baltim_q.gal row-standardized, method='full'",
+    "url": "https://github.com/pysal/spreg/blob/main/spreg/tests/test_ml_error.py",
+    "betas": [19.45930348, 3.98928064, -0.16714232, 0.57336871, 0.71757002]
+  },
+  "lm_tests_columbus": {
+    "source": "spreg.diagnostics_sp.LMtests docstring (spreg 1.9): OLS HOVAL ~ INC + CRIME, columbus.gal row-standardized",
+    "url": "https://github.com/pysal/spreg/blob/main/spreg/diagnostics_sp.py",
+    "lm_error": [3.0971, 0.0784],
+    "lm_lag": [0.9816, 0.3218],
+    "robust_lm_error": [3.2092, 0.0732],
+    "robust_lm_lag": [1.0936, 0.2957],
+    "lm_sarma": [4.1907, 0.123]
+  }
+}

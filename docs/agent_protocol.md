@@ -174,3 +174,13 @@ Validated in `docs/audits/inference_validation.md` by simulation with known trut
 
 **Local models.** `python mcp_server.py --profile core` exposes 13 tools with short descriptions; every result starts with `summary` and `next_step`. Call `get_recipe` first for multi-step tasks. See `docs/local_models.md`.
 
+## 13. Geography and maps
+
+- **Maps:** `make_map(input_path, column, level, year, se_col=...)`. Pass an SE or MOE column so unreliable areas are hatched. Report the class separability printed in the caption; when it is low, adjacent colors are not statistically distinguishable. Use `kind="significance"` with a `batch_significance` output to map change, never raw differences.
+- **Boundaries** are matched to the ACS release automatically (2010-based tracts through the 2019 release, 2020-based from 2020; Connecticut planning regions from 2022).
+- **Spatial statistics:** `spatial_autocorrelation` (Moran's I, optional local clusters with correction), `spatial_regression` (lag or error), `spatial_small_area_estimates` (spatial Fay–Herriot). Noisy small-area estimates can create or hide clusters: pass replicates, or rerun on Fay–Herriot estimates as a sensitivity check.
+- **Tract harmonization** uses decennial block population or housing-unit weights by default (`weight="auto"`); the first national run downloads about 3,200 county block-count requests, then caches them.
+- **Custom areas:** `custom_area_mapping(areas_path, ...)` then `aggregate_geographies`. Partial overlaps are reported with their allocation assumption.
+- **Errata:** every extraction plan lists Census errata and user notes for the table and releases; mention them in write-ups.
+- **Controlled estimates** (Census MOE code -555555555) now keep MOE 0 with a `<code>_CONTROLLED` flag column.
+

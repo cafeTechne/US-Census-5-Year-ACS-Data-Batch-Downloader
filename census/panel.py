@@ -22,7 +22,7 @@ IDENTIFIER_COLUMNS: Dict[str, str] = {
 }
 
 _DERIVED_RE = re.compile(
-    rf"^(?P<base>{BASE_PATTERN})(?P<pct>P?)_(?P<kind>SE|CV|RELIABILITY)$"
+    rf"^(?P<base>{BASE_PATTERN})(?P<pct>P?)_(?P<kind>SE|CV|RELIABILITY|CONTROLLED)$"
 )
 _DOLLAR_IN_LABEL_RE = re.compile(r"\s*\(in \d{4} inflation-adjusted dollars\)", re.I)
 _LABEL_PREFIX_RE = re.compile(
@@ -38,6 +38,7 @@ SLUG_SUFFIXES: Dict[str, str] = {
     "SE": "se",
     "CV": "cv",
     "RELIABILITY": "rel",
+    "CONTROLLED": "controlled",
     "SIG": "sig",
 }
 
@@ -52,7 +53,7 @@ Metadata = Mapping[str, Mapping[str, str]]
 def classify_column(col: str) -> Optional[Tuple[str, str, bool]]:
     """Return (variable_base, kind, is_percent) for a value/derived column.
 
-    kind is one of E, M, PE, PM, ANN, SE, CV, RELIABILITY, NOTE(:<inner kind>).
+    kind is one of E, M, PE, PM, ANN, SE, CV, RELIABILITY, CONTROLLED, NOTE(:<inner kind>).
     """
     if col.endswith("_NOTE"):
         inner = classify_column(col[: -len("_NOTE")])
@@ -122,6 +123,7 @@ def describe_column(col: str, metadata: Metadata) -> str:
         "SE": f"Standard Error!!{stripped}",
         "CV": f"Coefficient of Variation (%)!!{stripped}",
         "RELIABILITY": f"Reliability (CV<=15% High, <=30% Moderate, else Low)!!{stripped}",
+        "CONTROLLED": f"Controlled estimate (published MOE code -555555555; MOE stored as 0)!!{stripped}",
         "SIG": f"Significance of change between periods (* = significant at 90%)!!{stripped}",
     }.get(kind, label)
 
@@ -165,6 +167,7 @@ def measurement_type(col: str) -> str:
         "SE": "Standard Error",
         "CV": "Coefficient of Variation",
         "RELIABILITY": "Reliability Flag",
+        "CONTROLLED": "Controlled Flag",
         "SIG": "Significance Flag",
     }[kind]
 
@@ -181,7 +184,7 @@ def infer_unit(
     if not info:
         return ""
     base, kind, pct = info
-    if kind.startswith("NOTE:") or kind in ("ANN", "RELIABILITY", "SIG"):
+    if kind.startswith("NOTE:") or kind in ("ANN", "RELIABILITY", "SIG", "CONTROLLED"):
         return "Text"
     if kind == "CV" or pct:
         return "Percent"
@@ -289,7 +292,7 @@ def make_slug_map(
                     slug = f"{stem}_{SLUG_SUFFIXES.get(inner, inner.lower())}_note"
                 else:
                     suffix = SLUG_SUFFIXES[kind]
-                    if pct and kind in ("SE", "CV", "RELIABILITY"):
+                    if pct and kind in ("SE", "CV", "RELIABILITY", "CONTROLLED"):
                         suffix = f"pct_{suffix}"
                     slug = f"{stem}_{suffix}"
         base_slug, n = slug, 2

@@ -1,0 +1,6 @@
+{
+  "source_url": "https://api.census.gov/data/2010/dec/pl?get=P001001,H001001&for=block:*&in=state:10+county:<each>+tract:*",
+  "sha256": "f03a42e04c91e91053e3db2609233e8e919ee7baadea2917d4887229e0e46e89",
+  "size_bytes": 14950,
+  "note": "subset of Delaware (10) for tests: 2010 tracts 10001041100, 10003014300 and every 2020 tract they touch"
+}

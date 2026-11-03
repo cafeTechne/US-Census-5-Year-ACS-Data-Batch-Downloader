@@ -189,6 +189,7 @@ GEOID_COMPONENTS: Dict[str, List[Tuple[str, int]]] = {
     "state": [("state", 2)],
     "county": [("state", 2), ("county", 3)],
     "tract": [("state", 2), ("county", 3), ("tract", 6)],
+    "block group": [("state", 2), ("county", 3), ("tract", 6), ("block group", 1)],
     "place": [("state", 2), ("place", 5)],
     "zcta": [(ZCTA_COLUMN, 5)],
     "msa": [(MSA_COLUMN, 5)],
@@ -203,6 +204,7 @@ GEOGRAPHY_COLUMNS: List[str] = [
     "state",
     "county",
     "tract",
+    "block group",
     "place",
     ZCTA_COLUMN,
     MSA_COLUMN,
@@ -212,6 +214,8 @@ GEOGRAPHY_COLUMNS: List[str] = [
 def detect_geo_level(columns: Iterable[str]) -> Optional[str]:
     """Infer the geography level from API response columns (most specific first)."""
     cols = set(columns)
+    if "block group" in cols:
+        return "block group"
     if "tract" in cols:
         return "tract"
     if ZCTA_COLUMN in cols:
@@ -232,7 +236,7 @@ def detect_geo_level(columns: Iterable[str]) -> Optional[str]:
 def build_geoid(components: Mapping[str, object], geo_level: str) -> str:
     """Build a standard Census GEOID string for one entity.
 
-    Tract: SSCCCTTTTTT (11), County: SSCCC (5), Place: SSPPPPP (7),
+    Block group: SSCCCTTTTTTB (12), Tract: SSCCCTTTTTT (11), County: SSCCC (5), Place: SSPPPPP (7),
     ZCTA: ZZZZZ (5), CBSA: MMMMM (5), State: SS (2), Nation: 'US'.
     """
     if geo_level == "us":

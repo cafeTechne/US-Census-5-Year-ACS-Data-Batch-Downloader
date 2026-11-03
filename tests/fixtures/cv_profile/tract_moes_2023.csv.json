@@ -1,0 +1,26 @@
+{
+  "kind": "census_api_response_table",
+  "note": "Raw API values (sentinels kept) for the tracts of the listed counties. The API key is not part of the URLs.",
+  "release": "ACS 5-year 2023",
+  "retrieved": "2026-11-02",
+  "rows": 1278,
+  "sha256": "855e2ef3dfa33593a6713d6979c5e1309380f7947143b0da8ab9d5fad1c7162f",
+  "source_urls": [
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A48+county%3A453",
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A06+county%3A019",
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A36+county%3A005",
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A17+county%3A019",
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A56+county%3A021",
+    "https://api.census.gov/data/2023/acs/acs5?get=NAME%2CB17001_001E%2CB17001_001M%2CB17001_002E%2CB17001_002M%2CB19013_001E%2CB19013_001M%2CB25064_001E%2CB25064_001M&for=tract%3A%2A&in=state%3A13+county%3A121"
+  ],
+  "variables": [
+    "B17001_001E",
+    "B17001_001M",
+    "B17001_002E",
+    "B17001_002M",
+    "B19013_001E",
+    "B19013_001M",
+    "B25064_001E",
+    "B25064_001M"
+  ]
+}

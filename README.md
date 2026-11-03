@@ -8,7 +8,7 @@ Multi-year panels are built from **concepts**, not raw variable codes. ACS codes
 
 | Interface | Entry point | Intended user |
 | :--- | :--- | :--- |
-| MCP server | `mcp_server.py` (44 tools; `--profile core` gives 13 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
+| MCP server | `mcp_server.py` (51 tools; `--profile core` gives 14 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
 | Command line | `python -m census <command> --json` | Agents and scripts without MCP |
 | Python library | `census` package (`plan_extraction`, `run_batch`) | Notebooks, pipelines |
 | Desktop GUI | `acs_downloader.py` (Tkinter) | Legacy point-and-click use; maintenance mode |
@@ -24,6 +24,8 @@ git clone https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Download
 cd US-Census-5-Year-ACS-Data-Batch-Downloader
 pip install -r requirements.txt
 ```
+
+Or install it as an editable package from the clone (`pip install -e .`, or `pip install -e ".[dev]"` for pytest and ruff; the toolkit reads its metadata archive and data files from the repository), which adds the `census-acs` command (same as `python -m census`) and `census-acs-mcp` (the MCP server; `census-acs-mcp --profile core`). Releases are listed in `CHANGELOG.md`; each tagged release is archived on Zenodo with a DOI to cite.
 
 Price-index data (R-CPI-U-RS, CPI-U, and C-CPI-U, 2000–2024) ships with the repository, so constant-dollar conversion works out of the box.
 
@@ -218,6 +220,21 @@ Models and figures that keep ACS sampling error in view, validated by simulation
 SIMEX is available but under-covers (0.81) and is not recommended for confirmatory use. Statistics use `scipy` and `statsmodels`; figures use `matplotlib`.
 
 **Local models.** `python mcp_server.py --profile core` serves a 13-tool profile with short descriptions, `summary`/`next_step` in every result, and step-by-step recipes (`get_recipe`). Qwen3 8B on CPU completed 5 of 6 evaluation tasks ([docs/audits/local_model_eval.md](docs/audits/local_model_eval.md)); setup in [docs/local_models.md](docs/local_models.md).
+
+## Geography, maps, and spatial analysis
+
+Built on GeoPandas, Shapely (GEOS), pyogrio (GDAL), pyproj, and PySAL. Outputs are GeoPackage by default, which ArcGIS Pro and QGIS open natively.
+
+| Capability | Function / tool | Notes |
+| :--- | :--- | :--- |
+| Census boundaries matched to each ACS release | `census.boundaries.get_boundaries` / `get_boundaries` | Cartographic (1:500k) for maps, TIGER/Line for areal work; vintage mismatches are errors |
+| Journal maps that show uncertainty | `census.maps.choropleth` / `make_map` | Quantile classes by default; legend reports class separability (Sun and Wong 2010); low-reliability areas hatched; uncertainty and significance maps |
+| Spatial autocorrelation | `census.spatial.morans_i`, `local_morans` / `spatial_autocorrelation` | Reproduces PySAL references; replicate SE of Moran's I is conservative (coverage 0.987) |
+| Spatial regression | `census.spatial.spatial_regression` | Lag and error models with LM diagnostics (spreg) |
+| Spatial Fay–Herriot | `census.sae_spatial.spatial_fay_herriot` / `spatial_small_area_estimates` | Reproduces the R `sae` grapes example; coverage 0.891 |
+| Population-weighted tract crosswalks | `census.block_weights`, `harmonize_panel(weight="auto")` | Decennial block weights; Delaware test: mean error 444 vs 624 people with land-area weights |
+| Block groups and custom polygons | `geo_level="block group"`, `census.custom_areas` / `custom_area_mapping` | Area or block-population allocation |
+| ACS errata and user notes | `census.errata.errata_for`; in every extraction plan | 258 notes from census.gov with sources |
 
 ## Advisories and known limitations
 

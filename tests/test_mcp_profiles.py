@@ -43,9 +43,9 @@ class TestProfileSelection(unittest.TestCase):
         expected = [n for n in mcp_profiles.PROFILES["core"] if n in registered]
         self.assertEqual(list(CORE_TOOLS), expected)
         self.assertLessEqual(len(CORE_TOOLS), 14)
-        # Every profile name except run_manifest (workstream D) must exist.
+        # Every profile name must be a registered tool.
         for profile in ("core", "review"):
-            missing = set(mcp_profiles.PROFILES[profile]) - registered - {"run_manifest"}
+            missing = set(mcp_profiles.PROFILES[profile]) - registered
             self.assertFalse(missing, f"{profile} names unknown tools: {missing}")
 
     def test_review_profile(self):
