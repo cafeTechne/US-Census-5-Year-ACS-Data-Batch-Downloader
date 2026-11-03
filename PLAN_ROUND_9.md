@@ -2,7 +2,7 @@
 
 **Planning Round:** 9
 **Date:** 2026-11-02
-**Status:** Draft for review (decisions in section 12)
+**Status:** Decisions made (section 12); in implementation
 **Branch:** `phase9/geography-and-maps` (from `defaultBranch` after the Round 8 merge)
 
 ---
@@ -109,7 +109,7 @@ The Census Bureau publishes errata and user notes for ACS releases (tables withd
 
 ## 10. Workstream H (P2): packaging and release
 
-- `pyproject.toml` so the toolkit installs with `pip install` (optional extras `geo`, `dev`), with a console entry point (`census-acs`) and an MCP entry point.
+- `pyproject.toml` so the toolkit installs with `pip install` (optional extra `dev`), with a console entry point (`census-acs`) and an MCP entry point.
 - Tagged, versioned releases with a changelog; a Zenodo DOI per release, wired into `CITATION.cff`, so papers can cite the exact version used.
 - A built documentation site from the existing Markdown (optional).
 
@@ -127,14 +127,14 @@ The Census Bureau publishes errata and user notes for ACS releases (tables withd
 
 ## 12. Decisions
 
-| # | Question | Recommended default |
+| # | Question | Decision |
 | :--- | :--- | :--- |
-| 1 | Geospatial libraries as required dependencies or an optional `geo` extra? | **Optional extra.** GeoPandas, pyogrio, and PySAL install from wheels on Windows, macOS, and Linux, but they roughly double the install size; users who only need tables and models should not need them. Tools that need them return a clear error naming the extra |
-| 2 | Boundary detail | Cartographic boundary files (1:500k) for maps; TIGER/Line for areal calculations and crosswalks |
-| 3 | Interactive maps | Static maps first (journals); optional self-contained HTML export with no external tile servers (no third-party requests from readers' browsers) as P2 |
-| 4 | Default map classification | Class-separability breaks when MOEs are available, quantiles otherwise; always report separability in the legend |
-| 5 | Crosswalk weights | Block-population weights by default once workstream D lands; land-area weights remain available and are used automatically when block data cannot be fetched, with a note |
-| 6 | Shapefile output | Available but not default (10-character field names truncate ACS codes); GeoPackage is the default |
+| 1 | Geospatial libraries | **Required dependencies** (GeoPandas, pyogrio, pyproj, Shapely, PySAL: `libpysal`, `esda`, `spreg`, `mapclassify`) |
+| 2 | Boundary detail | **Decided:** cartographic boundary files (1:500k) for maps; TIGER/Line for areal calculations and crosswalks |
+| 3 | Map priority | **Decided:** static journal maps are the priority; optional self-contained HTML export (no external tile servers) is P2 |
+| 4 | Default map classification | **Decided: follow research practice.** Quantile classes (5 by default) are the most common choice in social-science journals because classes are comparable across maps; natural breaks (Jenks) and equal interval are available. Because ACS estimates carry error, every map's legend reports class separability (the share of adjacent-class pairs whose 90% intervals do not overlap), and class-separability breaks (Sun and Wong 2010) are available for maps where distinguishability matters most |
+| 5 | Crosswalk weights | **Decided:** block-population weights by default; land-area fallback with a note |
+| 6 | Shapefile output | **Decided:** available on request; GeoPackage is the default |
 
 ---
 
@@ -148,4 +148,4 @@ The Census Bureau publishes errata and user notes for ACS releases (tables withd
 6. Block-population crosswalk weights sum to one per source tract, and apportioned 2019 tract totals match unchanged county totals.
 7. Errata affecting a requested table appear in the plan and in manifest outputs.
 8. Outputs open in ArcGIS Pro and QGIS (GeoPackage), verified by reading them back with GDAL.
-9. CI stays green on Linux and Windows, Python 3.10–3.12, with and without the `geo` extra.
+9. CI stays green on Linux and Windows, Python 3.10–3.12.
