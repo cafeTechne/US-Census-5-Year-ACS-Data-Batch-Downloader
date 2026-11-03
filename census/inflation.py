@@ -131,7 +131,7 @@ _DOLLAR_RE = re.compile(r"\bdollars\b", re.IGNORECASE)
 BOUNDARY_VINTAGE_BREAK = 2020
 # Connecticut planning regions replace counties from the 2022 ACS release.
 CT_PLANNING_REGION_YEAR = 2022
-BOUNDARY_SENSITIVE_LEVELS = {"tract", "zcta", "place", "county", "msa"}
+BOUNDARY_SENSITIVE_LEVELS = {"tract", "block group", "zcta", "place", "county", "msa"}
 
 # ACS user note 2023-07: home values are presented in current-year dollars
 # starting with the 2022 releases. Earlier releases' home values were not on
@@ -286,18 +286,18 @@ def boundary_shift_advisory(
     """Warn when a multi-year request spans a geography change.
 
     Covers the 2010 -> 2020 Census geography change (2020 releases) and, for
-    county and tract levels, Connecticut's switch from eight counties to nine
+    county, tract and block-group levels, Connecticut's switch from eight counties to nine
     planning regions in the 2022 release, which changes Connecticut county and
     tract GEOIDs (ACS user note 2023-01).
     """
     ct = (
         start_year < CT_PLANNING_REGION_YEAR <= end_year
-        and (not geo_level or geo_level in ("county", "tract"))
+        and (not geo_level or geo_level in ("county", "tract", "block group"))
     )
     ct_msg = (
         f"CONNECTICUT ADVISORY: from the {CT_PLANNING_REGION_YEAR} release, Connecticut is "
         "tabulated by nine planning regions (county codes 09110-09190) instead of eight counties "
-        "(09001-09015), so Connecticut county and tract GEOIDs before and after do not match. "
+        "(09001-09015), so Connecticut county, tract and block-group GEOIDs before and after do not match. "
         "Tract panels can be recoded with harmonize_tracts_to. Source: "
         "https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2023-01.html"
     )
@@ -309,6 +309,9 @@ def boundary_shift_advisory(
         "tract": "Many census tracts were split, merged, or renumbered; tract GEOIDs "
         "before and after 2020 do not describe the same areas. Use a crosswalk "
         "(e.g. Census tract relationship files or NHGIS/LTDB) before panel analysis.",
+        "block group": "Block groups nest in tracts, so 2020 tract splits and merges "
+        "renumber block groups too; block-group GEOIDs before and after 2020 do not describe "
+        "the same areas. Use a crosswalk before panel analysis.",
         "zcta": "ZCTAs were re-delineated from 2020 Census address data; some ZCTAs "
         "were added, dropped, or changed shape.",
         "place": "Place boundaries are updated annually and were re-delineated for "

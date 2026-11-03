@@ -296,8 +296,8 @@ def morans_i(
         mi = Moran(y, weights, transformation="r", permutations=int(permutations))
     level = confidence_level if confidence_level <= 1 else confidence_level / 100
     res = SpatialAutocorrelationResult(
-        variable=var, I=float(mi.I), expected_I=float(mi.EI), p_norm=float(mi.p_norm),
-        p_sim=float(mi.p_sim) if permutations else None, z_sim=float(mi.z_sim) if permutations else None,
+        variable=var, I=_scalar(mi.I), expected_I=_scalar(mi.EI), p_norm=_scalar(mi.p_norm),
+        p_sim=_scalar(mi.p_sim) if permutations else None, z_sim=_scalar(mi.z_sim) if permutations else None,
         permutations=int(permutations), confidence_level=level, n=int(len(y)), notes=notes,
         provenance={"library": "esda.Moran", "weights": getattr(weights, "census_report", None) or weights_report(weights),
                     "seed": seed},
@@ -397,6 +397,11 @@ def _design(formula: str, d: pd.DataFrame):
     return yd.iloc[:, [0]].to_numpy(float), X.to_numpy(float), list(X.columns), yd.columns[0]
 
 
+def _scalar(x) -> float:
+    """float() of a scalar or 1-element array (numpy 2 rejects float() on ndim>0 arrays)."""
+    return float(np.asarray(x, dtype=float).reshape(-1)[0])
+
+
 def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, ml_method: str, kwargs):
     import spreg
 
@@ -404,13 +409,13 @@ def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, m
         warnings.simplefilter("ignore")
         if model == "lag" and method == "ml":
             r = spreg.ML_Lag(y, X, w, method=ml_method, spat_diag=False, name_x=names, name_y=yname, **kwargs)
-            spatial = float(r.rho)
+            spatial = _scalar(r.rho)
         elif model == "lag":
             r = spreg.GM_Lag(y, X, w=w, spat_diag=False, name_x=names, name_y=yname, **kwargs)
-            spatial = float(r.rho)
+            spatial = _scalar(r.rho)
         elif method == "ml":
             r = spreg.ML_Error(y, X, w, method=ml_method, name_x=names, name_y=yname, **kwargs)
-            spatial = float(r.lam)
+            spatial = _scalar(r.lam)
         else:
             r = spreg.GM_Error_Het(y, X, w, name_x=names, name_y=yname, **kwargs)
             spatial = float(np.asarray(r.betas).ravel()[-1])
@@ -433,7 +438,7 @@ def lm_diagnostics(y: np.ndarray, X: np.ndarray, w) -> Dict[str, Any]:
         warnings.simplefilter("ignore")
         ols = spreg.OLS(y, X)
         lms = spreg.LMtests(ols, w, tests=["lme", "lml", "rlme", "rlml", "sarma"])
-    out = {name: {"statistic": float(getattr(lms, attr)[0]), "p_value": float(getattr(lms, attr)[1])}
+    out = {name: {"statistic": _scalar(getattr(lms, attr)[0]), "p_value": _scalar(getattr(lms, attr)[1])}
            for name, attr in [("lm_error", "lme"), ("lm_lag", "lml"), ("robust_lm_error", "rlme"),
                               ("robust_lm_lag", "rlml"), ("lm_sarma", "sarma")]}
     a = 0.05

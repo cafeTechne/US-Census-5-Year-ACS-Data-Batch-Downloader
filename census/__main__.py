@@ -152,7 +152,8 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
 
 
 def _entities(args: argparse.Namespace) -> Any:
-    return build_entities(args.geo, args.state, _list(args.codes), include_pr=args.include_pr)
+    years = _years(args.years) if getattr(args, "years", None) else None
+    return build_entities(args.geo, args.state, _list(args.codes), include_pr=args.include_pr, years=years)
 
 
 def cmd_plan(args: argparse.Namespace) -> int:

@@ -18,24 +18,61 @@ _MAP_KINDS = ("estimate", "uncertainty", "significance")
 _GEO_ERRORS = (FileNotFoundError, OSError, KeyError, ValueError, TypeError, RuntimeError)
 
 
+def _per_state(level: str, boundary_year: int) -> bool:
+    """Whether boundaries for ``level`` must come from per-state files: tract and
+    block group always (smaller downloads), other per-state levels (place,
+    county subdivision) only before national cb files exist (2019)."""
+    from census.boundaries import FIRST_NATIONAL_SUBSTATE_CB_YEAR, LEVELS, normalize_level
+
+    lvl = normalize_level(level)
+    if not LEVELS[lvl]["per_state"]:
+        return False
+    return lvl in ("tract", "block group") or int(boundary_year) < FIRST_NATIONAL_SUBSTATE_CB_YEAR
+
+
+def _fetch_boundaries(level: str, acs_year: int, states=None):
+    """Boundaries matching an ACS release: the boundary year comes from
+    ``boundary_vintage`` (e.g. ZCTA for ACS 2023 -> the 2020 file) and per-state
+    files are stitched together when the level has no national file that year."""
+    from census.boundaries import boundary_vintage, get_boundaries
+
+    b_year = boundary_vintage(acs_year, level)
+    if not _per_state(level, b_year):
+        return get_boundaries(level, b_year)
+    states = sorted(set(states or ()))
+    if not states:
+        raise ValueError(f"{level} boundaries for {b_year} are per state; pass state")
+    parts = [get_boundaries(level, b_year, state=s) for s in states]
+    if len(parts) == 1:
+        return parts[0]
+    bounds = parts[0].__class__(pd.concat(parts, ignore_index=True), geometry="geometry", crs=parts[0].crs)
+    # concat drops attrs; keep the vintage and source for captions and provenance
+    bounds.attrs.update({k: v for k, v in parts[0].attrs.items() if k not in ("state", "source_url", "sha256")})
+    bounds.attrs["states"] = states
+    return bounds
+
+
 def _with_boundaries(df: pd.DataFrame, level: str, year: int):
     """Attach Census cartographic boundaries matching the ACS release."""
-    from census.boundaries import get_boundaries, join_boundaries
+    from census.boundaries import join_boundaries
 
     if level not in _LEVELS:
         raise ValueError(f"level must be one of {_LEVELS}")
-    geoids = df["GEOID"].astype(str)
-    if level in ("tract", "block group"):
-        states = sorted({g[:2] for g in geoids})
-        parts = [get_boundaries(level, year, state=s) for s in states]
-        bounds = pd.concat(parts, ignore_index=True)
-        bounds = parts[0].__class__(bounds, geometry="geometry", crs=parts[0].crs)
-        # concat drops attrs; keep the vintage and source for captions and provenance
-        bounds.attrs.update({k: v for k, v in parts[0].attrs.items() if k not in ("state", "source_url", "sha256")})
-        bounds.attrs["states"] = states
-    else:
-        bounds = get_boundaries(level, year)
+    states = {g[:2] for g in df["GEOID"].astype(str)}
+    bounds = _fetch_boundaries(level, year, states)
     return join_boundaries(df, level, acs_year=year, boundaries=bounds, how="inner", on_unmatched="warn")
+
+
+def _weights_for(gdf, kind: str):
+    """Spatial weights; knn / distance weights are built in an equal-area CRS so
+    distances are in meters, not degrees."""
+    from census import spatial
+
+    if kind in ("knn", "distance") and gdf.crs is not None:
+        from census.boundaries import equal_area_crs
+
+        gdf = gdf.to_crs(equal_area_crs(gdf))
+    return gdf, spatial.spatial_weights(gdf, kind=kind)
 
 
 def _paths(fig: Any) -> List[str]:
@@ -58,7 +95,11 @@ def get_boundaries(level: str, year: int, state: Optional[str] = None,
     from census import boundaries
 
     try:
-        gdf = boundaries.get_boundaries(level, year, state=state)
+        b_year = boundaries.boundary_vintage(year, level)
+        if state is None and not _per_state(level, b_year):
+            gdf = boundaries.get_boundaries(level, b_year)
+        else:
+            gdf = _fetch_boundaries(level, year, [state] if state is not None else None)
         path = boundaries.write_geo(gdf, output_path or str(_out_dir(None, "geo")) + f"/{level.replace(' ', '_')}_{year}_{state or 'us'}.gpkg")
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
@@ -139,12 +180,7 @@ def spatial_autocorrelation(
     from census import spatial
 
     try:
-        gdf = _with_boundaries(_load_frame(input_path), level, year)
-        if weights == "knn":
-            from census.boundaries import equal_area_crs
-
-            gdf = gdf.to_crs(equal_area_crs(gdf))
-        w = spatial.spatial_weights(gdf, kind=weights)
+        gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
         reps = _read_replicates(replicates_path)
         res = spatial.morans_i(gdf, column, w, replicates=reps)
         payload: Dict[str, Any] = {"global": res.__dict__ if hasattr(res, "__dict__") else res,
@@ -177,8 +213,7 @@ def spatial_regression(
     from census import spatial
 
     try:
-        gdf = _with_boundaries(_load_frame(input_path), level, year)
-        w = spatial.spatial_weights(gdf, kind=weights)
+        gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
         res = spatial.spatial_regression(formula, gdf, w, model=model, replicates=_read_replicates(replicates_path))
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
@@ -202,12 +237,10 @@ def spatial_small_area_estimates(
 
     Example: spatial_small_area_estimates("frame.parquet", "poverty_rate ~ unemployment_rate", "poverty_rate_se", "tract", 2023)
     """
-    from census import spatial
     from census.sae_spatial import spatial_fay_herriot
 
     try:
-        gdf = _with_boundaries(_load_frame(input_path), level, year)
-        w = spatial.spatial_weights(gdf, kind=weights)
+        gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
         res = spatial_fay_herriot(formula, pd.DataFrame(gdf.drop(columns="geometry")), se_col, w)
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
@@ -237,20 +270,24 @@ def custom_area_mapping(
     allocation assumption are reported.
     Example: custom_area_mapping("neighborhoods.gpkg", "tract", "population")
     """
-    from census.boundaries import get_boundaries as _bounds
-    from census.custom_areas import allocate_units, group_mapping, mapping_report, read_areas
+    from census.custom_areas import allocate_units, group_mapping, load_block_points, mapping_report, read_areas
 
     try:
         areas = read_areas(areas_path, id_col=id_col)
         state_fips = None
-        units = None
+        units = blocks = None
         if unit_level in ("tract", "block group"):
-            joined = _bounds("county", year)
-            hits = joined.to_crs(areas.crs).sjoin(areas, predicate="intersects")
+            counties = _fetch_boundaries("county", year)
+            hits = counties.to_crs(areas.crs).sjoin(areas, predicate="intersects")
             state_fips = sorted({str(g)[:2] for g in hits["GEOID"]})
-            units = pd.concat([_bounds(unit_level, year, state=s) for s in state_fips], ignore_index=True)
-            units = joined.__class__(units, geometry="geometry", crs=joined.crs)
-        allocation = allocate_units(areas, units, method=method, unit_level=unit_level)
+            units = _fetch_boundaries(unit_level, year, state_fips)
+            if method != "area":
+                # decennial blocks matching the release's tract vintage (2010 tracts through ACS 2019)
+                block_year = 2020 if int(year) >= 2020 else 2010
+                parts = [load_block_points(s, block_year) for s in state_fips]
+                blocks = parts[0] if len(parts) == 1 else parts[0].__class__(
+                    pd.concat(parts, ignore_index=True), geometry="geometry", crs=parts[0].crs)
+        allocation = allocate_units(areas, units, method=method, unit_level=unit_level, blocks=blocks)
         mapping = group_mapping(allocation)
         report = mapping_report(allocation)
     except _GEO_ERRORS as exc:

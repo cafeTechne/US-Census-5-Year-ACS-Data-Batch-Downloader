@@ -8,3 +8,5 @@ data/geo_crosswalks/*.csv -text
 data/geo_crosswalks/*.json -text
 tests/fixtures/** -text
 *.zip binary
+data/*.json -text
+data/*.csv -text

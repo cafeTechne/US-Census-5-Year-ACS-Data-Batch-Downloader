@@ -386,12 +386,15 @@ def choropleth(
     zc = _zcrit(level)
     g = gdf.reset_index(drop=True)
     est = pd.to_numeric(g[column], errors="coerce").to_numpy(float)
-    se = _se(g, se_col, moe_col)
+    has_se = bool(se_col or moe_col)
+    # without SE/MOE the map shows estimates only: no hatching, separability n/a
+    se = _se(g, se_col, moe_col) if has_se else np.full(len(est), np.nan)
     cv = _cv(est, se)
-    bins = class_breaks(est, scheme, k, se=se, confidence_level=level)
+    bins = class_breaks(est, scheme, k, se=se if has_se else None, confidence_level=level)
     kk = len(bins)
     cls = assign_classes(est, bins)
-    sep = class_separability(est, se, np.where(cls >= 0, cls, np.nan), kk, level)
+    sep = (class_separability(est, se, np.where(cls >= 0, cls, np.nan), kk, level) if has_se
+           else {"separability": float("nan")})
     colors = sequential_colors(kk, cmap)
     low = np.isfinite(cv) & (cv > cv_threshold)
     finite = est[np.isfinite(est)]
@@ -423,17 +426,20 @@ def choropleth(
         handles.append(Patch(facecolor="white", edgecolor=HATCH_COLOR, hatch=HATCH_LOW, lw=0.3,
                              label=f"CV > {cv_threshold:g}% (low reliability)"))
     with matplotlib.rc_context(STYLE):
-        _legend(main, handles,
-                    f"{legend_title or column}\n{method}, k = {kk}\n"
-                          f"class separability {sep_txt} ({_pct(level)} intervals)")
+        rel_txt = (f"class separability {sep_txt} ({_pct(level)} intervals)" if has_se
+                   else "reliability not shown (no SE/MOE given)")
+        _legend(main, handles, f"{legend_title or column}\n{method}, k = {kk}\n{rel_txt}")
     binfo = _boundary_info(g, boundary_source)
     caption = _caption(
         title or f"{legend_title or column} by {binfo.get('level', 'area')}", data_source,
         f"Boundaries: {binfo['description']}",
-        f"{method} with {kk} classes; class separability {sep_txt} (share of adjacent-class area "
-        f"pairs whose {_pct(level)} confidence intervals do not overlap, Sun and Wong 2010); "
-        f"hatching marks estimates with coefficient of variation above {cv_threshold:g}% "
-        f"({int(low.sum())} of {len(g)} areas); equal-area projection {', '.join(crs_used)}")
+        (f"{method} with {kk} classes; class separability {sep_txt} (share of adjacent-class area "
+         f"pairs whose {_pct(level)} confidence intervals do not overlap, Sun and Wong 2010); "
+         f"hatching marks estimates with coefficient of variation above {cv_threshold:g}% "
+         f"({int(low.sum())} of {len(g)} areas)" if has_se else
+         f"{method} with {kk} classes; reliability not shown (no standard errors or MOEs given, so "
+         f"class separability and low-reliability areas are not assessed)")
+        + f"; equal-area projection {', '.join(crs_used)}")
     prov = _provenance("choropleth", data_source, level, result_id, manifest_hash,
                        dict(provenance or {}, column=column, se_col=se_col, moe_col=moe_col, scheme=scheme,
                             k=kk, bins=list(bins), separability=sep, cv_threshold=cv_threshold,

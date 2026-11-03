@@ -55,7 +55,9 @@ _FIX_NEXT_STEP = "fix the arguments as described in `error` and call again, or g
 def _guided(summary: Callable[[Dict[str, Any]], str], next_step: Union[str, Callable[[Dict[str, Any]], str]]):
     """Give a workflow result native ``summary`` (one sentence) and ``next_step``.
 
-    Failures get the error message as summary and a fix-and-retry next step.
+    Errors (``success`` False with ``error``/``error_code``) get the error message
+    as summary and a fix-and-retry next step; other unsuccessful results (e.g.
+    failed validation checks) keep the workflow's own summary and next step.
     The wrapped function keeps its name, docstring and signature (MCP schema).
     """
 
@@ -65,7 +67,7 @@ def _guided(summary: Callable[[Dict[str, Any]], str], next_step: Union[str, Call
             out = fn(*args, **kwargs)
             if not isinstance(out, dict):
                 return out
-            if out.get("success") is False:
+            if out.get("success") is False and (out.get("error") or out.get("error_code") or out.get("message")):
                 text, step = str(out.get("error") or out.get("message") or "The call failed."), _FIX_NEXT_STEP
             else:
                 try:
@@ -701,7 +703,6 @@ def download_table(
 
     try:
         level, codes = _parse_geography(geography)
-        entities = build_entities(level, state_code, codes)
     except ValueError as exc:
         return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
     table = str(table_code).strip().upper()
@@ -710,6 +711,10 @@ def download_table(
     if level == "tract" and year_list[0] <= 2019 < year_list[-1]:
         options.harmonize_tracts_to = 2020  # releases span the 2010/2020 tract change
     client = _client()
+    try:
+        entities = build_entities(level, state_code, codes, client=client, years=year_list)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
     plan = plan_extraction(table, entities, year_list, "panel", options, None, variables, client)
     if not plan.get("success"):
         return _jsonable(plan)
@@ -725,7 +730,8 @@ def download_table(
             "next_step": "name fewer variables (variables=[...]) or fewer years, or use check_variable_concordance",
         }
     base_dir = output_dir or os.path.join(ROOT, "downloads")
-    out = run_batch(table, entities, year_list, base_dir, "panel", options, None, client, variables=variables)
+    out = run_batch(table, entities, year_list, base_dir, "panel", options, None, client, variables=variables,
+                    plan=plan)
     out = _jsonable(out)
     if isinstance(out, dict) and out.get("success"):
         out["years_requested"] = year_list

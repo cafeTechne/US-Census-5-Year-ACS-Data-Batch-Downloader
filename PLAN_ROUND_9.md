@@ -168,3 +168,7 @@ The Census Bureau publishes errata and user notes for ACS releases (tables withd
 
 **Not built:** ZCTA and place crosswalks from blocks (need block-to-ZCTA/place assignment files); interactive HTML maps (P2).
 
+**Inference validation rerun** (`docs/audits/inference_validation.md`) with the real tract CV profile and the spatial studies: every gated method passes. fit_replicate 0.907 (population target) and 0.897 (these-areas target); regression calibration 0.890; Fay–Herriot 0.897; correlations 0.895; trend test size 0.098; spatial Fay–Herriot 0.890 (10x10 lattice, rho 0.5).
+
+**Local-model rerun** (`docs/audits/local_model_eval.md`, Qwen3 8B, 8K context, CPU with partial integrated-GPU offload): 5 of 6 tasks, the same as Round 8. The recipe task still fails: with a larger context and a recipe-first instruction the model still answers multi-step questions from tool descriptions without calling `get_recipe`. This is treated as a limit of this model size, not tuned around. The evaluation has no map task yet, so `make_map` in the core profile is untested with a local model; adding map and spatial tasks to the harness is carried to Round 10.
+

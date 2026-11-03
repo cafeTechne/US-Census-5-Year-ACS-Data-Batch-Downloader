@@ -201,7 +201,8 @@ def test_population_weights_via_tract_crosswalk(tmp_path):
     path = tmp_path / "pop.csv"
     path.write_text("source_geoid,target_geoid,weight\n01001020500,01001020501,0.5\n01001020500,01001020502,0.5\n")
     cw = gc.tract_crosswalk(weight="population", weights_file=str(path))
-    assert cw.attrs["weight_type"] == "population"
+    assert cw.attrs["weight_type"] == "user-supplied"  # a file is never reported as Census block weights
+    assert cw.attrs["weight_label"] == "population"
     out = gc.apportion(_frame([[SPLIT_2010, 100, 20]]), cw, metadata=COUNT_META, min_coverage=0)
     assert out["B01003_001E"].tolist() == [50.0, 50.0]
     assert "population" in out.attrs["notes"][0]

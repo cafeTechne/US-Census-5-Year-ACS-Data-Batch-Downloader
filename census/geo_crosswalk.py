@@ -350,10 +350,13 @@ def tract_crosswalk(
     if weights_file is not None:
         cw = load_weight_file(weights_file)
         cw.attrs.update(
-            weight_type=weight if weight not in AREA_WEIGHTS else "user-supplied",
+            # the file's weights are whatever the user built; never report a default label
+            weight_type="user-supplied",
+            weight_label=None if weight in AREA_WEIGHTS else weight,
             direction=direction,
             fallbacks={},
-            notes=[f"weights from user-supplied file {os.path.basename(weights_file)}"],
+            notes=[f"weights from user-supplied file {os.path.basename(weights_file)}"
+                   + (f" (labelled '{weight}' by the user)" if weight not in AREA_WEIGHTS else "")],
         )
         return cw
     if weight not in AREA_WEIGHTS:
@@ -761,6 +764,8 @@ def apportion(
     result = result.loc[~low].drop(columns="coverage").reset_index(drop=True)
 
     weight_type = crosswalk.attrs.get("weight_type", "user-supplied")
+    if crosswalk.attrs.get("weight_label"):
+        weight_type = f"{weight_type} ({crosswalk.attrs['weight_label']})"
     notes = [
         f"apportioned with {weight_type} weights; estimate = sum(w * X)",
         NOTE_INDEPENDENCE,

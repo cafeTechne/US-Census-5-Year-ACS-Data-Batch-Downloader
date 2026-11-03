@@ -349,8 +349,15 @@ def tract_weights(
     for st in [_state(s) for s in (states or STATES)]:
         try:
             rel = load_block_relationships(st, session=session)
+            # A state's file also lists pieces whose source block lies in a
+            # neighbouring state (boundary changes); those belong to that
+            # state's run, so keep only this state's source tracts (each piece
+            # is counted once) and dedupe repeated block pairs.
+            rel = rel[rel[f"tract_{sv}"].astype(str).str[:2] == st]
+            rel = rel.drop_duplicates([f"block_{sv}", f"block_{2020 if sv == 2010 else 2010}"])
             counts = None if weight == WEIGHT_LAND else load_block_counts(
-                st, sv, counties=rel[f"tract_{sv}"].str[2:5].unique(), api_key=api_key, session=session
+                st, sv, counties=sorted(rel[f"tract_{sv}"].astype(str).str[2:5].unique()), api_key=api_key,
+                session=session
             )
             cw = block_tract_weights(rel, counts, direction, weight)
         except (BlockDataError, OSError, ValueError) as exc:
@@ -364,10 +371,8 @@ def tract_weights(
         frames.append(cw)
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
         columns=["source_geoid", "target_geoid", "weight", "part_area", "mass"])
-    # A tract piece can cross a state line only through a boundary change; merge duplicates.
-    if out.duplicated(["source_geoid", "target_geoid"]).any():
-        out = out.groupby(["source_geoid", "target_geoid"], as_index=False).sum()
-        out["weight"] = out["weight"] / out.groupby("source_geoid")["weight"].transform("sum")
+    # Each source tract is computed from its own state's file only, so no
+    # (source, target) pair appears twice and weights are never re-normalized.
     out.attrs.update(
         weight_type=weight, direction=direction, fallbacks=fallbacks,
         notes=[NOTE_BLOCK.format(weight=weight)] + notes,
