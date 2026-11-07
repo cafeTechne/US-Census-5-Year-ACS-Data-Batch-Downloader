@@ -28,6 +28,68 @@ SOURCE_MODEL = "model"
 SOURCE_SAMPLING_REPLICATE = "sampling_replicate"
 SOURCE_SAMPLING_MODEL = "sampling_model"
 
+# Replicate completeness policy (PLAN_ROUND_11 Q2/D7): "strict" (confirmatory,
+# used by census.manifest.run_manifest) refuses a sampling SE built from
+# incomplete replicates; "flag" (exploratory default) keeps the estimate but
+# records diagnostics["replicates_incomplete"] and an understatement note.
+REPLICATE_POLICIES = ("flag", "strict")
+REPLICATES_UNDERSTATED = "sampling SE may be understated"
+
+
+def check_replicate_policy(policy: str) -> str:
+    if policy not in REPLICATE_POLICIES:
+        raise ValueError(f"replicate_policy must be one of {REPLICATE_POLICIES}, got {policy!r}")
+    return policy
+
+
+def stochastic_variables(frame: Optional[pd.DataFrame], variables) -> List[str]:
+    """Variables with ACS sampling error: a ``<v>_se`` column with a positive finite value."""
+    if frame is None:
+        return []
+    out = []
+    for v in variables:
+        c = f"{v}_se"
+        if c in frame.columns:
+            s = pd.to_numeric(frame[c], errors="coerce").to_numpy(float)
+            if (np.isfinite(s) & (s > 0)).any():
+                out.append(v)
+    return out
+
+
+def replicate_completeness(policy: str, *, failed_refits: int = 0, rows_held_fixed: Optional[Dict[str, int]] = None,
+                           variables_without_replicates=(), context: str = "replicate refits",
+                           diagnostics: Optional[Dict[str, Any]] = None,
+                           notes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    """Apply ``replicate_policy`` to incomplete replicates; return the incompleteness record or None.
+
+    ``strict`` raises ValueError when any refit failed, any row was held at its
+    full-sample value, or any stochastic variable had no replicates. ``flag``
+    stores the record in ``diagnostics["replicates_incomplete"]`` and appends a
+    note to ``notes``.
+    """
+    check_replicate_policy(policy)
+    rows = {str(k): int(v) for k, v in (rows_held_fixed or {}).items() if int(v)}
+    vars_ = sorted(set(variables_without_replicates))
+    failed = int(failed_refits)
+    if not (failed or rows or vars_):
+        return None
+    info = {"failed_refits": failed, "rows_held_fixed": rows, "variables_without_replicates": vars_}
+    parts = ([f"{failed} replicate refit(s) failed" if failed else ""]
+             + [f"rows without replicates held fixed: {rows}" if rows else ""]
+             + [f"stochastic variable(s) without replicates: {vars_}" if vars_ else ""])
+    detail = "; ".join(p for p in parts if p)
+    if policy == "strict":
+        raise ValueError(f"{context}: replicate_policy='strict' requires complete replicates ({detail}); the "
+                         "sampling SE would be understated. Supply complete replicates or use "
+                         "replicate_policy='flag' for exploratory work")
+    info["note"] = f"{REPLICATES_UNDERSTATED} ({detail})"
+    if diagnostics is not None:
+        diagnostics["replicates_incomplete"] = info
+    if notes is not None:
+        notes.append(f"REPLICATES INCOMPLETE: {info['note']}")
+    return info
+
+
 COEFFICIENT_COLUMNS = [
     "term", "estimate", "se_model", "se_sampling", "se_total",
     "ci_lower", "ci_upper", "p_value",

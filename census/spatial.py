@@ -40,7 +40,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats as sps
 
-from .results import SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, _jsonable
+from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, _jsonable, check_replicate_policy,
+                      replicate_completeness, stochastic_variables)
 from .variance import REPLICATE_COLUMNS, REPLICATE_COUNT, REPLICATE_FACTOR
 
 WEIGHT_KINDS = ("queen", "rook", "knn", "distance")
@@ -508,6 +509,7 @@ def spatial_regression(
     geoid_col: str = "GEOID",
     ml_method: str = "full",
     max_failed_replicates: int = 0,
+    replicate_policy: str = "flag",
     **spreg_kwargs: Any,
 ) -> ModelResult:
     """Spatial lag or spatial error regression (spreg) as a ModelResult.
@@ -524,10 +526,15 @@ def spatial_regression(
     sqrt(4/80 sum (b_r - b)^2) as in census.models.fit_replicate, and
     ``target`` (population / these_areas / conservative) picks the SE for
     intervals. ML refits cost O(n^3) each with ml_method='full'; use
-    ml_method='LU' or method='gm' for large n.
+    ml_method='LU' or method='gm' for large n. ``replicate_policy``: "flag"
+    (default) records failed refits or stochastic variables without
+    replicates in diagnostics["replicates_incomplete"]; "strict" raises
+    ValueError (census.results.replicate_completeness, PLAN_ROUND_11 Q2/D7).
     """
     from .analysis import formula_variables
     from .models import INTERVAL_TARGETS, _table
+
+    check_replicate_policy(replicate_policy)
 
     model, method = model.lower(), method.lower()
     if model not in SPATIAL_MODELS:
@@ -566,7 +573,8 @@ def spatial_regression(
     if weights.islands:
         notes.append(f"{len(weights.islands)} island(s) in the weights (zero spatial lag)")
     if replicates is not None and len(replicates):
-        used = [v for v in formula_variables(formula, d) if v in set(replicates["variable"])]
+        all_used = formula_variables(formula, d)
+        used = [v for v in all_used if v in set(replicates["variable"])]
         if not used:
             raise ValueError("no formula variable has replicates in the replicate frame")
         yr = _release_year(data)
@@ -584,6 +592,12 @@ def spatial_regression(
                 B.append(b)
             except Exception:  # noqa: BLE001 - counted and reported
                 failed += 1
+        # rows without replicates are refused by _replicate_matrix, so only
+        # failed refits and variables without replicates can be incomplete
+        replicate_completeness(replicate_policy, failed_refits=failed,
+                               variables_without_replicates=stochastic_variables(
+                                   data, [v for v in all_used if v not in used]),
+                               context="spatial_regression", diagnostics=diagnostics, notes=notes)
         if failed > max_failed_replicates:
             raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed_replicates})")
         B = np.vstack(B)

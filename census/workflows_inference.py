@@ -35,6 +35,21 @@ def _ok(summary: str, next_step: str, **payload: Any) -> Dict[str, Any]:
     return _jsonable({"success": True, "summary": summary, "next_step": next_step, **payload})
 
 
+def replicate_flag(result: Any) -> str:
+    """Summary suffix for results flagged with incomplete replicates (PLAN_ROUND_11 Q2/D7), else ""."""
+    info = (getattr(result, "diagnostics", None) or {}).get("replicates_incomplete")
+    if not info:
+        return ""
+    parts = []
+    if info.get("failed_refits"):
+        parts.append(f"{info['failed_refits']} replicate refits failed")
+    if info.get("rows_held_fixed"):
+        parts.append(f"{sum(info['rows_held_fixed'].values())} rows held fixed without replicates")
+    if info.get("variables_without_replicates"):
+        parts.append(f"no replicates for {', '.join(info['variables_without_replicates'])}")
+    return f" (sampling SE may be understated: {'; '.join(parts)})"
+
+
 def _fail(code: str, message: str, next_step: str = "") -> Dict[str, Any]:
     out = errors.error_result(code, message)
     out["summary"] = message
@@ -200,7 +215,7 @@ def fit_model(
                  "confidence interval and p-value) and the uncertainty sources it includes")
     if method == "simex":
         next_step += "; SIMEX under-covers and is exploratory only, not for confirmatory claims"
-    return _ok(f"{result.summary()}; intervals and p-values use {se_basis}", next_step,
+    return _ok(f"{result.summary()}{replicate_flag(result)}; intervals and p-values use {se_basis}", next_step,
                **{k: v for k, v in out.items() if k != "summary"})
 
 

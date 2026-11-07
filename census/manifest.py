@@ -442,6 +442,9 @@ def _wide_from_panel(panel: pd.DataFrame, columns: Mapping[str, Tuple[str, str, 
     return out
 
 
+CONFIRMATORY_REPLICATE_POLICY = "strict"
+
+
 def _one_sided(p: float, estimate: float, direction: str) -> float:
     if direction == "two-sided" or p is None or not np.isfinite(p):
         return p
@@ -458,6 +461,9 @@ def _run_analysis(a: Mapping[str, Any], frame: pd.DataFrame, level: float, repli
         if k in a:
             args.setdefault(k, a[k])
     if method == "fit_replicate":
+        # Confirmatory runs refuse incomplete replicates (PLAN_ROUND_11 Q2/D7);
+        # the failure is recorded as a "replicates_incomplete" deviation.
+        args["replicate_policy"] = CONFIRMATORY_REPLICATE_POLICY
         return models.fit_replicate(a["formula"], frame, replicates=replicates, confidence_level=level, **args)
     if method in ("regression_calibration", "simex"):
         return getattr(models, method)(a["formula"], frame, confidence_level=level, **args)
@@ -538,6 +544,9 @@ def run_manifest(
     :func:`census.analysis.attach_replicates`) used by ``fit_replicate`` and
     ``correlation_matrix``; without it those report model-based SEs and a
     deviation is recorded when the analysis sets ``"replicates": "required"``.
+    Replicate analyses run with ``replicate_policy="strict"`` (confirmatory):
+    failed refits, rows held fixed, or stochastic variables without replicates
+    stop the analysis and record a ``replicates_incomplete`` deviation.
     Never raises on data problems; returns ``success``, ``deviations``,
     ``hypotheses`` and the bundle manifest. The manifest hash is written into
     every output (results JSON, tables, figure sidecars, methods.md, bundle.json).
@@ -683,7 +692,9 @@ def run_manifest(
         try:
             results[aid] = _run_analysis(a, frame, level, replicates, corr_method)
         except Exception as exc:
-            deviations.append({"kind": "analysis_failed", "analysis": aid, "detail": f"{type(exc).__name__}: {exc}"})
+            kind = ("replicates_incomplete" if isinstance(exc, ValueError) and "replicate_policy='strict'" in str(exc)
+                    else "analysis_failed")
+            deviations.append({"kind": kind, "analysis": aid, "detail": f"{type(exc).__name__}: {exc}"})
 
     # 6. hypotheses with the pre-registered correction
     rows = []
@@ -724,7 +735,8 @@ def run_manifest(
     citation = data_citation(releases, tables_used)
     bundle = _write_bundle(out / "bundle", m, h, tagged, hyp_df, run_info, citation)
     return {"success": not any(d["kind"] in ("blocked_variable", "extraction_failed", "analysis_not_run",
-                                             "analysis_failed", "hypothesis_not_tested") for d in deviations),
+                                             "analysis_failed", "replicates_incomplete", "hypothesis_not_tested")
+                       for d in deviations),
             "manifest_hash": h, "deviations": deviations, "hypotheses": hyp_df, "results": tagged,
             "frame": frame, "bundle": bundle, "output_dir": str(out), "errors": []}
 
