@@ -26,7 +26,7 @@ import pandas as pd
 from scipy import stats
 
 from .models import interval_se_column
-from .results import interval_description
+from .results import _jsonable, interval_description
 from .multitest import adjust_pvalues
 from .results import CorrelationResult, ModelResult
 from .variance import Z90
@@ -379,7 +379,8 @@ def results_bundle(
     if methods:
         (root / "methods.md").write_text(methods.rstrip() + "\n", encoding="utf-8", newline="\n")
     for name, res in (results or {}).items():
-        d = res.to_dict() if hasattr(res, "to_dict") else res
+        # plain dicts may hold DataFrames (e.g. manifest hypotheses): write records, not a truncated repr
+        d = res.to_dict() if hasattr(res, "to_dict") else _jsonable(res)
         p = root / "results" / f"{name}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(d, indent=2, sort_keys=True, default=str) + "\n",
