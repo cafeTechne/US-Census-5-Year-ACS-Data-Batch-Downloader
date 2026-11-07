@@ -35,14 +35,22 @@ STARS: Tuple[Tuple[float, str], ...] = ((0.01, "***"), (0.05, "**"), (0.10, "*")
 _INTERCEPTS = ("intercept", "const", "(intercept)")
 
 
-def data_citation(releases: Union[str, Sequence[Any]] = (), tables: Sequence[str] = ()) -> str:
-    """Citation string for ACS 5-year data, e.g. releases ``[2023]``."""
+def data_citation(releases: Union[str, Sequence[Any]] = (), tables: Sequence[str] = (),
+                  synthetic: bool = False, description: Optional[str] = None) -> str:
+    """Citation string for ACS 5-year data, e.g. releases ``[2023]``.
+
+    ``synthetic=True``: the data only mimic the ACS layout; the citation says
+    so (with ``description``) and does not claim Census Data API retrieval.
+    """
     rel = [releases] if isinstance(releases, (str, int)) else list(releases)
-    text = "U.S. Census Bureau, American Community Survey 5-Year Estimates"
+    text = ("SYNTHETIC data (not Census data) in the layout of U.S. Census Bureau American Community Survey "
+            "5-Year Estimates" if synthetic else "U.S. Census Bureau, American Community Survey 5-Year Estimates")
     if rel:
         text += ", " + ", ".join(f"{int(r) - 4}-{r}" if str(r).isdigit() else str(r) for r in rel)
     if tables:
         text += "; tables " + ", ".join(tables)
+    if synthetic:
+        return text + "." + (f" {description.rstrip('.')}." if description else "")
     return text + ". Retrieved via the Census Data API (https://api.census.gov)."
 
 

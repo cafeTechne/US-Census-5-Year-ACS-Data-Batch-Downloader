@@ -13,6 +13,7 @@ import numpy as np
 from census.api import CensusAPIClient
 from census.manifest import (
     STATUS_CONFIRMATORY,
+    STATUS_CONFIRMATORY_INCOMPLETE,
     STATUS_EXPLORATORY,
     analysis_status,
     create_manifest,
@@ -20,6 +21,7 @@ from census.manifest import (
     load_manifest,
     manifest_hash,
     methods_section,
+    replicates_sha256,
     run_manifest,
     validate_manifest,
 )
@@ -173,6 +175,88 @@ class TestRunManifest(unittest.TestCase):
         self.assertFalse(res["success"])
         self.assertTrue(res["errors"])
         self.assertFalse(os.path.exists(os.path.join(self.dir, "manifest.json")))
+
+    def _read(self, rel):
+        with open(os.path.join(self.dir, "bundle", rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_status_confirmatory_only_when_clean(self):
+        res = run_manifest(self.m, self.dir, client=FakeClient(), use_cache=False)
+        self.assertEqual(res["analysis_status"], STATUS_CONFIRMATORY)
+        self.assertEqual(json.loads(self._read("results/run.json"))["analysis_status"], STATUS_CONFIRMATORY)
+        self.assertEqual(json.loads(self._read("bundle.json"))["provenance"]["analysis_status"], STATUS_CONFIRMATORY)
+        self.assertIn("**Analysis status: confirmatory**.", self._read("methods.md"))
+
+    def test_status_incomplete_with_blocking_deviations(self):
+        res = run_manifest(self.m, self.dir, client=FakeClient(fail_tables={"B01003"}), use_cache=False)
+        self.assertEqual(res["analysis_status"], STATUS_CONFIRMATORY_INCOMPLETE)
+        run = json.loads(self._read("results/run.json"))
+        self.assertEqual(run["analysis_status"], STATUS_CONFIRMATORY_INCOMPLETE)
+        self.assertEqual(json.loads(self._read("bundle.json"))["provenance"]["analysis_status"],
+                         STATUS_CONFIRMATORY_INCOMPLETE)
+        methods = self._read("methods.md")
+        self.assertIn("confirmatory_incomplete", methods)
+        self.assertIn("pre-registered analysis did not run as registered; results are not confirmatory", methods)
+        self.assertNotIn("**Analysis status: confirmatory**.", methods)
+
+    def test_data_source_validation(self):
+        for bad in ({"synthetic": "yes"}, {"description": "x"}, {"synthetic": True, "extra": 1},
+                    {"synthetic": True, "generator": 3}, "synthetic"):
+            m = copy.deepcopy(self.m)
+            m["data_source"] = bad
+            self.assertTrue(any("data_source" in e for e in validate_manifest(m, resolve=False)), bad)
+        m = copy.deepcopy(self.m)
+        m.pop("data_source", None)
+        self.assertEqual(validate_manifest(m, resolve=False), [])
+
+    def test_synthetic_source_citation_and_methods(self):
+        self.assertTrue(self.m["data_source"]["synthetic"])
+        run_manifest(self.m, self.dir, client=FakeClient(), use_cache=False)
+        bundle = json.loads(self._read("bundle.json"))
+        methods = self._read("methods.md")
+        for text in (bundle["citation"], methods):
+            self.assertIn("SYNTHETIC", text)
+            self.assertNotIn("Retrieved via the Census Data API", text)
+        self.assertTrue(bundle["provenance"]["data_source"]["synthetic"])
+        self.assertIsNone(bundle["provenance"]["replicates"])
+
+    def test_synthetic_client_flag_overrides_real_manifest(self):
+        m = copy.deepcopy(self.m)
+        m.pop("data_source")
+        client = FakeClient()
+        client.synthetic = True
+        run_manifest(m, self.dir, client=client, use_cache=False)
+        self.assertNotIn("Retrieved via the Census Data API", self._read("methods.md"))
+        self.assertIn("SYNTHETIC", json.loads(self._read("bundle.json"))["citation"])
+        # a real-source manifest still cites the Census Data API
+        self.assertIn("Retrieved via the Census Data API", methods_section(m))
+
+    def test_caller_supplied_replicates_described_and_hashed(self):
+        from census.simulation import make_replicates, replicate_long
+        frame = run_manifest(self.m, os.path.join(self.dir, "probe"), client=FakeClient(), use_cache=False)["frame"]
+        est = frame[["income", "pop"]].to_numpy(float)
+        se = frame[["income_se", "pop_se"]].to_numpy(float)
+        reps = replicate_long(list(frame["GEOID"]), ["income", "pop"], est,
+                              make_replicates(est, se, np.random.default_rng(1)))
+        reps["Year"] = 2019
+        res = run_manifest(self.m, self.dir, client=FakeClient(), use_cache=False, replicates=reps)
+        self.assertTrue(res["success"], res["deviations"])
+        prov = json.loads(self._read("bundle.json"))["provenance"]
+        digest = replicates_sha256(reps)
+        self.assertEqual(prov["replicates"], {"source": "caller_supplied", "synthetic": True,
+                                              "rows": len(reps), "sha256": digest})
+        self.assertEqual(replicates_sha256(reps.iloc[::-1][list(reversed(reps.columns))]), digest)
+        methods = self._read("methods.md")
+        self.assertIn("synthetic caller-supplied replicate estimates", methods)
+        self.assertIn(digest, methods)
+        self.assertNotIn("80 ACS replicate estimates", methods)
+        # not synthetic when the caller says so
+        m = copy.deepcopy(self.m)
+        m.pop("data_source")
+        run_manifest(m, self.dir, client=FakeClient(), use_cache=False, replicates=reps)
+        methods = self._read("methods.md")
+        self.assertIn("the caller-supplied replicate estimates", methods)
+        self.assertNotIn("synthetic caller-supplied", methods)
 
     def test_methods_section_without_results(self):
         text = methods_section(self.m)

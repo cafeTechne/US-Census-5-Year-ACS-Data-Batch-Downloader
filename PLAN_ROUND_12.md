@@ -188,3 +188,17 @@ Deferral is not a future promise. Keep this list short; do not convert every ide
 - Earlier plans, unrelated edits, datasets and credentials remain preserved. Implementation handoff lists actual changes, results, compatibility impact, remaining decisions and deferred work; no commits or pushes without permission.
 
 **Current handoff:** Draft informed by three parallel read-only reviews and parent source verification. No implementation, dependency setup, new runtime results, external verification or release action is claimed.
+
+---
+
+## 12. Implementation status (2026-11-07)
+
+| Slice | Result |
+| :--- | :--- |
+| 12.A Independent evidence | Dense hand-assembled references for the known-variance multilevel GLS layer (fixed components, heterogeneous D, within-block covariance) and the two-group DiD (explicit contrasts, reference-period edge case); no production defect found. `scripts/inference_validation.py --gate` (P12-3: report by default, gate on request); `docs/audits/CHECK_MAP.md` maps each method to its focused test and release study |
+| 12.B Interpretation | `census.results.interval_description` is the single source for estimand, interval basis, level, normal vs t (df), undefined terms, and replicate completeness; six disagreements fixed across serialization, tables, figures, methods text, workflow guidance, and CLI/MCP adapters |
+| 12.C Executable workflow | `docs/reference_workflow.md` with offline frozen synthetic inputs; `tests/test_reference_workflow.py` runs the documented commands twice with network refused and compares substantive results; blocked case under strict replicate policy. Fixed: results bundles lost hypothesis results (truncated repr) |
+| Second reader (P12-8) | Independent agent followed the doc with no prior context; all expected values reproduced; verdict "usable with fixes". Fixed: blocked runs labeled `confirmatory` (now `confirmatory_incomplete`); synthetic data cited as Census API data (new manifest `data_source`, SYNTHETIC citations, caller-supplied replicates described and hashed); doc setup, cleanup, fixture hash, method naming |
+
+**Deferred:** multilevel and DiD design studies are not yet in the `--gate` required set (run on demand per CHECK_MAP.md); CLI/MCP `run_manifest` cannot take replicates (Python route documented); no CLI command loads frozen responses into the cache (Python step documented).
+

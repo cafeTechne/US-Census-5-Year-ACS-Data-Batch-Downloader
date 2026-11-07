@@ -10,6 +10,7 @@ tests/fixtures/reference_workflow/frozen_api_responses.json.
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import math
@@ -26,7 +27,7 @@ import requests
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DOC = os.path.join(ROOT, "docs", "reference_workflow.md")
-MANIFEST_HASH = "42297cbe9d8a19d3b21d26cc0bfc53e94b30fbb97d034d25c0fc392cac97c45b"
+MANIFEST_HASH = "54b50c72f2a36759ab3d9bac6d901034aef66001f9a762416fb0d9d00974cf24"
 
 
 def _refuse(*args, **kwargs):
@@ -168,6 +169,24 @@ class TestReferenceWorkflow(unittest.TestCase):
                           (pop["se_total"], 0.4709), (h1["ci_lower"], 3.7386), (h1["ci_upper"], 4.8237),
                           (s["hypotheses"]["H2"]["estimate"], 0.9260)):
             self.assertAlmostEqual(got, want, places=4)
+        # provenance: synthetic source, caller-supplied replicates hashed into bundle.json
+        import pandas as pd
+        from census.manifest import replicates_sha256
+        bdir = os.path.join(self.dirs[0], "run1", "bundle")
+        with open(os.path.join(bdir, "bundle.json"), encoding="utf-8") as f:
+            prov = json.load(f)["provenance"]
+        self.assertEqual(prov["analysis_status"], "confirmatory")
+        self.assertTrue(prov["data_source"]["synthetic"])
+        reps = pd.read_csv(os.path.join(self.dirs[0], "synthetic_replicates.csv"), dtype={"GEOID": str})
+        self.assertEqual(prov["replicates"]["sha256"], replicates_sha256(reps))
+        self.assertEqual(prov["replicates"]["source"], "caller_supplied")
+        with open(os.path.join(bdir, "methods.md"), encoding="utf-8") as f:
+            methods = f.read()
+        self.assertNotIn("Retrieved via the Census Data API", methods)
+        self.assertNotIn("80 ACS replicate estimates", methods)
+        self.assertIn("synthetic caller-supplied replicate estimates", methods)
+        with open(DOC, encoding="utf-8") as f:
+            self.assertIn(hashlib.sha256(self.fixture_bytes).hexdigest(), f.read())
         # the interval text quoted in the document is the single-source description
         with open(DOC, encoding="utf-8") as f:
             doc = " ".join(f.read().split())
@@ -217,6 +236,7 @@ class TestReferenceWorkflow(unittest.TestCase):
         with open(os.path.join(self.dirs[0], "blocked", "bundle", "bundle.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["provenance"]["deviations"], 4)
         self.assertFalse(os.path.exists(os.path.join(self.dirs[0], "blocked", "bundle", "results", "m1.json")))
+        self.assertEqual(run["analysis_status"], "confirmatory_incomplete")
 
 
 if __name__ == "__main__":

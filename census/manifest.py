@@ -27,8 +27,27 @@ pulled. Schema (``schema_version`` 1)::
                     "args": {"model": "ols"}}],
       "hypotheses": [{"id": "H1", "statement": "...", "analysis": "m1",
                       "statistic": "coefficient", "term": "pop",
-                      "direction": "two-sided" | "greater" | "less", "family": "primary"}]
+                      "direction": "two-sided" | "greater" | "less", "family": "primary"}],
+      "data_source": {"synthetic": true,                    # optional; default: real Census API data
+                      "description": "...", "generator": "..."}
     }
+
+``data_source`` (optional) declares where the input data come from. When
+``synthetic`` is true (or :func:`run_manifest` is given a client with a true
+``synthetic`` attribute) the citation and methods text say the data are
+synthetic and never claim retrieval from the Census Data API.
+
+Run status (``analysis_status`` in results, ``results/run.json``,
+``bundle.json`` provenance and ``methods.md``):
+
+- ``"confirmatory"`` (:data:`STATUS_CONFIRMATORY`): the pre-registered
+  analysis ran as registered, with no blocking deviation.
+- ``"confirmatory_incomplete"`` (:data:`STATUS_CONFIRMATORY_INCOMPLETE`): at
+  least one blocking deviation (:data:`BLOCKING_DEVIATIONS`, e.g. a hypothesis
+  not tested, an analysis failed, replicates incomplete, an extraction
+  failure); the pre-registered analysis did not run as registered and its
+  results are not confirmatory.
+- ``"exploratory"``: anything run outside a manifest (:func:`label_exploratory`).
 
 Supported analysis methods are :data:`ANALYSIS_METHODS`; hypothesis
 statistics are :data:`STATISTICS`. :func:`create_manifest` validates (every
@@ -60,6 +79,14 @@ YEAR_CODE_RE = re.compile(r"^(\d{4}):([A-Z]+\d+[A-Z]*_\d+[A-Z]*)$")
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIONS = ("two-sided", "greater", "less")
 STATUS_CONFIRMATORY = "confirmatory"
+STATUS_CONFIRMATORY_INCOMPLETE = "confirmatory_incomplete"
+INCOMPLETE_STATUS_TEXT = "pre-registered analysis did not run as registered; results are not confirmatory"
+# deviations meaning the pre-registered analysis did not run as registered
+BLOCKING_DEVIATIONS = ("blocked_variable", "extraction_failed", "variable_missing_from_extraction",
+                       "aggregation_failed", "analysis_frame_failed", "analysis_not_run",
+                       "replicates_unavailable", "analysis_failed", "replicates_incomplete",
+                       "hypothesis_not_tested")
+DATA_SOURCE_KEYS = ("synthetic", "description", "generator")
 STATUS_EXPLORATORY = "exploratory"
 
 # method -> (required args, statistics it supports)
@@ -281,6 +308,18 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         errors.append(f"correction: {exc}")
     if corr.get("family", "all") not in ("all", "by_family"):
         errors.append("correction.family must be 'all' or 'by_family'")
+    ds = manifest.get("data_source")
+    if ds is not None:
+        if not isinstance(ds, Mapping):
+            errors.append("data_source must be an object {synthetic, description, generator}")
+        else:
+            if not isinstance(ds.get("synthetic"), bool):
+                errors.append("data_source.synthetic is required and must be true or false")
+            for k in ("description", "generator"):
+                if k in ds and not isinstance(ds[k], str):
+                    errors.append(f"data_source.{k} must be a string")
+            for k in sorted(set(ds) - set(DATA_SOURCE_KEYS)):
+                errors.append(f"data_source: unknown key {k!r}; allowed {DATA_SOURCE_KEYS}")
     if manifest.get("missing", "complete_case") != "complete_case":
         errors.append("missing: only 'complete_case' is supported")
 
@@ -527,8 +566,8 @@ def _statistic(h: Mapping[str, Any], res: Any) -> Dict[str, Any]:
     raise ValueError(stat)
 
 
-def _tag(result: Any, h: str, analysis_id: str) -> Any:
-    tag = {"analysis_status": STATUS_CONFIRMATORY, "manifest_hash": h, "manifest_analysis_id": analysis_id}
+def _tag(result: Any, h: str, analysis_id: str, status: str = STATUS_CONFIRMATORY) -> Any:
+    tag = {"analysis_status": status, "manifest_hash": h, "manifest_analysis_id": analysis_id}
     if hasattr(result, "provenance") and isinstance(result.provenance, dict):
         result.provenance.update(tag)
         return result
@@ -541,7 +580,7 @@ def _tag(result: Any, h: str, analysis_id: str) -> Any:
 
 def run_manifest(
     manifest: Union[str, Path, Mapping[str, Any]], output_dir: Union[str, Path], client: Any = None,
-    replicates: Any = None, use_cache: bool = True,
+    replicates: Any = None, use_cache: bool = True, replicates_synthetic: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Execute a manifest exactly: plan -> extraction -> analysis frame ->
     exclusions -> analyses -> hypothesis tests with the pre-registered
@@ -554,6 +593,13 @@ def run_manifest(
     Replicate analyses run with ``replicate_policy="strict"`` (confirmatory):
     failed refits, rows held fixed, or stochastic variables without replicates
     stop the analysis and record a ``replicates_incomplete`` deviation.
+    Supplied replicates are recorded as caller-supplied (not fetched from
+    Census VRE files by this function) with the SHA-256 of their canonical CSV
+    (:func:`replicates_sha256`); ``replicates_synthetic`` (default: the data
+    source's synthetic flag, or ``replicates.attrs["synthetic"]``) marks them
+    synthetic in the methods text.
+    ``analysis_status`` is ``"confirmatory"`` only without blocking deviations,
+    else ``"confirmatory_incomplete"`` (see the module docstring).
     Never raises on data problems; returns ``success``, ``deviations``,
     ``hypotheses`` and the bundle manifest. The manifest hash is written into
     every output (results JSON, tables, figure sidecars, methods.md, bundle.json).
@@ -732,18 +778,47 @@ def run_manifest(
     hyp_df["manifest_hash"] = h
 
     # 7. bundle
-    tagged = {aid: _tag(r, h, aid) for aid, r in results.items()}
-    run_info = {"manifest_hash": h, "analysis_status": STATUS_CONFIRMATORY, "deviations": deviations,
+    complete = not any(d["kind"] in BLOCKING_DEVIATIONS for d in deviations)
+    status = STATUS_CONFIRMATORY if complete else STATUS_CONFIRMATORY_INCOMPLETE
+    source = effective_data_source(m, client)
+    rep_info = None
+    if replicates is not None:
+        if replicates_synthetic is None:
+            attrs = getattr(replicates, "attrs", {}) or {}
+            replicates_synthetic = bool(attrs.get("synthetic", source["synthetic"]))
+        rep_info = {"source": "caller_supplied", "synthetic": bool(replicates_synthetic),
+                    "rows": int(len(replicates)), "sha256": replicates_sha256(replicates)}
+    tagged = {aid: _tag(r, h, aid, status) for aid, r in results.items()}
+    run_info = {"manifest_hash": h, "analysis_status": status, "deviations": deviations,
                 "exclusions": exclusion_log, "extraction": extraction, "n_units": None if frame is None
-                else int(len(frame)), "title": m.get("title")}
+                else int(len(frame)), "title": m.get("title"), "data_source": source, "replicates": rep_info}
+    if not complete:
+        run_info["status_note"] = INCOMPLETE_STATUS_TEXT
     tables_used = sorted(tables_and_refs(m))
-    citation = data_citation(releases, tables_used)
+    citation = data_citation(releases, tables_used, synthetic=source["synthetic"],
+                             description=source.get("description"))
     bundle = _write_bundle(out / "bundle", m, h, tagged, hyp_df, run_info, citation)
-    return {"success": not any(d["kind"] in ("blocked_variable", "extraction_failed", "analysis_not_run",
-                                             "analysis_failed", "replicates_incomplete", "hypothesis_not_tested")
-                       for d in deviations),
+    return {"success": complete, "analysis_status": status,
             "manifest_hash": h, "deviations": deviations, "hypotheses": hyp_df, "results": tagged,
             "frame": frame, "bundle": bundle, "output_dir": str(out), "errors": []}
+
+
+def effective_data_source(manifest: Mapping[str, Any], client: Any = None) -> Dict[str, Any]:
+    """The manifest's ``data_source`` (default: not synthetic), forced synthetic
+    when ``client`` carries a true ``synthetic`` attribute."""
+    ds = dict(manifest.get("data_source") or {})
+    ds["synthetic"] = bool(ds.get("synthetic")) or getattr(client, "synthetic", False) is True
+    return ds
+
+
+def replicates_sha256(replicates: pd.DataFrame) -> str:
+    """SHA-256 of the canonical CSV of a replicate frame: columns sorted by
+    name, rows sorted by all columns, no index, UTF-8, LF line endings."""
+    df = replicates.copy()
+    df.columns = [str(c) for c in df.columns]
+    df = df.reindex(columns=sorted(df.columns))
+    df = df.sort_values(list(df.columns), kind="mergesort").reset_index(drop=True)
+    return hashlib.sha256(df.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
 
 
 def _write_bundle(folder: Path, m, h, results, hyp_df, run_info, citation) -> Dict[str, Any]:
@@ -783,8 +858,11 @@ def _write_bundle(folder: Path, m, h, results, hyp_df, run_info, citation) -> Di
     payload["run"] = run_info
     from .report_tables import results_bundle
     return results_bundle(folder, tables=tables, figures=figures_, methods=methods_section(m, run_info),
-                          results=payload, provenance={"manifest_hash": h, "analysis_status": STATUS_CONFIRMATORY,
-                                                       "deviations": len(run_info["deviations"])},
+                          results=payload, provenance={"manifest_hash": h,
+                                                       "analysis_status": run_info["analysis_status"],
+                                                       "deviations": len(run_info["deviations"]),
+                                                       "data_source": run_info.get("data_source"),
+                                                       "replicates": run_info.get("replicates")},
                           citation=citation)
 
 
@@ -794,8 +872,7 @@ def _write_bundle(folder: Path, m, h, results, hyp_df, run_info, citation) -> Di
 
 _METHOD_TEXT = {
     "fit_replicate": ("Coefficients were estimated with {model} regression (statsmodels) on the full-sample "
-                      "estimates; sampling standard errors came from refitting on each of the 80 ACS replicate "
-                      "estimates, Var = 4/80 sum (b_r - b)^2, combined with the model standard error as "
+                      "estimates; sampling standard errors came from refitting on each of {rep_source}, Var = 4/80 sum (b_r - b)^2, combined with the model standard error as "
                       "se_total = sqrt(se_model^2 + se_sampling^2). Reported standard errors, intervals and p-values use "
                       "the {target_se} ({target} target: {estimand}), with normal-theory intervals. Without "
                       "replicates only model standard errors are reported.", ["vre", "design", "statsmodels"]),
@@ -825,16 +902,39 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
     from .sae import REFERENCES as FH_REFS
     m = manifest
     h = manifest_hash(m)
+    run = results or {}
+    source = run.get("data_source") or effective_data_source(m)
+    rep_info = run.get("replicates")
+    if rep_info:
+        kind = "synthetic caller-supplied" if rep_info.get("synthetic") else "caller-supplied"
+        rep_source = (f"the {kind} replicate estimates (not fetched from Census variance replicate files by "
+                      f"the toolkit; canonical CSV SHA-256 `{rep_info.get('sha256')}`)")
+        rep_short = f" and replicate-based standard errors from {kind} replicate estimates"
+    elif results is not None:
+        rep_source = "replicate estimates when supplied (none were supplied to this run)"
+        rep_short = " and replicate-based standard errors"
+    else:
+        rep_source = "the 80 ACS replicate estimates"
+        rep_short = " and replicate-based standard errors"
     level = float(m.get("confidence_level", 0.90))
     corr = m.get("correction") or {}
     cites: List[str] = ["acs"]
     lines = [f"## Methods", "", f"*Pre-registered analysis \"{m.get('title', '')}\"; manifest SHA-256 `{h}`, "
-             f"created {m.get('created')} by {', '.join(m.get('authors', []))}.*", "", "### Data", ""]
+             f"created {m.get('created')} by {', '.join(m.get('authors', []))}.*", ""]
+    if results is not None:
+        status = results.get("analysis_status", STATUS_CONFIRMATORY)
+        lines += [f"**Analysis status: {status}**"
+                  + (f": {INCOMPLETE_STATUS_TEXT}." if status == STATUS_CONFIRMATORY_INCOMPLETE else "."), ""]
+    lines += ["### Data", ""]
     tables = sorted(tables_and_refs(m))
     geo = m.get("geography", {})
-    lines.append(f"Data are {data_citation(m.get('releases', []), tables)} Geography: {geo.get('level')}"
+    cite = data_citation(m.get("releases", []), tables, synthetic=source["synthetic"],
+                         description=source.get("description"))
+    lines.append(f"Data are {cite} Geography: {geo.get('level')}"
                  + (f" (state {geo.get('state')})" if geo.get("state") else "")
                  + (f", codes {', '.join(map(str, geo['codes']))}" if geo.get("codes") else "") + ".")
+    if source["synthetic"] and source.get("generator"):
+        lines.append(f"Synthetic data generator: {source['generator']}.")
     lines.append("Variables (YEAR:CODE references resolve to that vintage's concept; concept IDs follow the "
                  "toolkit's cross-vintage concordance, with blocking concordance issues stopping extraction "
                  "rather than being substituted):")
@@ -877,7 +977,7 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                            target_se={"se_model": "model SE (se_model)", "se_sampling": "replicate sampling SE "
                                       "(se_sampling)", "se_total": "combined SE (se_total)"}[info["basis_column"]],
                            cov=", ".join(a.get("error_covariates") or args.get("error_covariates") or []),
-                           rep=" and replicate-based standard errors" if a.get("replicates") else "")
+                           rep=rep_short if (a.get("replicates") or rep_info) else "", rep_source=rep_source)
         target = a.get("formula") or a.get("variables") or a.get("variable")
         lines.append(f"- **{a['id']}** (`{target}`): {text}")
         cites += refs
