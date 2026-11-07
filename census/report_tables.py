@@ -25,8 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .models import interval_se_column
-from .results import _jsonable, interval_description
+from .results import _jsonable, interval_description, interval_row
 from .multitest import adjust_pvalues
 from .results import CorrelationResult, ModelResult
 from .variance import Z90
@@ -171,7 +170,7 @@ def regression_table(
         results = {"Model": results}
     if uncertainty not in ("se", "ci"):
         raise ValueError("uncertainty must be 'se' or 'ci'")
-    data_rows, terms = [], []
+    data_rows, terms, infos = [], [], {}
     for mname, res in results.items():
         c = res.coefficients.reset_index(drop=True)
         p = pd.to_numeric(c["p_value"], errors="coerce").to_numpy(float)
@@ -182,8 +181,7 @@ def regression_table(
             p_adj[fam] = np.asarray(adjust_pvalues(p[fam], correction), dtype=float)
         else:
             p_adj = p.copy()
-        info = interval_description(res)
-        se_col = info["basis_column"]
+        info = infos[mname] = interval_description(res)
         for i, row in c.iterrows():
             t = str(row["term"])
             if t not in terms:
@@ -191,12 +189,9 @@ def regression_table(
             data_rows.append({"model": mname, "term": t, "estimate": row["estimate"],
                               "se_model": row.get("se_model"), "se_sampling": row.get("se_sampling"),
                               "se_total": row.get("se_total"), "ci_lower": row["ci_lower"],
-                              "ci_upper": row["ci_upper"], "se_basis": se_col,
-                              "se_reported": row.get(se_col), "p_value": p[i], "p_adjusted": p_adj[i],
+                              "ci_upper": row["ci_upper"], **interval_row(info, t, row),
+                              "p_value": p[i], "p_adjusted": p_adj[i],
                               "marker": stars(p_adj[i]), "confidence_level": res.confidence_level,
-                              "distribution": info["distribution"],
-                              "df": (info["df"] or {}).get(t, math.nan) if info["df"] else math.nan,
-                              "interval_defined": t not in info["undefined_terms"],
                               "method": res.method, "n_obs": res.n_obs})
     data = pd.DataFrame(data_rows)
     models = list(results)
@@ -219,12 +214,15 @@ def regression_table(
     disp.append({"Term": "N", **{m: f"{results[m].n_obs:,}" for m in models}})
     notes = []
     for m, res in results.items():
-        info = interval_description(res)
+        info = infos[m]
+        # the interval text already carries the REPLICATES INCOMPLETE note: do not repeat it
+        extra = [n for n in res.notes if not (info["replicates_incomplete"]
+                                              and str(n).startswith("REPLICATES INCOMPLETE"))]
         notes.append(f"{m}: {res.method}; {info['text']}; uncertainty sources across se_model/se_sampling/"
                      f"se_total: {', '.join(res.uncertainty_sources)}"
-                     + (f" ({'; '.join(res.notes)})" if res.notes else "") + ".")
+                     + (f" ({'; '.join(extra)})" if extra else "") + ".")
     if uncertainty == "se":
-        bases = sorted({interval_se_column(r) for r in results.values()})
+        bases = sorted({info["basis_column"] for info in infos.values()})
         notes.append(f"Standard errors in parentheses ({', '.join(bases)}: the SE behind each model's "
                      "p-values and intervals; se_model, se_sampling and se_total are in the CSV).")
     else:

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS responses (
     created_at  REAL NOT NULL
 )
 """
+_META_SCHEMA = "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+SYNTHETIC_KEY = "synthetic_source"
 
 
 def make_cache_key(endpoint: str, params: Mapping[str, Any]) -> str:
@@ -44,6 +46,7 @@ class QueryCache:
         os.makedirs(directory, exist_ok=True)
         with self._connect() as conn:
             conn.execute(_SCHEMA)
+            conn.execute(_META_SCHEMA)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -77,6 +80,22 @@ class QueryCache:
                     time.time(),
                 ),
             )
+
+    def mark_synthetic(self, description: Optional[str] = None, generator: Optional[str] = None) -> None:
+        """Mark every response in this cache as SYNTHETIC (e.g. frozen generated fixtures).
+
+        Results built from a client using this cache are labelled synthetic
+        (census.manifest.run_manifest), whatever a manifest declares.
+        """
+        value = json.dumps({"description": description, "generator": generator}, sort_keys=True)
+        with self._connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (SYNTHETIC_KEY, value))
+
+    def synthetic_marker(self) -> Optional[Dict[str, Any]]:
+        """The synthetic marker ({description, generator}) or None for a real-data cache."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (SYNTHETIC_KEY,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def clear(self) -> int:
         with self._connect() as conn:

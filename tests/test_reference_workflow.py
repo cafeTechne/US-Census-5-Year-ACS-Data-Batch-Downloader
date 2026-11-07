@@ -27,7 +27,7 @@ import requests
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DOC = os.path.join(ROOT, "docs", "reference_workflow.md")
-MANIFEST_HASH = "54b50c72f2a36759ab3d9bac6d901034aef66001f9a762416fb0d9d00974cf24"
+MANIFEST_HASH = "cfa2208fab380730a82ed4a2511236bb22d79a6de634b9f6c984b9415cd4b6c8"
 
 
 def _refuse(*args, **kwargs):
@@ -171,13 +171,13 @@ class TestReferenceWorkflow(unittest.TestCase):
             self.assertAlmostEqual(got, want, places=4)
         # provenance: synthetic source, caller-supplied replicates hashed into bundle.json
         import pandas as pd
-        from census.manifest import replicates_sha256
+        from census.manifest import read_replicates, replicates_sha256
         bdir = os.path.join(self.dirs[0], "run1", "bundle")
         with open(os.path.join(bdir, "bundle.json"), encoding="utf-8") as f:
             prov = json.load(f)["provenance"]
         self.assertEqual(prov["analysis_status"], "confirmatory")
         self.assertTrue(prov["data_source"]["synthetic"])
-        reps = pd.read_csv(os.path.join(self.dirs[0], "synthetic_replicates.csv"), dtype={"GEOID": str})
+        reps = read_replicates(os.path.join(self.dirs[0], "synthetic_replicates.csv"))
         self.assertEqual(prov["replicates"]["sha256"], replicates_sha256(reps))
         self.assertEqual(prov["replicates"]["source"], "caller_supplied")
         with open(os.path.join(bdir, "methods.md"), encoding="utf-8") as f:

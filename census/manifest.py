@@ -32,10 +32,15 @@ pulled. Schema (``schema_version`` 1)::
                       "description": "...", "generator": "..."}
     }
 
-``data_source`` (optional) declares where the input data come from. When
-``synthetic`` is true (or :func:`run_manifest` is given a client with a true
-``synthetic`` attribute) the citation and methods text say the data are
-synthetic and never claim retrieval from the Census Data API.
+``data_source`` (optional) *declares* where the input data come from. The
+labels follow where the data actually came from (:func:`observed_data_source`):
+data are synthetic when the client that served them carries a true
+``synthetic`` attribute or its cache was marked with
+``QueryCache.mark_synthetic``; otherwise they are real Census Data API data.
+A declaration that disagrees with the observed source records a blocking
+``data_source_mismatch`` deviation, and the citation and methods text follow
+the observed source (real Census data are never called synthetic; synthetic
+data never claim retrieval from the Census Data API).
 
 Run status (``analysis_status`` in results, ``results/run.json``,
 ``bundle.json`` provenance and ``methods.md``):
@@ -62,6 +67,7 @@ silently. Anything run outside a manifest should be tagged with
 import copy
 import hashlib
 import json
+import math
 import re
 from datetime import datetime
 from pathlib import Path
@@ -85,7 +91,7 @@ INCOMPLETE_STATUS_TEXT = "pre-registered analysis did not run as registered; res
 BLOCKING_DEVIATIONS = ("blocked_variable", "extraction_failed", "variable_missing_from_extraction",
                        "aggregation_failed", "analysis_frame_failed", "analysis_not_run",
                        "replicates_unavailable", "analysis_failed", "replicates_incomplete",
-                       "hypothesis_not_tested")
+                       "hypothesis_not_tested", "failed_calls", "data_source_mismatch")
 DATA_SOURCE_KEYS = ("synthetic", "description", "generator")
 STATUS_EXPLORATORY = "exploratory"
 
@@ -594,7 +600,7 @@ def run_manifest(
     failed refits, rows held fixed, or stochastic variables without replicates
     stop the analysis and record a ``replicates_incomplete`` deviation.
     Supplied replicates are recorded as caller-supplied (not fetched from
-    Census VRE files by this function) with the SHA-256 of their canonical CSV
+    Census VRE files by this function) with the SHA-256 of their canonical form
     (:func:`replicates_sha256`); ``replicates_synthetic`` (default: the data
     source's synthetic flag, or ``replicates.attrs["synthetic"]``) marks them
     synthetic in the methods text.
@@ -619,6 +625,9 @@ def run_manifest(
     (out / "manifest.json").write_text(json.dumps(m, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
                                        encoding="utf-8", newline="\n")
     deviations: List[Dict[str, Any]] = []
+    source, mismatch = resolve_data_source(m, client, use_cache)
+    if mismatch:
+        deviations.append({"kind": "data_source_mismatch", "detail": mismatch})
     level = float(m.get("confidence_level", 0.90))
     corr = m.get("correction") or {}
     corr_method = corr.get("method", "holm")
@@ -780,14 +789,16 @@ def run_manifest(
     # 7. bundle
     complete = not any(d["kind"] in BLOCKING_DEVIATIONS for d in deviations)
     status = STATUS_CONFIRMATORY if complete else STATUS_CONFIRMATORY_INCOMPLETE
-    source = effective_data_source(m, client)
     rep_info = None
     if replicates is not None:
         if replicates_synthetic is None:
             attrs = getattr(replicates, "attrs", {}) or {}
             replicates_synthetic = bool(attrs.get("synthetic", source["synthetic"]))
+        digest, reason = replicates_digest(replicates)
         rep_info = {"source": "caller_supplied", "synthetic": bool(replicates_synthetic),
-                    "rows": int(len(replicates)), "sha256": replicates_sha256(replicates)}
+                    "rows": int(len(replicates)), "sha256": digest}
+        if digest is None:
+            rep_info["sha256_unavailable"] = reason
     tagged = {aid: _tag(r, h, aid, status) for aid, r in results.items()}
     run_info = {"manifest_hash": h, "analysis_status": status, "deviations": deviations,
                 "exclusions": exclusion_log, "extraction": extraction, "n_units": None if frame is None
@@ -798,27 +809,126 @@ def run_manifest(
     citation = data_citation(releases, tables_used, synthetic=source["synthetic"],
                              description=source.get("description"))
     bundle = _write_bundle(out / "bundle", m, h, tagged, hyp_df, run_info, citation)
-    return {"success": complete, "analysis_status": status,
+    return {"success": complete, "analysis_status": status, "data_source": source, "replicates": rep_info,
             "manifest_hash": h, "deviations": deviations, "hypotheses": hyp_df, "results": tagged,
             "frame": frame, "bundle": bundle, "output_dir": str(out), "errors": []}
 
 
 def effective_data_source(manifest: Mapping[str, Any], client: Any = None) -> Dict[str, Any]:
-    """The manifest's ``data_source`` (default: not synthetic), forced synthetic
-    when ``client`` carries a true ``synthetic`` attribute."""
+    """Declaration-level data source (before a run): the manifest's
+    ``data_source`` (default: not synthetic), forced synthetic when ``client``
+    is observed synthetic. Runs use :func:`resolve_data_source`."""
     ds = dict(manifest.get("data_source") or {})
-    ds["synthetic"] = bool(ds.get("synthetic")) or getattr(client, "synthetic", False) is True
+    ds["synthetic"] = bool(ds.get("synthetic")) or (client is not None and observed_data_source(client)[0])
     return ds
 
 
-def replicates_sha256(replicates: pd.DataFrame) -> str:
-    """SHA-256 of the canonical CSV of a replicate frame: columns sorted by
-    name, rows sorted by all columns, no index, UTF-8, LF line endings."""
-    df = replicates.copy()
-    df.columns = [str(c) for c in df.columns]
-    df = df.reindex(columns=sorted(df.columns))
-    df = df.sort_values(list(df.columns), kind="mergesort").reset_index(drop=True)
-    return hashlib.sha256(df.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+def observed_data_source(client: Any = None, use_cache: bool = True) -> Tuple[bool, Dict[str, Any]]:
+    """(synthetic, marker) for the client that serves the data: synthetic when
+    the client has a true ``synthetic`` attribute or its cache (for
+    ``client=None``: the default cache, when ``use_cache``) carries a
+    ``QueryCache.mark_synthetic`` marker. ``marker`` holds its description and
+    generator ({} when none)."""
+    if client is None:
+        from .cache import get_default_cache
+        cache = get_default_cache() if use_cache else None
+    else:
+        cache = getattr(client, "cache", None)
+    marker = None
+    if cache is not None and hasattr(cache, "synthetic_marker"):
+        try:
+            marker = cache.synthetic_marker()
+        except Exception:  # noqa: BLE001 - unreadable marker: treat as none
+            marker = None
+    synthetic = marker is not None or (client is not None and getattr(client, "synthetic", False) is True)
+    return synthetic, dict(marker or {})
+
+
+def resolve_data_source(manifest: Mapping[str, Any], client: Any = None,
+                        use_cache: bool = True) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Data-source label for a run: the observed source wins over the declaration.
+
+    Returns (source, mismatch). ``source["synthetic"]`` is the observed value;
+    ``declared_synthetic`` the manifest's (None when undeclared). On a
+    mismatch the declared description/generator are dropped (they describe
+    data that were not used) and ``mismatch`` explains it.
+    """
+    ds = manifest.get("data_source")
+    ds = dict(ds) if isinstance(ds, Mapping) else {}
+    declared = ds.get("synthetic") if isinstance(ds.get("synthetic"), bool) else None
+    observed, marker = observed_data_source(client, use_cache)
+    mismatch = None
+    if declared is not None and declared != observed:
+        mismatch = (f"manifest declares data_source.synthetic={str(declared).lower()} but the data came from a "
+                    + ("synthetic source (synthetic client or marked cache)" if observed
+                       else "non-synthetic source (Census Data API client or unmarked cache)")
+                    + "; labelled by the observed source")
+        ds = {}
+    source: Dict[str, Any] = {k: v for k, v in ds.items() if k != "synthetic"}
+    if observed:
+        for k in ("description", "generator"):
+            if not source.get(k) and marker.get(k):
+                source[k] = marker[k]
+    source.update(synthetic=observed, declared_synthetic=declared)
+    return source, mismatch
+
+
+def _canonical_column(col: pd.Series) -> List[str]:
+    """String form of one column: numbers (int or float, not numeric strings) as repr(float)
+    (shortest round-trip text, identical across pandas/numpy versions; 3 and 3.0 alike),
+    NaN/None as "", everything else str(); identical across pandas/numpy versions."""
+    out: List[str] = []
+    numeric = pd.api.types.is_numeric_dtype(col.dtype) and not pd.api.types.is_bool_dtype(col.dtype)
+    for v in col.tolist():
+        if v is None or (isinstance(v, float) and math.isnan(v)) or v is pd.NA or v is pd.NaT:
+            out.append("")
+        elif numeric or (isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_))):
+            f = float(v)
+            out.append("" if math.isnan(f) else repr(f))
+        else:
+            out.append(str(v))
+    return out
+
+
+def replicates_digest(replicates: Any) -> Tuple[Optional[str], Optional[str]]:
+    """(sha256, None) of the canonical CSV of a replicate frame, or (None, reason). Never raises.
+
+    Canonical form (JSON lines): column labels as strings (a collision after str() is an
+    error), columns sorted by label, every value as a string (numbers as
+    ``repr(float(x))`` so 3 and 3.0 hash alike; missing as ""), rows sorted
+    by those strings (stable), no index, UTF-8, LF line endings.
+    """
+    try:
+        df = replicates if isinstance(replicates, pd.DataFrame) else pd.DataFrame(replicates)
+        labels = [str(c) for c in df.columns]
+        dups = sorted({x for x in labels if labels.count(x) > 1})
+        if dups:
+            return None, f"column labels collide as strings: {dups}"
+        cols = {lab: _canonical_column(df.iloc[:, i]) for i, lab in enumerate(labels)}
+        order = sorted(labels)
+        rows = sorted(zip(*(cols[c] for c in order))) if order else []
+        lines = [json.dumps(order, ensure_ascii=False)] + [json.dumps(list(r), ensure_ascii=False) for r in rows]
+        return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest(), None
+    except Exception as exc:  # noqa: BLE001 - provenance hashing must never stop a run
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def read_replicates(path: Union[str, Path]) -> pd.DataFrame:
+    """Read a replicate long frame (CSV or Parquet) with GEOID as text and floats
+    parsed exactly (round-trip) on every pandas version, so the same file gives the
+    same values and :func:`replicates_sha256` everywhere."""
+    path = str(path)
+    if path.lower().endswith(".parquet"):
+        return pd.read_parquet(path)
+    kw: Dict[str, Any] = {"dtype": {"GEOID": str}}
+    if int(pd.__version__.split(".")[0]) < 3:  # pandas 3 parses round-trip by default (option deprecated)
+        kw["float_precision"] = "round_trip"
+    return pd.read_csv(path, **kw)
+
+
+def replicates_sha256(replicates: Any) -> Optional[str]:
+    """SHA-256 of a replicate frame's canonical form (:func:`replicates_digest`); None if unavailable."""
+    return replicates_digest(replicates)[0]
 
 
 def _write_bundle(folder: Path, m, h, results, hyp_df, run_info, citation) -> Dict[str, Any]:
@@ -908,7 +1018,8 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
     if rep_info:
         kind = "synthetic caller-supplied" if rep_info.get("synthetic") else "caller-supplied"
         rep_source = (f"the {kind} replicate estimates (not fetched from Census variance replicate files by "
-                      f"the toolkit; canonical CSV SHA-256 `{rep_info.get('sha256')}`)")
+                      + (f"the toolkit; canonical SHA-256 `{rep_info['sha256']}`)" if rep_info.get("sha256")
+                         else f"the toolkit; SHA-256 unavailable: {rep_info.get('sha256_unavailable')})"))
         rep_short = f" and replicate-based standard errors from {kind} replicate estimates"
     elif results is not None:
         rep_source = "replicate estimates when supplied (none were supplied to this run)"

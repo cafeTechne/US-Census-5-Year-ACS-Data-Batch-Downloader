@@ -138,6 +138,16 @@ _ESTIMAND = {
     "conservative": "the population association with conservative intervals (se_total double-counts outcome "
                     "sampling error)",
 }
+# PUMS models are fitted to weighted person or housing-unit records, not areas
+_PUMS_ESTIMAND = {
+    "population": "the weighted population (superpopulation) association among persons or housing units",
+    "these_areas": "the weighted association among the surveyed population (persons or housing units) "
+                   "in this period (finite population)",
+    "conservative": "the weighted population association among persons or housing units with conservative "
+                    "intervals (se_total double-counts outcome sampling error)",
+}
+DID_CAUSAL_CAVEAT = ("causal interpretation requires the DiD identifying assumptions (parallel trends, "
+                     "no interference between units, no anticipation)")
 _CORRECTED_ESTIMAND = {
     "regression_calibration": "the association corrected for predictor measurement error",
     "simex": "the association corrected for predictor measurement error (SIMEX, exploratory only)",
@@ -179,9 +189,7 @@ def interval_description(result: Any) -> Dict[str, Any]:
     basis_sources = {"se_model": [x for x in sources if x != SOURCE_SAMPLING_REPLICATE],
                      "se_sampling": [x for x in sources if x == SOURCE_SAMPLING_REPLICATE]}.get(basis, sources)
     distribution = "t" if df else "normal"
-    method = str(getattr(result, "method", ""))
-    what = _ESTIMAND.get(target) or _CORRECTED_ESTIMAND.get(method, "the association")
-    estimand = f"{what} of {_outcome_of(getattr(result, 'formula', ''))} with the predictors; an association, not a causal effect"
+    estimand = _estimand_text(result, target)
     rep = (diag.get("replicates_incomplete")
            or (getattr(result, "provenance", None) or {}).get("replicates_incomplete"))
     dist_text = "t with per-term df" if df else "normal"
@@ -193,6 +201,43 @@ def interval_description(result: Any) -> Dict[str, Any]:
     return {"target": target, "basis_column": basis, "level": level, "distribution": distribution, "df": df,
             "basis_sources": basis_sources,
             "estimand": estimand, "undefined_terms": undefined, "replicates_incomplete": bool(rep), "text": text}
+
+
+def _estimand_text(result: Any, target: Optional[str]) -> str:
+    """Method-aware estimand: PUMS (weighted unit level), DiD (contrast), else area level."""
+    method = str(getattr(result, "method", ""))
+    kind = str(getattr(result, "model_type", "") or "").lower()
+    outcome = _outcome_of(getattr(result, "formula", ""))
+    if kind.startswith("did") or method.lower().startswith("did"):
+        return (f"the difference-in-differences contrast in {outcome} (treated x post); "
+                f"{DID_CAUSAL_CAVEAT}; without them it is a descriptive contrast"
+                + (f" ({target} target)" if target else ""))
+    if kind.startswith("pums") or method.lower().startswith("pums"):
+        what = _PUMS_ESTIMAND.get(target) or _CORRECTED_ESTIMAND.get(method, "the weighted unit-level association")
+        return f"{what} of {outcome} with the predictors; an association, not a causal effect"
+    what = _ESTIMAND.get(target) or _CORRECTED_ESTIMAND.get(method, "the association")
+    return (f"{what} of {outcome} with the predictors among areas (area level, not individuals); "
+            "an association, not a causal effect")
+
+
+def interval_row(info: Dict[str, Any], term: Any, row: Any = None) -> Dict[str, Any]:
+    """Per-term interval fields shared by tables and figures, from :func:`interval_description`.
+
+    ``row`` (a coefficient row, mapping-like) supplies ``se_reported`` (the
+    basis SE); without it ``se_reported`` is NaN.
+    """
+    t = str(term)
+    basis = info["basis_column"]
+    se = math.nan
+    if row is not None:
+        try:
+            v = row.get(basis, math.nan)
+            se = math.nan if v is None else v
+        except AttributeError:
+            pass
+    return {"se_basis": basis, "se_reported": se, "distribution": info["distribution"],
+            "df": (info["df"] or {}).get(t, math.nan) if info["df"] else math.nan,
+            "interval_defined": t not in info["undefined_terms"]}
 
 
 def _outcome_of(formula: str) -> str:
@@ -234,23 +279,25 @@ class ModelResult:
     diagnostics: Dict[str, Any] = field(default_factory=dict)
     provenance: Dict[str, Any] = field(default_factory=dict)
 
-    def summary(self) -> str:
-        info = interval_description(self)
+    def summary(self, info: Optional[Dict[str, Any]] = None) -> str:
+        """One line; includes the REPLICATES INCOMPLETE note (from the interval text) at most once."""
+        info = info or interval_description(self)
         return (
             f"{self.model_type} '{self.formula}', n={self.n_obs}, method={self.method}, "
             f"SEs include: {', '.join(self.uncertainty_sources)}; {info['text']}"
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        info = interval_description(self)
         return _jsonable({
             "model_type": self.model_type, "formula": self.formula, "n_obs": self.n_obs,
             "coefficients": self.coefficients, "method": self.method,
             "uncertainty_sources": self.uncertainty_sources,
             "confidence_level": self.confidence_level, "notes": self.notes,
             "diagnostics": self.diagnostics, "provenance": self.provenance,
-            "interval_se_column": interval_description(self)["basis_column"],
-            "interval": interval_description(self),
-            "summary": self.summary(),
+            "interval_se_column": info["basis_column"],
+            "interval": info,
+            "summary": self.summary(info),
         })
 
 

@@ -210,8 +210,14 @@ class TestRunManifest(unittest.TestCase):
         self.assertEqual(validate_manifest(m, resolve=False), [])
 
     def test_synthetic_source_citation_and_methods(self):
-        self.assertTrue(self.m["data_source"]["synthetic"])
-        run_manifest(self.m, self.dir, client=FakeClient(), use_cache=False)
+        # the example manifest declares no data_source: the label follows the observed source
+        self.assertNotIn("data_source", self.m)
+        m = copy.deepcopy(self.m)
+        m["data_source"] = {"synthetic": True, "description": "generated tracts"}
+        client = FakeClient()
+        client.synthetic = True
+        res = run_manifest(m, self.dir, client=client, use_cache=False)
+        self.assertEqual(res["deviations"], [])
         bundle = json.loads(self._read("bundle.json"))
         methods = self._read("methods.md")
         for text in (bundle["citation"], methods):
@@ -222,7 +228,7 @@ class TestRunManifest(unittest.TestCase):
 
     def test_synthetic_client_flag_overrides_real_manifest(self):
         m = copy.deepcopy(self.m)
-        m.pop("data_source")
+        m.pop("data_source", None)
         client = FakeClient()
         client.synthetic = True
         run_manifest(m, self.dir, client=client, use_cache=False)
@@ -239,7 +245,9 @@ class TestRunManifest(unittest.TestCase):
         reps = replicate_long(list(frame["GEOID"]), ["income", "pop"], est,
                               make_replicates(est, se, np.random.default_rng(1)))
         reps["Year"] = 2019
-        res = run_manifest(self.m, self.dir, client=FakeClient(), use_cache=False, replicates=reps)
+        synthetic_client = FakeClient()
+        synthetic_client.synthetic = True
+        res = run_manifest(self.m, self.dir, client=synthetic_client, use_cache=False, replicates=reps)
         self.assertTrue(res["success"], res["deviations"])
         prov = json.loads(self._read("bundle.json"))["provenance"]
         digest = replicates_sha256(reps)
@@ -252,7 +260,7 @@ class TestRunManifest(unittest.TestCase):
         self.assertNotIn("80 ACS replicate estimates", methods)
         # not synthetic when the caller says so
         m = copy.deepcopy(self.m)
-        m.pop("data_source")
+        m.pop("data_source", None)
         run_manifest(m, self.dir, client=FakeClient(), use_cache=False, replicates=reps)
         methods = self._read("methods.md")
         self.assertIn("the caller-supplied replicate estimates", methods)

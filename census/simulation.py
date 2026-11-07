@@ -391,6 +391,8 @@ def run_study(cfg: SimConfig = FULL, studies: Optional[Sequence[str]] = None,
         if log:
             log(f"{name}: {reps} reps in {dt:.1f}s")
     cols = ["study", "method", "target", "reps", "nominal", "coverage", "mc_se", "status"]
+    if not rows:  # nothing selected or every study has 0 reps in this configuration
+        return pd.DataFrame(columns=cols)
     df = pd.DataFrame(rows)
     return df[cols + [c for c in df.columns if c not in cols]]
 

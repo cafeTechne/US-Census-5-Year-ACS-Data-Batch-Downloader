@@ -30,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from census.simulation import BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, run_study, spatial_config  # noqa: E402
+from census.simulation import (BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, STUDIES,  # noqa: E402
+                               run_study, spatial_config)
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
@@ -129,7 +130,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fast", action="store_true", help="CI configuration (prints only unless --out)")
     ap.add_argument("--out", default=None, help="output Markdown path")
-    ap.add_argument("--studies", nargs="*", default=None)
+    ap.add_argument("--studies", nargs="+", default=None,
+                    help="run only these studies (at least one name; omit the flag for every study)")
     ap.add_argument("--gate", action="store_true",
                     help="exit 1 if a required study fails or is missing (default: report only, exit 0); "
                          "with --studies only the selected required studies are required")
@@ -137,13 +139,21 @@ def main() -> int:
     cfg, label = (FAST, "fast") if args.fast else (FULL, "full")
     out = args.out or (None if args.fast else OUT_MD)
     t0 = datetime.now()
-    df = run_study(cfg, studies=args.studies, log=lambda m: print(m, flush=True))
+    import pandas as _pd
+
+    unknown = sorted(set(args.studies or ()) - set(STUDIES))
+    if unknown:
+        ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
+    main_studies = None if args.studies is None else [s for s in args.studies if s not in SPATIAL_STUDIES]
+    frames = []
+    if main_studies is None or main_studies:
+        frames.append(run_study(cfg, studies=main_studies, log=lambda m: print(m, flush=True)))
     spatial = [s for s in SPATIAL_STUDIES if args.studies is None or s in args.studies]
     if spatial:  # Round 9 spatial studies (own lattice configuration)
-        sdf = run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True))
-        import pandas as _pd
-
-        df = _pd.concat([df, sdf], ignore_index=True)
+        frames.append(run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True)))
+    frames = [f for f in frames if len(f)]
+    df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(
+        columns=["study", "method", "target", "reps", "nominal", "coverage", "mc_se", "status"])
     secs = (datetime.now() - t0).total_seconds()
     if out:
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

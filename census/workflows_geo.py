@@ -11,7 +11,7 @@ import pandas as pd
 
 from census import errors
 from census.workflows import _jsonable, _load_frame, _records, _write_frame
-from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, replicate_flag
+from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, result_summary
 
 _LEVELS = ("state", "county", "tract", "block group", "place", "zcta")
 _MAP_KINDS = ("estimate", "uncertainty", "significance")
@@ -229,7 +229,7 @@ def spatial_regression(
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary() + replicate_flag(res), "make_table or report coefficients with the LM diagnostics",
+    return _ok(result_summary(res), "make_table or report coefficients with the LM diagnostics",
                **{k: v for k, v in out.items() if k != "summary"})
 
 

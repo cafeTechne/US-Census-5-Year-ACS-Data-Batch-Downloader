@@ -32,7 +32,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from scipy import stats
 
-from .results import CorrelationResult, ModelResult, SmallAreaResult, interval_description
+from .results import CorrelationResult, ModelResult, SmallAreaResult, interval_description, interval_row
 from .variance import Z90
 
 OKABE_ITO = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
@@ -298,11 +298,7 @@ def coefficient_plot(
                 continue
             rows.append({"model": label, "term": t, "estimate": row["estimate"],
                          "ci_lower": row["ci_lower"], "ci_upper": row["ci_upper"],
-                         "se_total": row.get("se_total", math.nan),
-                         "se_basis": info["basis_column"], "se_reported": row.get(info["basis_column"], math.nan),
-                         "distribution": info["distribution"],
-                         "df": (info["df"] or {}).get(t, math.nan) if info["df"] else math.nan,
-                         "interval_defined": t not in info["undefined_terms"],
+                         "se_total": row.get("se_total", math.nan), **interval_row(info, t, row),
                          "confidence_level": res.confidence_level, "method": res.method,
                          "uncertainty_sources": ";".join(res.uncertainty_sources)})
     values = pd.DataFrame(rows, columns=["model", "term", "estimate", "ci_lower", "ci_upper",

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "title": "Median household income and population size: SYNTHETIC example data shaped like ACS 2015-2019 tracts (not real Manhattan estimates)",
+  "title": "Median household income and population size across census tracts, ACS 2015-2019",
   "authors": ["human:example-researcher", "agent:claude"],
   "created": "2026-11-02T00:00:00Z",
   "releases": [2019],
@@ -12,11 +12,6 @@
   "exclusions": [
     {"rule": "cv_screen", "threshold": 30, "variables": ["income"], "action": "flag"}
   ],
-  "data_source": {
-    "synthetic": true,
-    "description": "30 synthetic tracts with ACS-shaped API responses (tests/fixtures/reference_workflow/frozen_api_responses.json); not Census data and not about Manhattan",
-    "generator": "tests.test_manifest.synthetic_payload(seed=7): pop ~ Uniform(1000, 8000) rounded; income = 30000 + 4*pop + Normal(0, 4000); MOE 12% of income, 8% of pop"
-  },
   "missing": "complete_case",
   "confidence_level": 0.90,
   "correction": {"method": "holm", "family": "all"},
