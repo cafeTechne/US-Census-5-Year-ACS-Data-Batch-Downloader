@@ -47,7 +47,8 @@ from .models import (
     DEFAULT_CV_THRESHOLD, INTERVAL_TARGETS, _replicate_matrices, _screen_summary, _table,
 )
 from .results import (SOURCE_MODEL, SOURCE_SAMPLING_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult,
-                      check_replicate_policy, replicate_completeness, stochastic_variables)
+                      check_refit_count, check_replicate_policy, precheck_replicates, replicate_completeness,
+                      stochastic_variables)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR
 
 METHODS = ("REML", "ML")
@@ -533,6 +534,11 @@ def _replicate_se(formula, re_formula, data, replicates, params, state, se_col, 
     if replicate_refit == "gls" and vinv is None:
         vinv = eng._solve(theta, keep=True)["vinv"]
     covariate_reps = any(v in mats for v in used if v != formula.split("~")[0].strip())
+    stoch = stochastic_variables(frame if frame is not None else data, [v for v in used if v not in mats])
+    if se_col and formula.split("~")[0].strip() not in mats:
+        stoch = sorted(set(stoch) | {formula.split("~")[0].strip()})
+    precheck_replicates(replicate_policy, rows_held_fixed=fixed, variables_without_replicates=stoch,
+                        context="fit_multilevel")
     coefs, failed = [], 0
     for r in range(REPLICATE_COUNT):
         d = data.copy()
@@ -560,24 +566,16 @@ def _replicate_se(formula, re_formula, data, replicates, params, state, se_col, 
             coefs.append(np.asarray(b, float))
         except Exception:  # noqa: BLE001 - refit failures are counted and reported
             failed += 1
-    stoch = stochastic_variables(frame if frame is not None else data, [v for v in used if v not in mats])
-    if se_col and formula.split("~")[0].strip() not in mats:
-        stoch = sorted(set(stoch) | {formula.split("~")[0].strip()})
     diag: Dict[str, Any] = {}
     flag_notes: List[str] = []
     replicate_completeness(replicate_policy, failed_refits=failed, rows_held_fixed=fixed,
                            variables_without_replicates=stoch, context="fit_multilevel",
                            diagnostics=diag, notes=flag_notes)
-    if failed > max_failed:
-        raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed})")
+    check_refit_count(failed, len(coefs), max_failed, "fit_multilevel")
     B = np.vstack(coefs)
     b0 = params.to_numpy(float)
     se = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0)), index=params.index)
     notes = []
     if replicate_refit == "gls":
         notes.append("replicate refits hold variance components at full-sample values (GLS linearization)")
-    if failed:
-        notes.append(f"{failed} replicate refit(s) failed and were omitted; se_sampling may be understated")
-    if fixed:
-        notes.append(f"rows without replicates held at full-sample values (understates sampling SE): {fixed}")
     return se, notes + flag_notes, {"replicate_failures": failed, "replicate_variables": sorted(mats), **diag}

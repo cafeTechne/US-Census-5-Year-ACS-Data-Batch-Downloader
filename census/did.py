@@ -33,25 +33,31 @@ cluster-robust SEs then. ACS DiD panels are short: non-overlapping 5-year
 releases give 2 to 4 periods (e.g. 2009/2014/2019/2024). Measured 90%
 coverage with AR(1) u_it (census.simulation.study_did_serial, 150 areas, known
 sampling variances; 1000 repetitions for "population", 200 for
-"these_areas"; event rows pool 3 effect terms):
+"these_areas"; event rows pool 3 effect terms per repetition). The
+these_areas target is the estimator's weighting rule applied to the true
+area-period values: the GLS DiD with the estimator's full-sample REML A
+(under AR(1) the working covariance is misspecified, so the generating
+variance is not the estimator's weight):
 
     layout     design     rho=0.0  rho=0.5  rho=0.8   target
     2 periods  two_group  0.872    0.902    0.897     population
     4 periods  two_group  0.887    0.896    0.905     population
     4 periods  event      0.887    0.898    0.897     population
-    2 periods  two_group  0.930    0.955    0.920     these_areas
-    4 periods  two_group  0.940    0.935    0.900     these_areas
-    4 periods  event      0.907    0.920    0.900     these_areas
+    2 periods  two_group  0.930    0.965    0.915     these_areas
+    4 periods  two_group  0.940    0.940    0.900     these_areas
+    4 periods  event      0.905    0.922    0.898     these_areas
 
-No configuration falls below 0.88 at rho 0.5 or 0.8 (MC SE about 0.01): with
+No configuration falls below 0.88 at rho 0.5 or 0.8 (MC SE about 0.01 for
+population, 0.012-0.021 for these_areas): with
 2 periods the single difference absorbs any correlation into A, and with 4
 periods the misspecified block covariance changes the GLS weights but not the
 validity of the variance. A CR1 cluster-by-area sandwich (Liang-Zeger with
 G/(G-1)(N-1)/(N-K)) was measured and did no better (0.873-0.909, 0.881-0.883
 at rho=0), so no cluster option is offered; the independence assumption
-above is stated in results instead. Panels with many more periods (not
+above is stated in results instead. Panels with more than 4 periods (not
 possible with non-overlapping 5-year ACS releases; possible with 1-year
-releases) would need re-validation.
+releases) are not validated: results then carry a "SERIAL CORRELATION NOT
+VALIDATED" note instead of the validation note.
 
 Parallel trends: with at least three pre-treatment periods the event-style
 leads (pre-period treated-control differences relative to the reference) are
@@ -73,12 +79,15 @@ from scipy import stats as sps
 from .models import INTERVAL_TARGETS, _table
 from .multilevel import BlockGLS
 from .results import (SOURCE_MODEL, SOURCE_SAMPLING_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult,
-                      check_replicate_policy, replicate_completeness)
+                      check_refit_count, check_replicate_policy, precheck_replicates,
+                      replicate_completeness)
 from .sae import _maximize
 from .trends import PERIOD_YEARS, overlap_design_check
 from .variance import REPLICATE_COLUMNS, REPLICATE_COUNT, REPLICATE_FACTOR
 
 DESIGNS = ("two_group", "event")
+# Largest panel (number of periods) covered by the PLAN_ROUND_11 Q1 AR(1) coverage study.
+SERIAL_VALIDATED_PERIODS = 4
 REFERENCES = [
     "Card, D. & Krueger, A.B. (1994). Minimum wages and employment. AER 84(4), 772-793, Table 3.",
     "Angrist, J.D. & Pischke, J.-S. (2009). Mostly Harmless Econometrics, sec. 5.2.",
@@ -235,7 +244,8 @@ def difference_in_differences(
     se_model assumes area-by-period errors independent across periods; with
     AR(1) errors (rho up to 0.8) on 2-4 non-overlapping periods coverage was
     measured at 0.896-0.905, so no cluster-robust option is needed (module
-    docstring, PLAN_ROUND_11 Q1/D8).
+    docstring, PLAN_ROUND_11 Q1/D8). Panels with more than 4 periods were
+    not validated and get a "SERIAL CORRELATION NOT VALIDATED" note.
     Returns a ModelResult whose coefficients include the
     period effects and the DiD term(s) ("did", or "lead[...]"/"lag[...]").
     """
@@ -273,14 +283,9 @@ def difference_in_differences(
     se_sampling = pd.Series(np.nan, index=names)
     method_label = "gls_reml"
     if replicates is not None and len(replicates):
-        se_sampling, rep_notes, failed, n_fixed = _replicate_se(P, diff, eng, A, sol, replicates, outcome, treated,
-                                                                period, unit, design, params,
-                                                                replicate_refit, method)
-        replicate_completeness(replicate_policy, failed_refits=failed,
-                               rows_held_fixed={outcome: n_fixed} if n_fixed else None,
-                               context="difference_in_differences", diagnostics=diagnostics, notes=notes)
-        if failed > max_failed_replicates:
-            raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed_replicates})")
+        se_sampling, rep_notes = _replicate_se(P, diff, eng, A, sol, replicates, outcome, treated, period, unit,
+                                               design, params, replicate_refit, method, replicate_policy,
+                                               max_failed_replicates, diagnostics, notes)
         notes += rep_notes
         sources.append(SOURCE_SAMPLING_REPLICATE)
         method_label = f"gls_reml_replicate_{replicate_refit}"
@@ -307,8 +312,15 @@ def difference_in_differences(
         diagnostics["parallel_trends"] = None
         notes.append(f"parallel-trends diagnostic needs >= 3 non-overlapping pre-periods (have {len(P.pre)})")
     diagnostics["interval_target"] = target
-    notes.append("se_model assumes area-by-period errors independent across periods (validated with AR(1) "
-                 "errors up to rho=0.8 on 2-4 non-overlapping periods; see census.did)")
+    n_periods = len(P.periods)
+    if n_periods <= SERIAL_VALIDATED_PERIODS:
+        notes.append("se_model assumes area-by-period errors independent across periods (validated with AR(1) "
+                     "errors up to rho=0.8 on 2-4 non-overlapping periods; see census.did)")
+    else:
+        notes.append(f"SERIAL CORRELATION NOT VALIDATED: se_model assumes area-by-period errors independent across "
+                     f"periods; coverage was validated only for 2-{SERIAL_VALIDATED_PERIODS} periods and this panel "
+                     f"has {n_periods}. With serially correlated shocks over more periods conventional DiD SEs can "
+                     "be understated (Bertrand, Duflo & Mullainathan 2004, QJE 119(1):249-275)")
     notes.append(f"intervals and p-values use the '{target}' target")
     return ModelResult(
         model_type=f"did_{design}", formula=f"{outcome} ~ unit FE + period FE + treated x post ({design})",
@@ -345,7 +357,8 @@ def _refit_A(eng: BlockGLS, dy: np.ndarray, A0: float, method: str) -> float:
 
 
 def _replicate_se(P, diff, eng, A, sol, replicates, outcome, treated, period, unit, design, params,
-                  replicate_refit="full", method="REML"):
+                  replicate_refit="full", method="REML", replicate_policy="flag", max_failed=0,
+                  diagnostics=None, notes=None):
     rep = replicates[replicates["variable"] == outcome] if "variable" in replicates.columns else replicates
     if not len(rep) or (period not in rep.columns and "Year" not in rep.columns):
         raise ValueError(f"replicates need GEOID, {period}, variable={outcome!r} and rep_1..rep_80")
@@ -356,6 +369,9 @@ def _replicate_se(P, diff, eng, A, sol, replicates, outcome, treated, period, un
     R = rep[REPLICATE_COLUMNS].reindex(key).to_numpy(float, copy=True)
     miss = ~np.isfinite(R).all(axis=1)
     y0 = P.data[outcome].to_numpy(float)
+    n_fixed = int(miss.sum())
+    fixed = {outcome: n_fixed} if n_fixed else None
+    precheck_replicates(replicate_policy, rows_held_fixed=fixed, context="difference_in_differences")
     if miss.any():
         R[miss] = y0[miss, None]
     coefs, failed = [], 0
@@ -368,15 +384,13 @@ def _replicate_se(P, diff, eng, A, sol, replicates, outcome, treated, period, un
                 coefs.append(eng.gls(np.array([_refit_A(eng, d["dy"], A, method)]), d["dy"]))
         except Exception:  # noqa: BLE001
             failed += 1
+    replicate_completeness(replicate_policy, failed_refits=failed, rows_held_fixed=fixed,
+                           context="difference_in_differences", diagnostics=diagnostics, notes=notes)
+    check_refit_count(failed, len(coefs), max_failed, "difference_in_differences")
     B = np.vstack(coefs)
     se = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - params.to_numpy(float)) ** 2).sum(axis=0)), index=params.index)
-    notes = ["replicate refits hold A at its full-sample value (GLS linearization; understates se_sampling)"
-             if replicate_refit == "gls" else "replicate refits re-estimate A (full replication of the estimator)"]
-    if miss.any():
-        notes.append(f"{int(miss.sum())} unit-period row(s) without replicates held fixed (understates se_sampling)")
-    if failed:
-        notes.append(f"{failed} replicate refit(s) failed")
-    return se, notes, failed, int(miss.sum())
+    return se, ["replicate refits hold A at its full-sample value (GLS linearization; understates se_sampling)"
+                if replicate_refit == "gls" else "replicate refits re-estimate A (full replication of the estimator)"]
 
 
 def did_from_changes(changes: Sequence[float], change_ses: Sequence[float], treated: Sequence[int],

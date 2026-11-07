@@ -71,7 +71,9 @@ from .results import (
     SOURCE_SAMPLING_MODEL,
     SOURCE_SAMPLING_REPLICATE,
     ModelResult,
+    check_refit_count,
     check_replicate_policy,
+    precheck_replicates,
     replicate_completeness,
     stochastic_variables,
 )
@@ -336,6 +338,10 @@ def fit_replicate(
         mats, fixed = _replicate_matrices(data, replicates, used)
         if not mats:
             raise ValueError("no formula variable has replicates in the replicate frame")
+        missing = [v for v in used if v not in mats]
+        stoch_missing = stochastic_variables(frame, missing)
+        precheck_replicates(replicate_policy, rows_held_fixed=fixed, variables_without_replicates=stoch_missing,
+                            context="fit_replicate")
         coefs, failed = [], 0
         for r in range(REPLICATE_COUNT):
             d = data.copy()
@@ -349,23 +355,18 @@ def fit_replicate(
                 coefs.append(b)
             except Exception:  # noqa: BLE001 - any refit failure is counted and reported
                 failed += 1
-        missing = [v for v in used if v not in mats]
         replicate_completeness(replicate_policy, failed_refits=failed, rows_held_fixed=fixed,
-                               variables_without_replicates=stochastic_variables(frame, missing),
+                               variables_without_replicates=stoch_missing,
                                context="fit_replicate", diagnostics=diagnostics, notes=notes)
-        if failed > max_failed_replicates:
-            raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed_replicates})")
+        check_refit_count(failed, len(coefs), max_failed_replicates, "fit_replicate")
         B = np.vstack(coefs)  # (n_ok, k)
         b0 = params.to_numpy(float)
         se_sampling = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0)), index=params.index)
         sources.append(SOURCE_SAMPLING_REPLICATE)
         method = "replicate_refit"
-        if failed:
-            notes.append(f"{failed} replicate refit(s) failed and were omitted; se_sampling may be understated")
-        if fixed:
-            notes.append(f"rows without replicates held at full-sample values (understates sampling SE): {fixed}")
-        if missing:
-            notes.append(f"variables without replicates treated as fixed: {missing}")
+        fixed_vars = [v for v in missing if v not in stoch_missing]
+        if fixed_vars:   # no SE column: genuinely fixed (stochastic ones are in REPLICATES INCOMPLETE)
+            notes.append(f"variables without replicates or SEs treated as fixed: {fixed_vars}")
         diagnostics["replicate_stability"] = {
             t: {"sd": float(B[:, j].std(ddof=1)) if len(B) > 1 else np.nan,
                 "share_same_sign": float(np.mean(np.sign(B[:, j]) == np.sign(b0[j])))}

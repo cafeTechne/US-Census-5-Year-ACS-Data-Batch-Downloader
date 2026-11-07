@@ -51,6 +51,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from .results import IncompleteReplicatesError
+
 SCHEMA_VERSION = 1
 AUTHOR_RE = re.compile(r"^(human|agent):\S+$")
 CONCEPT_RE = re.compile(r"^c_[0-9a-f]{12}$")
@@ -443,6 +445,10 @@ def _wide_from_panel(panel: pd.DataFrame, columns: Mapping[str, Tuple[str, str, 
 
 
 CONFIRMATORY_REPLICATE_POLICY = "strict"
+# Manifest methods that use replicates; each runs with replicate_policy="strict".
+# (Spatial, multilevel, DiD and PUMS analyses are not manifest methods; if added
+# they must join this set so confirmatory runs refuse incomplete replicates.)
+REPLICATE_METHODS = ("fit_replicate", "correlation_matrix")
 
 
 def _one_sided(p: float, estimate: float, direction: str) -> float:
@@ -460,10 +466,11 @@ def _run_analysis(a: Mapping[str, Any], frame: pd.DataFrame, level: float, repli
     for k in ("error_covariates", "variables", "variable", "geoid", "variable_1", "variable_2"):
         if k in a:
             args.setdefault(k, a[k])
-    if method == "fit_replicate":
+    if method in REPLICATE_METHODS:
         # Confirmatory runs refuse incomplete replicates (PLAN_ROUND_11 Q2/D7);
         # the failure is recorded as a "replicates_incomplete" deviation.
         args["replicate_policy"] = CONFIRMATORY_REPLICATE_POLICY
+    if method == "fit_replicate":
         return models.fit_replicate(a["formula"], frame, replicates=replicates, confidence_level=level, **args)
     if method in ("regression_calibration", "simex"):
         return getattr(models, method)(a["formula"], frame, confidence_level=level, **args)
@@ -684,16 +691,14 @@ def run_manifest(
                                "detail": f"unavailable variables: {sorted(needed - available)}"
                                if frame is not None else "no analysis frame"})
             continue
-        if a.get("replicates") == "required" and replicates is None and a["method"] in (
-                "fit_replicate", "correlation_matrix"):
+        if a.get("replicates") == "required" and replicates is None and a["method"] in REPLICATE_METHODS:
             deviations.append({"kind": "replicates_unavailable", "analysis": aid,
                                "detail": "manifest requires replicate SEs; none supplied, analysis not run"})
             continue
         try:
             results[aid] = _run_analysis(a, frame, level, replicates, corr_method)
         except Exception as exc:
-            kind = ("replicates_incomplete" if isinstance(exc, ValueError) and "replicate_policy='strict'" in str(exc)
-                    else "analysis_failed")
+            kind = "replicates_incomplete" if isinstance(exc, IncompleteReplicatesError) else "analysis_failed"
             deviations.append({"kind": kind, "analysis": aid, "detail": f"{type(exc).__name__}: {exc}"})
 
     # 6. hypotheses with the pre-registered correction

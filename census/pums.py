@@ -58,7 +58,8 @@ import pandas as pd
 
 from .api import PRODUCT_1YR, PRODUCT_5YR, normalize_product
 from .geo import STATE_FILES, STATE_MAPPING, get_resource_path
-from .results import SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, check_replicate_policy, replicate_completeness
+from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, check_refit_count,
+                      check_replicate_policy, replicate_completeness)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
 
 USER_AGENT = "acs-batch-downloader/pums (research toolkit; python-requests)"
@@ -291,8 +292,17 @@ def _convert(frame: pd.DataFrame, keep_str: Iterable[str]) -> pd.DataFrame:
 LARGE_PUMS_BYTES = 200 * 1024 ** 2
 
 
+class PumsMemoryWarning(UserWarning):
+    """columns=None on a large PUMS file (PLAN_ROUND_11 R2)."""
+
+
+# Shown on every call (not once per location): each call reads a file anew.
+# Appended, so a user's own filters (e.g. "ignore" or "error") still take precedence.
+warnings.filterwarnings("always", category=PumsMemoryWarning, append=True)
+
+
 def _all_columns_note(source: Any) -> Optional[str]:
-    """Warn (UserWarning) and return a note when all columns of a large file are requested."""
+    """Warn (PumsMemoryWarning, a UserWarning) and return a note when all columns of a large file are requested."""
     try:
         if isinstance(source, str):
             size = os.path.getsize(source)
@@ -306,10 +316,11 @@ def _all_columns_note(source: Any) -> Optional[str]:
         return None
     if size <= LARGE_PUMS_BYTES:
         return None
-    note = (f"columns=None reads all 280+ columns of a {size / 1024 ** 2:.0f} MB PUMS file; memory can run to "
+    name = os.path.basename(source) if isinstance(source, str) else getattr(source, "name", "in-memory data")
+    note = (f"columns=None reads all 280+ columns of {name} ({size / 1024 ** 2:.0f} MB PUMS file); memory can run to "
             "tens of GB (hundreds for several states). Pass columns=[...] with only the variables you need "
             "(identifiers, PUMA and weights are always kept)")
-    warnings.warn(note, UserWarning, stacklevel=3)
+    warnings.warn(note, PumsMemoryWarning, stacklevel=3)   # -> the caller of read_pums_csv
     return note
 
 
@@ -899,6 +910,7 @@ def pums_regression(
     target: str = "these_areas",
     confidence_level: float = 0.90,
     replicate_policy: str = "flag",
+    max_failed_replicates: int = 0,
 ) -> ModelResult:
     """Survey-weighted regression on PUMS with replicate-weight SEs.
 
@@ -917,8 +929,12 @@ def pums_regression(
     ``replicate_policy`` (census.results.replicate_completeness, PLAN_ROUND_11
     Q2/D7): a replicate refit fails when IRLS does not converge, the system is
     singular, or a replicate weight is missing (non-finite) for a modelled
-    record. "flag" (default) omits failed refits from se_sampling and records
-    diagnostics["replicates_incomplete"]; "strict" raises ValueError.
+    record. "flag" (default) omits up to ``max_failed_replicates`` (default
+    0, as in census.models.fit_replicate) failed refits from se_sampling and
+    records diagnostics["replicates_incomplete"]; more failures raise
+    RuntimeError. "strict" raises IncompleteReplicatesError (a ValueError) on
+    any failure. If every refit fails, RuntimeError (flag) or
+    IncompleteReplicatesError (strict) is raised.
     """
     import patsy
 
@@ -956,8 +972,7 @@ def pums_regression(
     diagnostics: Dict[str, Any] = {}
     replicate_completeness(replicate_policy, failed_refits=failed, context="pums_regression",
                            diagnostics=diagnostics, notes=notes)
-    if not coefs:
-        raise ValueError("every replicate-weight refit failed; se_sampling is unavailable")
+    check_refit_count(failed, len(coefs), max_failed_replicates, "pums_regression")
     B = np.vstack(coefs)
     se_samp = np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0))
     se_mod = _sandwich(X, y, W[:, 0], b0, model)

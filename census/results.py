@@ -56,16 +56,22 @@ def stochastic_variables(frame: Optional[pd.DataFrame], variables) -> List[str]:
     return out
 
 
+class IncompleteReplicatesError(ValueError):
+    """replicate_policy="strict" refused a sampling SE built from incomplete replicates."""
+
+
 def replicate_completeness(policy: str, *, failed_refits: int = 0, rows_held_fixed: Optional[Dict[str, int]] = None,
                            variables_without_replicates=(), context: str = "replicate refits",
                            diagnostics: Optional[Dict[str, Any]] = None,
-                           notes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+                           notes: Optional[List[str]] = None,
+                           rows_label: str = "rows without replicates held fixed") -> Optional[Dict[str, Any]]:
     """Apply ``replicate_policy`` to incomplete replicates; return the incompleteness record or None.
 
-    ``strict`` raises ValueError when any refit failed, any row was held at its
-    full-sample value, or any stochastic variable had no replicates. ``flag``
-    stores the record in ``diagnostics["replicates_incomplete"]`` and appends a
-    note to ``notes``.
+    ``strict`` raises IncompleteReplicatesError (a ValueError) when any refit
+    failed, any row was held at its full-sample value (or, per
+    ``rows_label``, dropped), or any stochastic variable had no replicates.
+    ``flag`` stores the record in ``diagnostics["replicates_incomplete"]`` and
+    appends one combined "REPLICATES INCOMPLETE" note to ``notes``.
     """
     check_replicate_policy(policy)
     rows = {str(k): int(v) for k, v in (rows_held_fixed or {}).items() if int(v)}
@@ -75,19 +81,40 @@ def replicate_completeness(policy: str, *, failed_refits: int = 0, rows_held_fix
         return None
     info = {"failed_refits": failed, "rows_held_fixed": rows, "variables_without_replicates": vars_}
     parts = ([f"{failed} replicate refit(s) failed" if failed else ""]
-             + [f"rows without replicates held fixed: {rows}" if rows else ""]
+             + [f"{rows_label}: {rows}" if rows else ""]
              + [f"stochastic variable(s) without replicates: {vars_}" if vars_ else ""])
     detail = "; ".join(p for p in parts if p)
     if policy == "strict":
-        raise ValueError(f"{context}: replicate_policy='strict' requires complete replicates ({detail}); the "
-                         "sampling SE would be understated. Supply complete replicates or use "
-                         "replicate_policy='flag' for exploratory work")
+        raise IncompleteReplicatesError(
+            f"{context}: replicate_policy='strict' requires complete replicates ({detail}); the "
+            "sampling SE would be understated. Supply complete replicates or use "
+            "replicate_policy='flag' for exploratory work")
     info["note"] = f"{REPLICATES_UNDERSTATED} ({detail})"
     if diagnostics is not None:
         diagnostics["replicates_incomplete"] = info
     if notes is not None:
         notes.append(f"REPLICATES INCOMPLETE: {info['note']}")
     return info
+
+
+def precheck_replicates(policy: str, *, rows_held_fixed: Optional[Dict[str, int]] = None,
+                        variables_without_replicates=(), context: str = "replicate refits",
+                        rows_label: str = "rows without replicates held fixed") -> None:
+    """Under ``strict``, refuse missing replicate rows/variables before any refit is run."""
+    if check_replicate_policy(policy) == "strict":
+        replicate_completeness(policy, rows_held_fixed=rows_held_fixed,
+                               variables_without_replicates=variables_without_replicates, context=context,
+                               rows_label=rows_label)
+
+
+def check_refit_count(failed: int, n_ok: int, max_failed: int, context: str = "replicate refits") -> None:
+    """After replicate_completeness: refuse when every refit failed or more than ``max_failed`` did."""
+    if n_ok == 0:
+        raise RuntimeError(f"{context}: all {int(failed)} replicate refits failed; se_sampling is unavailable "
+                           "(check the model specification and the replicate inputs)")
+    if failed > max_failed:
+        raise RuntimeError(f"{context}: {int(failed)} of {int(failed) + int(n_ok)} replicate refits failed "
+                           f"(max_failed_replicates={max_failed})")
 
 
 COEFFICIENT_COLUMNS = [

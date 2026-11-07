@@ -37,17 +37,11 @@ def _ok(summary: str, next_step: str, **payload: Any) -> Dict[str, Any]:
 
 def replicate_flag(result: Any) -> str:
     """Summary suffix for results flagged with incomplete replicates (PLAN_ROUND_11 Q2/D7), else ""."""
-    info = (getattr(result, "diagnostics", None) or {}).get("replicates_incomplete")
+    info = ((getattr(result, "diagnostics", None) or {}).get("replicates_incomplete")
+            or (getattr(result, "provenance", None) or {}).get("replicates_incomplete"))
     if not info:
         return ""
-    parts = []
-    if info.get("failed_refits"):
-        parts.append(f"{info['failed_refits']} replicate refits failed")
-    if info.get("rows_held_fixed"):
-        parts.append(f"{sum(info['rows_held_fixed'].values())} rows held fixed without replicates")
-    if info.get("variables_without_replicates"):
-        parts.append(f"no replicates for {', '.join(info['variables_without_replicates'])}")
-    return f" (sampling SE may be understated: {'; '.join(parts)})"
+    return f" (REPLICATES INCOMPLETE: {info['note']})"
 
 
 def _fail(code: str, message: str, next_step: str = "") -> Dict[str, Any]:

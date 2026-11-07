@@ -791,19 +791,27 @@ def _ar1_truth(T, alpha, years, rho, rng) -> Dict[int, np.ndarray]:
 
 def study_did_serial(cfg: SimConfig, reps: int, rhos: Sequence[float] = SERIAL_RHOS,
                      layouts: Optional[Dict[str, List[int]]] = None,
-                     clusters: Sequence[Optional[str]] = (None,),
                      replicate_reps: Optional[int] = None) -> List[Dict[str, Any]]:
     """90% coverage of difference_in_differences under AR(1) area shocks: layout x design x rho x target.
 
-    ``clusters``: SE methods passed as ``cluster=`` (None = the GLS model SE,
-    the only one difference_in_differences offers; a CR1 cluster-by-area
-    sandwich was measured during PLAN_ROUND_11 Q1 and not adopted, see
-    census.did).
+    SEs are the GLS model SE (se_model, population target) and the replicate
+    SE (se_sampling, these_areas target); difference_in_differences has no
+    cluster option (a CR1 cluster-by-area sandwich was measured during
+    PLAN_ROUND_11 Q1 and not adopted, see census.did).
 
     Population target: the superpopulation effect (DID_DELTA for "did" and
     lags, 0 for leads). these_areas target (replicate refits, a subset of
-    repetitions): the GLS DiD of these areas' true values at the generating A,
-    as in study_did_replicate. Event coverage pools all effect terms.
+    repetitions): the estimator's own weighting rule applied to these areas'
+    true values, i.e. the GLS DiD of the true area-period means with the GLS
+    weights at the estimator's full-sample REML A (diagnostics
+    "A_area_period_var") and the known sampling variances. Under AR(1) shocks
+    the working independence covariance is misspecified, so the generating
+    variance is not the weight the estimator uses; the target is the
+    finite-population contrast the estimator is consistent for given its
+    weights (sampling error removed, weights held at the estimate).
+    Event rows pool all effect terms: ``reps`` counts repetitions,
+    ``n_terms`` the pooled terms per repetition, and ``mc_se`` is computed
+    from per-repetition coverage.
     """
     from .did import _did_vfun, _differences, _prepare, difference_in_differences
     from .multilevel import BlockGLS
@@ -829,34 +837,32 @@ def study_did_serial(cfg: SimConfig, reps: int, rhos: Sequence[float] = SERIAL_R
                                                           ).assign(Year=yr) for yr in years], ignore_index=True)
                 true_vec = np.concatenate([th[yr] for yr in years])
                 for design in designs:
-                    for cl in clusters:
-                        kw = {} if cl is None else {"cluster": cl}
-                        targets = [("population", None)] + ([("these_areas", reps_long)] if do_rep else [])
-                        for target, rl in targets:
-                            if target == "these_areas" and cl is not None:
-                                continue  # cluster option applies to the population (model) SE
-                            res = difference_in_differences(frame, "y", "treated", SERIAL_TREAT_YEAR,
-                                                            design=design, target=target, replicates=rl, **kw)
-                            tab = res.coefficients[res.coefficients["role"] == "effect"]
-                            if target == "population":
-                                truth = np.where(tab["term"].str.startswith("lead"), 0.0, DID_DELTA)
-                            else:
-                                P = _prepare(frame, "y", "treated", "Year", "GEOID", SERIAL_TREAT_YEAR, None,
-                                             design, None, 5)
-                                d = _differences(P, "y", "treated", "Year", "GEOID", design)
-                                eng = BlockGLS(d["unit"], d["dy"], d["X"], _did_vfun, D=d["D"],
-                                               extra={"Dr": d["Dr"]})
-                                dt = _differences(P, "y", "treated", "Year", "GEOID", design, y_override=true_vec)
-                                b = eng.gls(np.array([DID_SIGMA_U ** 2]), dt["dy"])
-                                truth = np.asarray(b)[[d["names"].index(t) for t in tab["term"]]]
-                            ok = (tab["ci_lower"].to_numpy() <= truth) & (truth <= tab["ci_upper"].to_numpy())
-                            cov.setdefault((design, cl or "model", target), []).append(ok)
-            for (design, sem, target), lst in cov.items():
+                    targets = [("population", None)] + ([("these_areas", reps_long)] if do_rep else [])
+                    for target, rl in targets:
+                        res = difference_in_differences(frame, "y", "treated", SERIAL_TREAT_YEAR,
+                                                        design=design, target=target, replicates=rl)
+                        tab = res.coefficients[res.coefficients["role"] == "effect"]
+                        if target == "population":
+                            truth = np.where(tab["term"].str.startswith("lead"), 0.0, DID_DELTA)
+                        else:
+                            P = _prepare(frame, "y", "treated", "Year", "GEOID", SERIAL_TREAT_YEAR, None,
+                                         design, None, 5)
+                            d = _differences(P, "y", "treated", "Year", "GEOID", design)
+                            eng = BlockGLS(d["unit"], d["dy"], d["X"], _did_vfun, D=d["D"],
+                                           extra={"Dr": d["Dr"]})
+                            dt = _differences(P, "y", "treated", "Year", "GEOID", design, y_override=true_vec)
+                            b = eng.gls(np.array([res.diagnostics["A_area_period_var"]]), dt["dy"])
+                            truth = np.asarray(b)[[d["names"].index(t) for t in tab["term"]]]
+                        ok = (tab["ci_lower"].to_numpy() <= truth) & (truth <= tab["ci_upper"].to_numpy())
+                        cov.setdefault((design, target), []).append(ok)
+            for (design, target), lst in cov.items():
                 C = np.vstack(lst)
-                row = coverage_summary(f"difference_in_differences {design}, {lname}, AR(1) rho={rho}, se={sem}",
+                row = coverage_summary(f"difference_in_differences {design}, {lname}, AR(1) rho={rho}, se=model",
                                        f"effect terms pooled ({target})", C.ravel(),
-                                       {"layout": lname, "design": design, "rho": rho, "se_method": sem,
+                                       {"layout": lname, "design": design, "rho": rho, "se_method": "model",
                                         "interval_target": target})
+                row["reps"] = int(C.shape[0])
+                row["n_terms"] = int(C.shape[1])
                 if C.shape[1] > 1 and C.shape[0] > 1:
                     row["mc_se"] = float(C.mean(axis=1).std(ddof=1) / math.sqrt(C.shape[0]))
                 rows.append(row)

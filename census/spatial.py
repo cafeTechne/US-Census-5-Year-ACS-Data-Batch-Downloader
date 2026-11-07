@@ -40,8 +40,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats as sps
 
-from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, _jsonable, check_replicate_policy,
-                      replicate_completeness, stochastic_variables)
+from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, _jsonable, check_refit_count,
+                      check_replicate_policy, precheck_replicates, replicate_completeness, stochastic_variables)
 from .variance import REPLICATE_COLUMNS, REPLICATE_COUNT, REPLICATE_FACTOR
 
 WEIGHT_KINDS = ("queen", "rook", "knn", "distance")
@@ -579,6 +579,10 @@ def spatial_regression(
             raise ValueError("no formula variable has replicates in the replicate frame")
         yr = _release_year(data)
         mats = {v: _replicate_matrix(replicates, v, list(d.index), geoid_col, yr) for v in used}
+        # rows without replicates are refused by _replicate_matrix, so only
+        # failed refits and variables without replicates can be incomplete
+        stoch = stochastic_variables(data, [v for v in all_used if v not in used])
+        precheck_replicates(replicate_policy, variables_without_replicates=stoch, context="spatial_regression")
         B, failed = [], 0
         for k in range(REPLICATE_COUNT):
             dd = d.copy()
@@ -592,22 +596,15 @@ def spatial_regression(
                 B.append(b)
             except Exception:  # noqa: BLE001 - counted and reported
                 failed += 1
-        # rows without replicates are refused by _replicate_matrix, so only
-        # failed refits and variables without replicates can be incomplete
-        replicate_completeness(replicate_policy, failed_refits=failed,
-                               variables_without_replicates=stochastic_variables(
-                                   data, [v for v in all_used if v not in used]),
+        replicate_completeness(replicate_policy, failed_refits=failed, variables_without_replicates=stoch,
                                context="spatial_regression", diagnostics=diagnostics, notes=notes)
-        if failed > max_failed_replicates:
-            raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed_replicates})")
+        check_refit_count(failed, len(B), max_failed_replicates, "spatial_regression")
         B = np.vstack(B)
         se_sampling = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - betas) ** 2).sum(axis=0)), index=terms)
         sources.append(SOURCE_SAMPLING_REPLICATE)
         est_method += ", replicate refits"
         diagnostics["replicate_failures"] = failed
         diagnostics["replicate_variables"] = used
-        if failed:
-            notes.append(f"{failed} replicate refit(s) failed and were omitted; se_sampling may be understated")
         notes.append("se_sampling from 80 replicate refits; se_total is conservative (the model residual already "
                      "absorbs outcome sampling error), as for census.models.fit_replicate")
     level = confidence_level if confidence_level <= 1 else confidence_level / 100
