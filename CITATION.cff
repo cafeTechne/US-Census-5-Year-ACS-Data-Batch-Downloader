@@ -12,7 +12,7 @@ authors:
   - alias: cafeTechne
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader"
-version: "0.10.0"
+version: "0.10.1"
 doi: "10.5281/zenodo.23925301"
 # doi: Zenodo concept DOI, added after the first archived release (see CHANGELOG.md "Releasing").
 date-released: "2026-11-07"
