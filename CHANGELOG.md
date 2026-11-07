@@ -5,7 +5,7 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
-## Unreleased: Round 11 owner decisions
+## 0.10.1 (Round 11): audit decisions
 
 - **Q2 incomplete replicates:** `replicate_policy="flag"|"strict"` on replicate-based
   models; pre-registered manifests run strict; exploratory results say when sampling
