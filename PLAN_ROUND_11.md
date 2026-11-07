@@ -29,10 +29,10 @@ Confirmed defects are distinguished from risks and policy questions. The ACS suc
 | C5 | Medium / defect | Handle missing PUMS grouping keys as documented | Round 10 A | Fixed; tests/test_audit_r11.py::test_c5_* |
 | C6 | Medium / defect | Validate or correctly difference post-treatment DiD references | Round 10 D | Fixed (D5: pre-treatment reference required); tests/test_audit_r11.py::test_c6_* |
 | C7 | Medium / guidance defect | Report the uncertainty basis actually used; qualify SIMEX guidance | Existing inference recipes and wrappers | Fixed; tests/test_audit_r11.py::test_c7_* |
-| R1 | Medium / risk | Clarify and enforce intended runtime price-data integrity | Existing inflation; Round 10 E | Decision required |
-| R2 | Medium / risk | Characterize PUMS peak-memory amplification | Round 10 A | Measurement required |
-| Q1 | Question | Define DiD serial-correlation inference scope | Round 10 D | Decision required |
-| Q2 | Question | Define policy for incomplete model replicates | Existing inference; Round 10 D | Decision required |
+| R1 | Medium / risk | Clarify and enforce intended runtime price-data integrity | Existing inflation; Round 10 E | Decided 2026-11-07: kept as a documented risk; integrity verified at generation and by tests, not at each load (docs/agent_protocol.md section 6) |
+| R2 | Medium / risk | Characterize PUMS peak-memory amplification | Round 10 A | Measured 2026-11-07: ~3.6 GB peak at California scale with needed columns; warning added for all-column reads of files over 200 MB |
+| Q1 | Question | Define DiD serial-correlation inference scope | Round 10 D | Measured 2026-11-07: coverage 0.896-0.905 under AR(1) rho 0.5 and 0.8 (study_did_serial); no estimator added; CR1 cluster sandwich measured and not better; independence assumption documented. 2-period rho=0 cell rechecked at 3,000 reps: 0.900 |
+| Q2 | Question | Define policy for incomplete model replicates | Existing inference; Round 10 D | Decided 2026-11-07: replicate_policy strict for manifests (confirmatory), flag otherwise with an understated-SE note (tests/test_audit_decisions.py) |
 
 ## 4. Confirmed defects and acceptance criteria
 

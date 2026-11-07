@@ -46,7 +46,9 @@ from .analysis import formula_variables
 from .models import (
     DEFAULT_CV_THRESHOLD, INTERVAL_TARGETS, _replicate_matrices, _screen_summary, _table,
 )
-from .results import SOURCE_MODEL, SOURCE_SAMPLING_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult
+from .results import (SOURCE_MODEL, SOURCE_SAMPLING_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult,
+                      check_refit_count, check_replicate_policy, precheck_replicates, replicate_completeness,
+                      stochastic_variables)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR
 
 METHODS = ("REML", "ML")
@@ -367,6 +369,7 @@ def fit_multilevel(
     max_failed_replicates: int = 0,
     cv_threshold: float = DEFAULT_CV_THRESHOLD,
     small_sample: Optional[str] = "kenward_roger",
+    replicate_policy: str = "flag",
 ) -> ModelResult:
     """Random-intercept (and random-slope) model with optional known level-1 variance.
 
@@ -389,8 +392,14 @@ def fit_multilevel(
     normal intervals. Full simulation (nominal 0.90): coverage 0.891 random
     intercept, 0.890 random slope with KR, vs 0.878 / 0.874 with normal
     intervals.
+    ``replicate_policy``: "flag" (default, exploratory) keeps se_sampling when
+    refits failed (up to ``max_failed_replicates``), rows lack replicates, or
+    a stochastic variable has none, recording diagnostics
+    ["replicates_incomplete"]; "strict" (confirmatory) raises ValueError
+    (census.results.replicate_completeness, PLAN_ROUND_11 Q2/D7).
     """
     method = method.upper()
+    check_replicate_policy(replicate_policy)
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}")
     if target not in INTERVAL_TARGETS:
@@ -483,7 +492,7 @@ def fit_multilevel(
     if replicates is not None and len(replicates):
         se_sampling, rep_notes, rep_diag = _replicate_se(formula, re_formula, data, replicates, params, state,
                                                          se_col, area_effect, q, method, replicate_refit,
-                                                         max_failed_replicates, groups)
+                                                         max_failed_replicates, groups, replicate_policy, frame)
         notes += rep_notes
         diagnostics.update(rep_diag)
         sources = sources + [SOURCE_SAMPLING_REPLICATE]
@@ -514,7 +523,7 @@ def fit_multilevel(
 
 
 def _replicate_se(formula, re_formula, data, replicates, params, state, se_col, area_effect, q, method,
-                  replicate_refit, max_failed, groups):
+                  replicate_refit, max_failed, groups, replicate_policy="flag", frame=None):
     used = formula_variables(formula, data)
     mats, fixed = _replicate_matrices(data, replicates, used)
     if not mats:
@@ -525,6 +534,11 @@ def _replicate_se(formula, re_formula, data, replicates, params, state, se_col, 
     if replicate_refit == "gls" and vinv is None:
         vinv = eng._solve(theta, keep=True)["vinv"]
     covariate_reps = any(v in mats for v in used if v != formula.split("~")[0].strip())
+    stoch = stochastic_variables(frame if frame is not None else data, [v for v in used if v not in mats])
+    if se_col and formula.split("~")[0].strip() not in mats:
+        stoch = sorted(set(stoch) | {formula.split("~")[0].strip()})
+    precheck_replicates(replicate_policy, rows_held_fixed=fixed, variables_without_replicates=stoch,
+                        context="fit_multilevel")
     coefs, failed = [], 0
     for r in range(REPLICATE_COUNT):
         d = data.copy()
@@ -552,16 +566,16 @@ def _replicate_se(formula, re_formula, data, replicates, params, state, se_col, 
             coefs.append(np.asarray(b, float))
         except Exception:  # noqa: BLE001 - refit failures are counted and reported
             failed += 1
-    if failed > max_failed:
-        raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed})")
+    diag: Dict[str, Any] = {}
+    flag_notes: List[str] = []
+    replicate_completeness(replicate_policy, failed_refits=failed, rows_held_fixed=fixed,
+                           variables_without_replicates=stoch, context="fit_multilevel",
+                           diagnostics=diag, notes=flag_notes)
+    check_refit_count(failed, len(coefs), max_failed, "fit_multilevel")
     B = np.vstack(coefs)
     b0 = params.to_numpy(float)
     se = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0)), index=params.index)
     notes = []
     if replicate_refit == "gls":
         notes.append("replicate refits hold variance components at full-sample values (GLS linearization)")
-    if failed:
-        notes.append(f"{failed} replicate refit(s) failed and were omitted; se_sampling may be understated")
-    if fixed:
-        notes.append(f"rows without replicates held at full-sample values (understates sampling SE): {fixed}")
-    return se, notes, {"replicate_failures": failed, "replicate_variables": sorted(mats)}
+    return se, notes + flag_notes, {"replicate_failures": failed, "replicate_variables": sorted(mats), **diag}

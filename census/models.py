@@ -71,6 +71,11 @@ from .results import (
     SOURCE_SAMPLING_MODEL,
     SOURCE_SAMPLING_REPLICATE,
     ModelResult,
+    check_refit_count,
+    check_replicate_policy,
+    precheck_replicates,
+    replicate_completeness,
+    stochastic_variables,
 )
 from .variance import REPLICATE_COLUMNS, REPLICATE_COUNT, REPLICATE_FACTOR
 
@@ -265,7 +270,7 @@ def _replicate_matrices(data: pd.DataFrame, replicates: pd.DataFrame, used: Sequ
         if not len(sub):
             continue
         sub = sub.assign(GEOID=sub["GEOID"].astype(str)).set_index(keys)
-        m = sub[REPLICATE_COLUMNS].reindex(idx).to_numpy(float)  # (n, 80)
+        m = sub[REPLICATE_COLUMNS].reindex(idx).to_numpy(float, copy=True)  # (n, 80)
         miss = ~np.isfinite(m).all(axis=1)
         if miss.any():  # hold the full-sample value fixed where no replicates exist
             m[miss] = data[v].to_numpy(float)[miss, None]
@@ -286,6 +291,7 @@ def fit_replicate(
     cv_threshold: float = DEFAULT_CV_THRESHOLD,
     max_failed_replicates: int = 0,
     target: str = "population",
+    replicate_policy: str = "flag",
 ) -> ModelResult:
     """Fit a statsmodels formula model with ACS replicate sampling SEs.
 
@@ -299,10 +305,16 @@ def fit_replicate(
     (see INTERVAL_TARGETS): "population" (default, se_model) for the general
     relationship; "these_areas" (se_sampling, needs replicates) for the
     relationship among these areas given ACS sampling error; "conservative"
-    (se_total). All three SEs are always reported. Replicates do not correct
+    (se_total). All three SEs are always reported. ``replicate_policy``
+    (census.results.replicate_completeness): "flag" (default, exploratory)
+    keeps the estimate when refits failed (up to ``max_failed_replicates``),
+    rows lack replicates, or a variable with an SE column has no replicates,
+    and records diagnostics["replicates_incomplete"]; "strict" (confirmatory,
+    used by census.manifest) raises ValueError instead. Replicates do not correct
     attenuation from noisy covariates; use regression_calibration for that.
     """
     model = model.lower()
+    check_replicate_policy(replicate_policy)
     if target not in INTERVAL_TARGETS:
         raise ValueError(f"target must be one of {INTERVAL_TARGETS}")
     if target == "these_areas" and (replicates is None or not len(replicates)):
@@ -326,6 +338,10 @@ def fit_replicate(
         mats, fixed = _replicate_matrices(data, replicates, used)
         if not mats:
             raise ValueError("no formula variable has replicates in the replicate frame")
+        missing = [v for v in used if v not in mats]
+        stoch_missing = stochastic_variables(frame, missing)
+        precheck_replicates(replicate_policy, rows_held_fixed=fixed, variables_without_replicates=stoch_missing,
+                            context="fit_replicate")
         coefs, failed = [], 0
         for r in range(REPLICATE_COUNT):
             d = data.copy()
@@ -339,20 +355,18 @@ def fit_replicate(
                 coefs.append(b)
             except Exception:  # noqa: BLE001 - any refit failure is counted and reported
                 failed += 1
-        if failed > max_failed_replicates:
-            raise RuntimeError(f"{failed} of 80 replicate refits failed (max_failed_replicates={max_failed_replicates})")
+        replicate_completeness(replicate_policy, failed_refits=failed, rows_held_fixed=fixed,
+                               variables_without_replicates=stoch_missing,
+                               context="fit_replicate", diagnostics=diagnostics, notes=notes)
+        check_refit_count(failed, len(coefs), max_failed_replicates, "fit_replicate")
         B = np.vstack(coefs)  # (n_ok, k)
         b0 = params.to_numpy(float)
         se_sampling = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0)), index=params.index)
         sources.append(SOURCE_SAMPLING_REPLICATE)
         method = "replicate_refit"
-        if failed:
-            notes.append(f"{failed} replicate refit(s) failed and were omitted; se_sampling may be understated")
-        if fixed:
-            notes.append(f"rows without replicates held at full-sample values (understates sampling SE): {fixed}")
-        missing = [v for v in used if v not in mats]
-        if missing:
-            notes.append(f"variables without replicates treated as fixed: {missing}")
+        fixed_vars = [v for v in missing if v not in stoch_missing]
+        if fixed_vars:   # no SE column: genuinely fixed (stochastic ones are in REPLICATES INCOMPLETE)
+            notes.append(f"variables without replicates or SEs treated as fixed: {fixed_vars}")
         diagnostics["replicate_stability"] = {
             t: {"sd": float(B[:, j].std(ddof=1)) if len(B) > 1 else np.nan,
                 "share_same_sign": float(np.mean(np.sign(B[:, j]) == np.sign(b0[j])))}

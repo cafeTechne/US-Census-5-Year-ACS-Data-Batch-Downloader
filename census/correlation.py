@@ -26,7 +26,8 @@ import pandas as pd
 from scipy import stats
 
 from .multitest import adjust_pvalues
-from .results import SOURCE_SAMPLING_REPLICATE, CorrelationResult
+from .results import (SOURCE_SAMPLING_REPLICATE, CorrelationResult, check_replicate_policy, replicate_completeness,
+                      stochastic_variables)
 from .variance import REPLICATE_COLUMNS, REPLICATE_FACTOR
 
 METHODS = ("pearson", "spearman")
@@ -108,6 +109,7 @@ def correlation_matrix(
     replicates: Optional[pd.DataFrame] = None,
     correction: Optional[str] = "holm",
     disattenuate: bool = False,
+    replicate_policy: str = "flag",
 ) -> CorrelationResult:
     """Correlation matrix with intervals, adjusted p-values and optional
     replicate SEs and disattenuated coefficients.
@@ -121,8 +123,15 @@ def correlation_matrix(
             ``variable``, ``rep_1..rep_80``) giving design-based SEs.
         correction: ``adjust_pvalues`` method across the matrix, or None.
         disattenuate: Also report Spearman-corrected coefficients.
+        replicate_policy: With ``replicates``, units with an estimate but no
+            (finite) replicates, or variables with an SE column but no
+            replicates, make the replicate SEs incomplete. ``flag`` (default)
+            records provenance["replicates_incomplete"] and a note;
+            ``strict`` (census.manifest) raises IncompleteReplicatesError
+            (census.results.replicate_completeness).
     """
     method = str(method).lower()
+    check_replicate_policy(replicate_policy)
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}")
     level = confidence_level / 100.0 if confidence_level > 1 else float(confidence_level)
@@ -138,12 +147,22 @@ def correlation_matrix(
     k = len(variables)
     data = {v: pd.to_numeric(frame[v], errors="coerce").to_numpy(float) for v in variables}
     reps = _replicate_cube(frame, replicates, variables) if replicates is not None else None
+    incomplete = None
+    if reps is not None:
+        units_missing = {v: int((np.isfinite(data[v]) & ~np.isfinite(reps[v]).all(axis=1)).sum())
+                         for v in variables if v in reps}
+        incomplete = replicate_completeness(
+            replicate_policy, rows_held_fixed=units_missing,
+            variables_without_replicates=stochastic_variables(frame, [v for v in variables if v not in reps]),
+            context="correlation_matrix", rows_label="units missing replicates (excluded from replicate SEs)")
     r = np.eye(k)
     n = np.zeros((k, k), dtype=int)
     p = np.full((k, k), np.nan)
     lo, hi = np.eye(k), np.eye(k)
     se_rep = np.zeros((k, k)) if reps is not None else None
     notes: List[str] = []
+    if incomplete:
+        notes.append(f"REPLICATES INCOMPLETE: {incomplete['note']}")
     for i, vi in enumerate(variables):
         n[i, i] = int(np.isfinite(data[vi]).sum())
         for j in range(i + 1, k):
@@ -194,6 +213,8 @@ def correlation_matrix(
             notes.append("some disattenuated |r| exceed 1 (reliability underestimated or sampling noise)")
         if method == "spearman":
             notes.append("disattenuation formula is exact for Pearson; applied to Spearman as an approximation")
+    if incomplete:
+        provenance["replicates_incomplete"] = incomplete
     if reps is not None:
         provenance["uncertainty_sources"] = [SOURCE_SAMPLING_REPLICATE]
         notes.append("se_replicate: correlation recomputed on 80 replicates, Var = 4/80*sum(r_r - r)^2")

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from census import errors
 from census.workflows import _load_frame, _records, _write_frame
-from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates
+from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, replicate_flag
 
 _ERRORS = (FileNotFoundError, OSError, KeyError, ValueError, TypeError, RuntimeError, ZeroDivisionError)
 _PUMS_NAME = re.compile(r"\b[A-Z][A-Z0-9_]{1,15}\b")
@@ -24,6 +24,16 @@ def _pums_columns(*texts: Optional[str]) -> List[str]:
             if name not in names and name not in ("AND", "OR", "NOT", "IN"):
                 names.append(name)
     return names
+
+
+def _memory_warnings(df: Any) -> List[str]:
+    """attrs["memory_note"] from census.pums.read_pums_csv (columns=None on a large file), as a list."""
+    note = (getattr(df, "attrs", None) or {}).get("memory_note")
+    return [f"MEMORY: {note}"] if note else []
+
+
+def _warning_suffix(warns: List[str]) -> str:
+    return f" WARNING: {' '.join(warns)}" if warns else ""
 
 
 def pums_tabulate(
@@ -67,10 +77,11 @@ def pums_tabulate(
     path = _write_frame(out, output_path, "pums_tabulation.csv")
     flags = [c for c in ("flag_small_n", "flag_high_cv", "flag_se_undefined") if c in out.columns]
     flagged = int(out[flags].astype(bool).any(axis=1).sum()) if flags else 0
+    warns = _memory_warnings(df)
     return _ok(f"PUMS {statistic} for {len(out)} cell(s); {flagged} flagged (fewer than 30 records, "
-               "CV over 30%, or undefined uncertainty).",
+               "CV over 30%, or undefined uncertainty)." + _warning_suffix(warns),
                "report estimates with their MOE; treat flagged cells with caution",
-               output_path=path, preview=_records(out, 20))
+               output_path=path, preview=_records(out, 20), warnings=warns)
 
 
 def pums_regression(
@@ -103,8 +114,10 @@ def pums_regression(
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary(), "report coefficients with the SE named in uncertainty_sources",
-               **{k: v for k, v in out.items() if k != "summary"})
+    warns = _memory_warnings(df)
+    return _ok(res.summary() + replicate_flag(res) + _warning_suffix(warns),
+               "report coefficients with the SE named in uncertainty_sources",
+               **{k: v for k, v in out.items() if k not in ("summary", "warnings")}, warnings=warns)
 
 
 def multilevel_model(
@@ -135,7 +148,7 @@ def multilevel_model(
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary(), "report coefficients with df and the SE named in uncertainty_sources",
+    return _ok(res.summary() + replicate_flag(res), "report coefficients with df and the SE named in uncertainty_sources",
                **{k: v for k, v in out.items() if k != "summary"})
 
 
@@ -177,7 +190,7 @@ def difference_in_differences(
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary(), "report the DiD estimate with its interval and the parallel-trends result",
+    return _ok(res.summary() + replicate_flag(res), "report the DiD estimate with its interval and the parallel-trends result",
                **{k: v for k, v in out.items() if k != "summary"})
 
 

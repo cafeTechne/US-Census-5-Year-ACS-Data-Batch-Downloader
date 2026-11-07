@@ -281,7 +281,8 @@ def _rep_cube(frame: pd.DataFrame, reps: pd.DataFrame, keys: List[str], code: st
         raise ValueError(f"replicate frame has duplicate rows for {code}")
     idx = pd.MultiIndex.from_frame(frame[keys]) if len(keys) > 1 else pd.Index(frame["GEOID"])
     sub = sub.set_index(keys)
-    vals = sub[["estimate"] + REPLICATE_COLUMNS].reindex(idx).to_numpy(float)
+    # copy: under pandas 3 copy-on-write, to_numpy can return a read-only view
+    vals = sub[["estimate"] + REPLICATE_COLUMNS].reindex(idx).to_numpy(float, copy=True)
     return vals.T
 
 

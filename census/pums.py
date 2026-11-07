@@ -48,6 +48,7 @@ import math
 import os
 import re
 import time
+import warnings
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -57,7 +58,8 @@ import pandas as pd
 
 from .api import PRODUCT_1YR, PRODUCT_5YR, normalize_product
 from .geo import STATE_FILES, STATE_MAPPING, get_resource_path
-from .results import SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult
+from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, check_refit_count,
+                      check_replicate_policy, replicate_completeness)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
 
 USER_AGENT = "acs-batch-downloader/pums (research toolkit; python-requests)"
@@ -285,6 +287,43 @@ def _convert(frame: pd.DataFrame, keep_str: Iterable[str]) -> pd.DataFrame:
     return frame
 
 
+# PLAN_ROUND_11 R2: reading every column of a large state file can exhaust
+# memory; above this file size columns=None warns and suggests columns=.
+LARGE_PUMS_BYTES = 200 * 1024 ** 2
+
+
+class PumsMemoryWarning(UserWarning):
+    """columns=None on a large PUMS file (PLAN_ROUND_11 R2)."""
+
+
+# Shown on every call (not once per location): each call reads a file anew.
+# Appended, so a user's own filters (e.g. "ignore" or "error") still take precedence.
+warnings.filterwarnings("always", category=PumsMemoryWarning, append=True)
+
+
+def _all_columns_note(source: Any) -> Optional[str]:
+    """Warn (PumsMemoryWarning, a UserWarning) and return a note when all columns of a large file are requested."""
+    try:
+        if isinstance(source, str):
+            size = os.path.getsize(source)
+        elif isinstance(source, (bytes, bytearray)):
+            size = len(source)
+        else:
+            pos = source.tell()
+            size = source.seek(0, 2)
+            source.seek(pos)
+    except (OSError, AttributeError, ValueError):
+        return None
+    if size <= LARGE_PUMS_BYTES:
+        return None
+    name = os.path.basename(source) if isinstance(source, str) else getattr(source, "name", "in-memory data")
+    note = (f"columns=None reads all 280+ columns of {name} ({size / 1024 ** 2:.0f} MB PUMS file); memory can run to "
+            "tens of GB (hundreds for several states). Pass columns=[...] with only the variables you need "
+            "(identifiers, PUMA and weights are always kept)")
+    warnings.warn(note, PumsMemoryWarning, stacklevel=3)   # -> the caller of read_pums_csv
+    return note
+
+
 def read_pums_csv(source: Union[str, bytes, io.IOBase], record: str = "person",
                   columns: Optional[Sequence[str]] = None, *, replicates: bool = True,
                   chunksize: int = 200_000, filter: Optional[Callable[[pd.DataFrame], Any]] = None) -> pd.DataFrame:
@@ -298,8 +337,11 @@ def read_pums_csv(source: Union[str, bytes, io.IOBase], record: str = "person",
     ``STRING_COLUMNS`` stay strings; other all-numeric columns become numbers.
     ``filter(chunk) -> boolean mask`` drops rows while reading (memory); chunk
     values are still raw strings (weights float32), e.g. ``lambda c: c["PUMA"] == "00100"``.
+    ``columns=None`` on a file larger than ``LARGE_PUMS_BYTES`` (200 MB) emits
+    a UserWarning and sets ``attrs["memory_note"]`` (PLAN_ROUND_11 R2).
     """
     rec = _record(record)
+    memory_note = _all_columns_note(source) if columns is None else None
     if isinstance(source, (bytes, bytearray)):
         source = io.BytesIO(source)
     handle, zf = source, None
@@ -346,7 +388,10 @@ def read_pums_csv(source: Union[str, bytes, io.IOBase], record: str = "person",
             zf.close()
     frame = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=wanted)
     frame = _convert(frame, STRING_COLUMNS | set(weights))
-    return frame[[c for c in wanted if c in frame.columns]]
+    frame = frame[[c for c in wanted if c in frame.columns]]
+    if memory_note:
+        frame.attrs["memory_note"] = memory_note
+    return frame
 
 
 def fetch_pums(
@@ -372,6 +417,14 @@ def fetch_pums(
     weights are always kept. The 2020 1-year file is experimental and needs
     ``allow_experimental=True`` (decision 3). ``attrs`` carry the release,
     source URL, SHA-256, cache path, PUMA vintage and weight names.
+
+    Memory (PLAN_ROUND_11 R2, synthetic measurement 2026-11-07): a
+    California-sized 5-year person file (1.9 million records) read with only
+    the needed columns plus the 80 replicate weights peaked at about 3.6 GB
+    RSS for a median by PUMA plus an 80-replicate regression. Reading all
+    columns (``columns=None``) multiplies that several-fold, and multi-state
+    all-column reads may need tens to hundreds of GB; ``columns=None`` on a
+    zip larger than 200 MB therefore warns (UserWarning, attrs["memory_note"]).
     """
     p, rec, year = _product(product), _record(record), int(year)
     _check_release(year, p, allow_experimental)
@@ -856,6 +909,8 @@ def pums_regression(
     where: Any = None,
     target: str = "these_areas",
     confidence_level: float = 0.90,
+    replicate_policy: str = "flag",
+    max_failed_replicates: int = 0,
 ) -> ModelResult:
     """Survey-weighted regression on PUMS with replicate-weight SEs.
 
@@ -870,12 +925,23 @@ def pums_regression(
     ``"these_areas"`` uses se_sampling, the design-based SE for the population
     the PUMS represents (Census's documented method for PUMS); ``"population"``
     uses se_model; ``"conservative"`` uses sqrt(se_model^2 + se_sampling^2).
+
+    ``replicate_policy`` (census.results.replicate_completeness, PLAN_ROUND_11
+    Q2/D7): a replicate refit fails when IRLS does not converge, the system is
+    singular, or a replicate weight is missing (non-finite) for a modelled
+    record. "flag" (default) omits up to ``max_failed_replicates`` (default
+    0, as in census.models.fit_replicate) failed refits from se_sampling and
+    records diagnostics["replicates_incomplete"]; more failures raise
+    RuntimeError. "strict" raises IncompleteReplicatesError (a ValueError) on
+    any failure. If every refit fails, RuntimeError (flag) or
+    IncompleteReplicatesError (strict) is raised.
     """
     import patsy
 
     from .models import INTERVAL_TARGETS, _table
 
     model = model.lower()
+    check_replicate_policy(replicate_policy)
     if model not in PUMS_MODELS:
         raise ValueError(f"model must be one of {PUMS_MODELS}")
     if target not in INTERVAL_TARGETS:
@@ -891,13 +957,29 @@ def pums_regression(
     if model == "logit" and not np.isin(y, (0.0, 1.0)).all():
         raise ValueError("logit outcome must be 0/1")
     b0 = _irls(X, y, W[:, 0], model)
-    B = np.vstack([_irls(X, y, W[:, r], model, start=b0) for r in range(1, REPLICATE_COUNT + 1)])
+    coefs, failed = [], 0
+    for r in range(1, REPLICATE_COUNT + 1):
+        try:
+            if not np.isfinite(W[:, r]).all():
+                raise ValueError("non-finite replicate weight")
+            b = _irls(X, y, W[:, r], model, start=b0)
+            if not np.isfinite(b).all():
+                raise ValueError("non-finite coefficients")
+            coefs.append(b)
+        except (np.linalg.LinAlgError, RuntimeError, ValueError):
+            failed += 1
+    notes: List[str] = []
+    diagnostics: Dict[str, Any] = {}
+    replicate_completeness(replicate_policy, failed_refits=failed, context="pums_regression",
+                           diagnostics=diagnostics, notes=notes)
+    check_refit_count(failed, len(coefs), max_failed_replicates, "pums_regression")
+    B = np.vstack(coefs)
     se_samp = np.sqrt(REPLICATE_FACTOR * ((B - b0) ** 2).sum(axis=0))
     se_mod = _sandwich(X, y, W[:, 0], b0, model)
     terms = list(X_df.columns)
     table = _table(pd.Series(b0, index=terms), pd.Series(se_mod, index=terms),
                    pd.Series(se_samp, index=terms), confidence_level, target)
-    notes = [
+    notes = notes + [
         "se_sampling: refit with each of the 80 replicate weights, Var = 4/80 * sum_r (b_r - b)^2",
         "se_model: weighted sandwich (HC1) SE ignoring the PUMS design; for comparison only",
         f"intervals and p-values use the '{target}' target",
@@ -905,13 +987,13 @@ def pums_regression(
     dropped = len(sub) - len(X_df)
     if dropped:
         notes.append(f"{dropped} record(s) dropped for missing formula variables")
-    diagnostics = {
+    diagnostics.update({
         "interval_target": target, "weight": base, "n_unweighted": int(len(X_df)),
         "weighted_n": float(W[:, 0].sum()),
         "replicate_stability": {t: {"sd": float(B[:, j].std(ddof=1)),
                                     "share_same_sign": float(np.mean(np.sign(B[:, j]) == np.sign(b0[j])))}
                                 for j, t in enumerate(terms)},
-    }
+    })
     provenance = {k: v for k, v in df.attrs.items() if isinstance(v, (str, int, float, bool))}
     provenance["model_library"] = "numpy IRLS (census.pums)"
     return ModelResult(model_type=f"pums_{model}", formula=formula, n_obs=int(len(X_df)), coefficients=table,

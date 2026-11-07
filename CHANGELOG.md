@@ -5,6 +5,22 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## Unreleased: Round 11 owner decisions
+
+- **Q2 incomplete replicates:** `replicate_policy="flag"|"strict"` on replicate-based
+  models; pre-registered manifests run strict; exploratory results say when sampling
+  SEs may be understated.
+- **Q1 DiD serial correlation:** coverage measured under AR(1) area shocks (0.896-0.905
+  at rho 0.5 and 0.8, default population target); no estimator added; assumption
+  documented in `census.did`, with a not-validated warning for panels over 4 periods.
+  The non-default these-areas target is conservative under serial correlation
+  (coverage 0.90-0.965).
+- **R2 PUMS memory:** measured ~3.6 GB peak at California scale; warning for all-column
+  reads of large files.
+- **R1 price-data integrity:** documented guarantee (verified at generation and by tests,
+  not at each load).
+- pandas 3 read-only array fixes in `census.models`, `census.did`, `census.analysis`.
+
 ## 0.10.0 (Round 10): microdata, 1-year estimates, research designs; Round 11 audit fixes
 
 - **PUMS microdata** (A, B): `census.pums` tabulations, crosstabs, weighted

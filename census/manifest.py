@@ -51,6 +51,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from .results import IncompleteReplicatesError
+
 SCHEMA_VERSION = 1
 AUTHOR_RE = re.compile(r"^(human|agent):\S+$")
 CONCEPT_RE = re.compile(r"^c_[0-9a-f]{12}$")
@@ -442,6 +444,13 @@ def _wide_from_panel(panel: pd.DataFrame, columns: Mapping[str, Tuple[str, str, 
     return out
 
 
+CONFIRMATORY_REPLICATE_POLICY = "strict"
+# Manifest methods that use replicates; each runs with replicate_policy="strict".
+# (Spatial, multilevel, DiD and PUMS analyses are not manifest methods; if added
+# they must join this set so confirmatory runs refuse incomplete replicates.)
+REPLICATE_METHODS = ("fit_replicate", "correlation_matrix")
+
+
 def _one_sided(p: float, estimate: float, direction: str) -> float:
     if direction == "two-sided" or p is None or not np.isfinite(p):
         return p
@@ -457,6 +466,10 @@ def _run_analysis(a: Mapping[str, Any], frame: pd.DataFrame, level: float, repli
     for k in ("error_covariates", "variables", "variable", "geoid", "variable_1", "variable_2"):
         if k in a:
             args.setdefault(k, a[k])
+    if method in REPLICATE_METHODS:
+        # Confirmatory runs refuse incomplete replicates (PLAN_ROUND_11 Q2/D7);
+        # the failure is recorded as a "replicates_incomplete" deviation.
+        args["replicate_policy"] = CONFIRMATORY_REPLICATE_POLICY
     if method == "fit_replicate":
         return models.fit_replicate(a["formula"], frame, replicates=replicates, confidence_level=level, **args)
     if method in ("regression_calibration", "simex"):
@@ -538,6 +551,9 @@ def run_manifest(
     :func:`census.analysis.attach_replicates`) used by ``fit_replicate`` and
     ``correlation_matrix``; without it those report model-based SEs and a
     deviation is recorded when the analysis sets ``"replicates": "required"``.
+    Replicate analyses run with ``replicate_policy="strict"`` (confirmatory):
+    failed refits, rows held fixed, or stochastic variables without replicates
+    stop the analysis and record a ``replicates_incomplete`` deviation.
     Never raises on data problems; returns ``success``, ``deviations``,
     ``hypotheses`` and the bundle manifest. The manifest hash is written into
     every output (results JSON, tables, figure sidecars, methods.md, bundle.json).
@@ -675,15 +691,15 @@ def run_manifest(
                                "detail": f"unavailable variables: {sorted(needed - available)}"
                                if frame is not None else "no analysis frame"})
             continue
-        if a.get("replicates") == "required" and replicates is None and a["method"] in (
-                "fit_replicate", "correlation_matrix"):
+        if a.get("replicates") == "required" and replicates is None and a["method"] in REPLICATE_METHODS:
             deviations.append({"kind": "replicates_unavailable", "analysis": aid,
                                "detail": "manifest requires replicate SEs; none supplied, analysis not run"})
             continue
         try:
             results[aid] = _run_analysis(a, frame, level, replicates, corr_method)
         except Exception as exc:
-            deviations.append({"kind": "analysis_failed", "analysis": aid, "detail": f"{type(exc).__name__}: {exc}"})
+            kind = "replicates_incomplete" if isinstance(exc, IncompleteReplicatesError) else "analysis_failed"
+            deviations.append({"kind": kind, "analysis": aid, "detail": f"{type(exc).__name__}: {exc}"})
 
     # 6. hypotheses with the pre-registered correction
     rows = []
@@ -724,7 +740,8 @@ def run_manifest(
     citation = data_citation(releases, tables_used)
     bundle = _write_bundle(out / "bundle", m, h, tagged, hyp_df, run_info, citation)
     return {"success": not any(d["kind"] in ("blocked_variable", "extraction_failed", "analysis_not_run",
-                                             "analysis_failed", "hypothesis_not_tested") for d in deviations),
+                                             "analysis_failed", "replicates_incomplete", "hypothesis_not_tested")
+                       for d in deviations),
             "manifest_hash": h, "deviations": deviations, "hypotheses": hyp_df, "results": tagged,
             "frame": frame, "bundle": bundle, "output_dir": str(out), "errors": []}
 
