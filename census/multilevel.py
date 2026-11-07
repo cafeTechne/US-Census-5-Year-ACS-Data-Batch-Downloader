@@ -242,9 +242,19 @@ def _fit_known(eng: BlockGLS, q: int, area_effect: bool, c: float, method: str,
         def nll(t):
             v = eng.loglik(t, method)
             return -v if np.isfinite(v) else 1e300
-        res = optimize.minimize(nll, np.asarray(s0, float), method="L-BFGS-B", bounds=bounds)
+        # Strict tolerances: with default ones L-BFGS-B (numerical gradients)
+        # stops short of the optimum by platform-dependent amounts (CI found
+        # the dietox group variance at 40.388 vs 40.393 locally).
+        res = optimize.minimize(nll, np.asarray(s0, float), method="L-BFGS-B", bounds=bounds,
+                                options={"ftol": 1e-15, "gtol": 1e-10, "maxiter": 5000})
         if best is None or res.fun < best.fun:
             best = res
+    # Derivative-free polish from the best start; kept only if it improves the likelihood.
+    polish = optimize.minimize(nll, best.x, method="Nelder-Mead", bounds=bounds,
+                               options={"xatol": 1e-10, "fatol": 1e-12, "maxiter": 20000, "maxfev": 40000})
+    if polish.fun < best.fun:
+        polish.success = bool(best.success or polish.success)
+        best = polish
     theta = best.x
     G, s2 = _unpack(theta, q, area_effect, c)
     return {"theta": theta, "G": G, "s2": s2, "loglik": -float(best.fun), "converged": bool(best.success),

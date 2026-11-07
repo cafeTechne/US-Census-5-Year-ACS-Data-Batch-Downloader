@@ -41,7 +41,16 @@ from .stats import reliability_flag
 from .variance import Z90
 
 DEFAULT_MAX_BYTES = 8_000_000
-CENSUS_CITATION = "U.S. Census Bureau, American Community Survey 5-year estimates; Census cartographic boundary files."
+CENSUS_CITATION_TEMPLATE = ("U.S. Census Bureau, American Community Survey {product} estimates; "
+                            "Census cartographic boundary files.")
+CENSUS_CITATION = CENSUS_CITATION_TEMPLATE.format(product="5-year")
+
+
+def census_citation(product: Optional[str] = "5-year") -> str:
+    """Footer citation naming the ACS product ('5-year' or '1-year')."""
+    from .api import normalize_product
+
+    return CENSUS_CITATION_TEMPLATE.format(product=normalize_product(product))
 
 
 def _num(v: float, digits: int = 4) -> Optional[float]:
@@ -202,6 +211,7 @@ def web_choropleth(
     tolerance_m: Optional[float] = None,
     max_bytes: int = DEFAULT_MAX_BYTES,
     max_attempts: int = 6,
+    product: str = "5-year",
 ) -> WebMap:
     """Write a self-contained interactive choropleth of ``column`` (see module docstring).
 
@@ -261,7 +271,7 @@ def web_choropleth(
     footer = " ".join(x for x in (
         html.escape(data_source) if data_source else "",
         html.escape(f"Boundaries: {binfo['description']}."),
-        html.escape(CENSUS_CITATION),
+        html.escape(census_citation(product)),
         "Interactive view for exploration; cite the static maps.",
     ) if x)
     minx, miny, maxx, maxy = g.total_bounds

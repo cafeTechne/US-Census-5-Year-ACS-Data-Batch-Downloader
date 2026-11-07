@@ -59,7 +59,7 @@ from census.concordance import BLOCKING_KINDS
 from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
-from census.stats import acs5_overlap_years
+from census.stats import acs_overlap_years
 from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference, workflows_microdata
 
 load_dotenv()
@@ -898,6 +898,7 @@ def calculate_significance(
     confidence_level: float = 0.90,
     year1: Optional[int] = None,
     year2: Optional[int] = None,
+    product: str = "5-year",
 ) -> Dict[str, Any]:
     """Two-tailed Z-test for whether two ACS estimates differ significantly.
 
@@ -909,10 +910,15 @@ def calculate_significance(
         est1, moe1: First estimate and its 90% MOE.
         est2, moe2: Second estimate and its 90% MOE.
         confidence_level: 0.90, 0.95 or 0.99 (default 0.90, the ACS standard).
-        year1, year2: Optional ACS 5-year end years for the overlap adjustment.
+        year1, year2: Optional ACS end years for the overlap adjustment.
+        product: '5-year' (default) or '1-year' (1-year releases never overlap).
     """
-    overlap = acs5_overlap_years(year1, year2) if year1 and year2 else 0
-    return z_test(est1, moe1, est2, moe2, confidence_level, overlap_years=overlap)
+    try:
+        overlap = acs_overlap_years(year1, year2, product) if year1 and year2 else 0
+        return z_test(est1, moe1, est2, moe2, confidence_level, overlap_years=overlap,
+                      product1=product, product2=product)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_INPUT, str(exc))
 
 
 @mcp.tool()

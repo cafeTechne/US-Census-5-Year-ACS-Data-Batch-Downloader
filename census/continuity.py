@@ -97,7 +97,8 @@ def check_concepts(
             checked += 1
             product = dataset_product(conc.dataset)
             # 1-year releases do not overlap; 5-year releases share sample years.
-            result = z_test(e1, m1, e2, m2, 0.90, overlap_years=acs_overlap_years(y1, y2, product))
+            result = z_test(e1, m1, e2, m2, 0.90, overlap_years=acs_overlap_years(y1, y2, product),
+                            product=product)
             rel_limit, pp_limit = implausibility_thresholds(y2 - y1)
             if pct:
                 change = abs(e2 - e1)

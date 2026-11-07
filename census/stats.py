@@ -270,6 +270,7 @@ def z_test(
     overlap_years: int = 0,
     product1: Optional[str] = None,
     product2: Optional[str] = None,
+    product: Optional[str] = None,
 ) -> Dict[str, object]:
     """Two-tailed Z-test for the difference between two ACS estimates.
 
@@ -278,9 +279,15 @@ def z_test(
     ``product1``/``product2`` ('5-year' / '1-year' or dataset keys), when
     given, must match: a 1-year vs 5-year comparison raises ``ValueError``.
     1-year releases never overlap; pass ``overlap_years=0`` (see
-    :func:`acs_overlap_years`).
+    :func:`acs_overlap_years`). ``product`` is shorthand for both. The overlap
+    share C = overlap_years / period uses the product's period length (5 or
+    1), so a same-release 1-year comparison (overlap 1 of 1) is treated as
+    independent (factor 1.0), not as 1 of 5 shared years.
     """
     period = 5
+    if product is not None:
+        product1 = product if product1 is None else product1
+        product2 = product if product2 is None else product2
     if product1 is not None or product2 is not None:
         from census.api import PRODUCT_PERIOD_YEARS, require_same_product
 

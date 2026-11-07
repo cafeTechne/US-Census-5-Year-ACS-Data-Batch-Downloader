@@ -55,6 +55,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 import numpy as np
 import pandas as pd
 
+from .api import PRODUCT_1YR, PRODUCT_5YR, normalize_product
 from .geo import STATE_FILES, STATE_MAPPING, get_resource_path
 from .results import SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
@@ -63,7 +64,9 @@ USER_AGENT = "acs-batch-downloader/pums (research toolkit; python-requests)"
 PUMS_DATA_BASE = "https://www2.census.gov/programs-surveys/acs/data/pums"
 PUMS_DOCS_BASE = "https://www2.census.gov/programs-surveys/acs/tech_docs/pums"
 PUMS_API_TEMPLATE = "https://api.census.gov/data/{year}/acs/{dataset}/pums"
-PRODUCTS = {"1-year": "1-Year", "5-year": "5-Year"}
+# Directory names under PUMS_DATA_BASE/<year>/ for each canonical product
+# (census.api.PRODUCTS); product names are normalized by census.api.normalize_product.
+PUMS_PRODUCT_DIRS = {PRODUCT_1YR: "1-Year", PRODUCT_5YR: "5-Year"}
 RECORDS = {"person": "p", "housing": "h"}
 WEIGHTS = {"person": "PWGTP", "housing": "WGTP"}
 FIRST_DICTIONARY_CSV = {"1-year": 2017, "5-year": 2017}
@@ -106,11 +109,7 @@ def weight_column(weight: str = "person") -> str:
 
 
 def _product(product: str) -> str:
-    p = str(product).lower().replace("_", "-").replace(" ", "-")
-    p = {"1yr": "1-year", "5yr": "5-year", "acs1": "1-year", "acs5": "5-year"}.get(p, p)
-    if p not in PRODUCTS:
-        raise ValueError(f"product must be one of {sorted(PRODUCTS)}")
-    return p
+    return normalize_product(product)
 
 
 def _record(record: str) -> str:
@@ -147,7 +146,7 @@ def pums_url(state: Union[str, int], year: int, product: str = "5-year", record:
     postal = STATE_POSTAL.get(st)
     if postal is None:
         raise ValueError(f"no PUMS state file code for FIPS {st}")
-    return (f"{PUMS_DATA_BASE}/{int(year)}/{PRODUCTS[_product(product)]}/"
+    return (f"{PUMS_DATA_BASE}/{int(year)}/{PUMS_PRODUCT_DIRS[_product(product)]}/"
             f"csv_{RECORDS[_record(record)]}{postal}.zip")
 
 
@@ -184,8 +183,23 @@ def _sidecar(path: str) -> str:
     return path + ".json"
 
 
+def _stat_key(path: str) -> Tuple[int, int]:
+    st = os.stat(path)
+    return int(st.st_size), int(st.st_mtime_ns)
+
+
+def _write_sidecar(path: str, meta: Dict[str, Any]) -> None:
+    with open(_sidecar(path), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
 def read_cache_entry(path: str) -> Optional[Dict[str, Any]]:
-    """Sidecar metadata if ``path`` exists and matches its recorded SHA-256."""
+    """Sidecar metadata if ``path`` exists and matches its recorded SHA-256.
+
+    State PUMS zips run to hundreds of MB, so the full SHA-256 is recomputed
+    only when the file's size or mtime differs from the values recorded in
+    the sidecar (``size_bytes``, ``mtime_ns``); a verified hash refreshes them.
+    """
     if not (os.path.exists(path) and os.path.exists(_sidecar(path))):
         return None
     try:
@@ -193,7 +207,17 @@ def read_cache_entry(path: str) -> Optional[Dict[str, Any]]:
             meta = json.load(f)
     except (OSError, ValueError):
         return None
-    return meta if meta.get("sha256") == _sha256_file(path) else None
+    size, mtime = _stat_key(path)
+    if meta.get("size_bytes") == size and meta.get("mtime_ns") == mtime and meta.get("sha256"):
+        return meta
+    if meta.get("sha256") != _sha256_file(path):
+        return None
+    meta["size_bytes"], meta["mtime_ns"] = size, mtime
+    try:
+        _write_sidecar(path, meta)
+    except OSError:
+        pass
+    return meta
 
 
 def write_cache_entry(path: str, raw: bytes, url: str, content_type: str = "") -> Dict[str, Any]:
@@ -205,8 +229,8 @@ def write_cache_entry(path: str, raw: bytes, url: str, content_type: str = "") -
     meta = {"source_url": url, "sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw),
             "content_type": content_type,
             "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-    with open(_sidecar(path), "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    meta["mtime_ns"] = _stat_key(path)[1]
+    _write_sidecar(path, meta)
     return meta
 
 
@@ -352,7 +376,7 @@ def fetch_pums(
     p, rec, year = _product(product), _record(record), int(year)
     _check_release(year, p, allow_experimental)
     url = pums_url(state, year, p, rec)
-    path, meta = cached_download(url, os.path.join(str(year), PRODUCTS[p]), cache_dir=cache_dir,
+    path, meta = cached_download(url, os.path.join(str(year), PUMS_PRODUCT_DIRS[p]), cache_dir=cache_dir,
                                  refresh=refresh, session=session)
     frame = read_pums_csv(path, rec, columns, replicates=replicates, chunksize=chunksize, filter=filter)
     try:
@@ -498,6 +522,21 @@ def _values(df: pd.DataFrame, expr: Any) -> np.ndarray:
     else:
         out = expr
     return pd.to_numeric(pd.Series(np.asarray(out)), errors="coerce").to_numpy(np.float64)
+
+
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _defined(df: pd.DataFrame, expr: Any, x: np.ndarray) -> np.ndarray:
+    """Rows where ``x`` is finite and, for a string expression, every column it
+    references is non-missing (``df.eval("WAGP > 50000")`` yields False, not
+    NaN, for a blank WAGP, which would otherwise count as a defined 0)."""
+    ok = np.isfinite(x)
+    if isinstance(expr, str) and expr not in df.columns:
+        for name in dict.fromkeys(_IDENT.findall(expr)):
+            if name in df.columns:
+                ok &= df[name].notna().to_numpy()
+    return ok
 
 
 def _groups(df: pd.DataFrame, by: Optional[Union[str, Sequence[str]]]) -> Tuple[np.ndarray, pd.DataFrame]:
@@ -648,7 +687,9 @@ def tabulate(
     * ``mean``: weighted mean of ``var`` (records with ``var`` missing dropped).
     * ``proportion``: weighted share (0-1) of records with ``var`` true/nonzero
       among records with ``var`` defined; ``var`` may be a column, an
-      expression such as ``"SCHL >= 21"``, or a callable.
+      expression such as ``"SCHL >= 21"``, or a callable. For an expression,
+      records where any referenced column is missing are excluded from both
+      numerator and denominator (and from ``n_unweighted``).
     * ``median``: weighted median of ``var`` (``bins`` for the Census
       bracket-interpolation method; see module docstring).
     * ``ratio``: sum(w * var) / sum(w * denominator), rows with both defined.
@@ -682,7 +723,7 @@ def tabulate(
         n = _group_count(ids_ok, G)
     elif statistic in ("mean", "proportion"):
         x = _values(sub, var)
-        defined = np.isfinite(x)
+        defined = _defined(sub, var, x)
         if statistic == "proportion":
             x = (np.nan_to_num(x) != 0).astype(float)
             notes.append("proportion is a fraction (0-1) of records with the variable defined")
@@ -693,7 +734,7 @@ def tabulate(
         n = _group_count(ids_ok, G)
     elif statistic == "ratio":
         x, y = _values(sub, var), _values(sub, denominator)
-        defined = np.isfinite(x) & np.isfinite(y)
+        defined = _defined(sub, var, x) & _defined(sub, denominator, y)
         ids_ok = np.where(defined, ids, -1)
         num = _group_sum(ids_ok, W * np.where(defined, x, 0.0)[:, None], G)
         den = _group_sum(ids_ok, W * np.where(defined, y, 0.0)[:, None], G)
@@ -702,7 +743,7 @@ def tabulate(
         label = f"{label} / {denominator if isinstance(denominator, str) else 'denominator'}"
     else:  # median
         x = _values(sub, var)
-        defined = np.isfinite(x)
+        defined = _defined(sub, var, x)
         ids_ok = np.where(defined, ids, -1)
         est = np.full((G, REPLICATE_COUNT + 1), np.nan)
         for g in range(G):
@@ -839,7 +880,9 @@ def pums_regression(
         raise ValueError(f"model must be one of {PUMS_MODELS}")
     if target not in INTERVAL_TARGETS:
         raise ValueError(f"target must be one of {INTERVAL_TARGETS}")
-    sub = df.loc[_mask(df, where)]
+    # Positional index: concatenated multi-state frames repeat row labels,
+    # which would make the label lookup below ambiguous.
+    sub = df.loc[_mask(df, where)].reset_index(drop=True)
     base, W = _weight_matrix(sub, weight)
     y_df, X_df = patsy.dmatrices(formula, sub, return_type="dataframe", NA_action="drop")
     pos = sub.index.get_indexer(X_df.index)
@@ -886,18 +929,42 @@ PUMA_TRACT_RELATIONSHIP_URLS = {
 }
 
 
+PUMS_DATA_DICTIONARY_PUMA_SOURCES = (
+    # Verified 2026-11: PUMA columns in the official CSV data dictionaries.
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2017-2021.csv",  # PUMA, 2010 definition
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2018-2022.csv",  # PUMA10 + PUMA20, -0009 = N/A
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2019-2023.csv",  # PUMA, 2020 definition
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2020-2024.csv",  # PUMA, 2020 definition
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2021.csv",       # 1-year: PUMA, 2010
+    f"{PUMS_DOCS_BASE}/data_dict/PUMS_Data_Dictionary_2022.csv",       # 1-year: PUMA, 2020
+)
+PUMA_NOT_APPLICABLE = "-0009"
+
+
 def puma_vintage(year: int, product: str = "5-year") -> int:
     """Census PUMA set (2000, 2010 or 2020) coded in a PUMS release.
 
-    2010 PUMAs from the 2012 1-year release through 2021, 2020 PUMAs from
-    2022 (PLAN_ROUND_10 section 3). 5-year releases ending 2012-2015 mix 2000
-    and 2010 codes (separate PUMA00/PUMA10 columns) and raise ValueError.
+    Per the official PUMS data dictionaries (``PUMS_DATA_DICTIONARY_PUMA_SOURCES``):
+
+    * 1-year: 2010 PUMAs from 2012 through 2021, 2020 PUMAs from 2022.
+    * 5-year: 2010 PUMAs for 2012-2016 through 2017-2021; one ``PUMA`` column
+      on the 2020 definition for 2019-2023 and 2020-2024 (the 2019-2021 sample
+      years are recoded to 2020 PUMAs).
+    * Mixed releases raise ValueError: 2008-2012 through 2011-2015 carry
+      PUMA00/PUMA10, and 2018-2022 carries PUMA10 (data years 2018-2021) and
+      PUMA20 (data year 2022) with ``-0009`` (not applicable) in the other
+      column, so no single PUMA vintage covers every record.
     """
     p, year = _product(product), int(year)
-    if year >= 2022:
-        return 2020
     if p == "1-year":
+        if year >= 2022:
+            return 2020
         return 2010 if year >= 2012 else 2000
+    if year == 2022:
+        raise ValueError("the 2018-2022 5-year PUMS mixes 2010 and 2020 PUMAs (PUMA10 for data years "
+                         "2018-2021, PUMA20 for 2022; -0009 = not applicable): pick one column explicitly")
+    if year >= 2023:
+        return 2020
     if year >= 2016:
         return 2010
     if year <= 2011:
@@ -906,10 +973,24 @@ def puma_vintage(year: int, product: str = "5-year") -> int:
 
 
 def puma_geoid(df: pd.DataFrame, puma: str = "PUMA", state: str = "STATE") -> pd.Series:
-    """7-character PUMA GEOID (state FIPS + 5-digit PUMA), matching boundary files."""
+    """7-character PUMA GEOID (state FIPS + 5-digit PUMA), matching boundary files.
+
+    Mixed-vintage files (2018-2022 5-year: PUMA10/PUMA20; 2008-2012 to 2011-2015:
+    PUMA00/PUMA10) have no ``PUMA`` column: pass ``puma="PUMA20"`` (or another
+    vintage column) explicitly. Records coded ``-0009`` (not applicable: the
+    record's data year is outside that column's vintage) get a missing GEOID.
+    """
+    if puma not in df.columns:
+        alts = [c for c in df.columns if re.fullmatch(r"PUMA\d\d", str(c))]
+        if alts:
+            raise ValueError(f"no {puma!r} column: this release mixes PUMA vintages ({', '.join(alts)}); "
+                             "pass puma=<one of them>; records outside its vintage get a missing GEOID")
+        raise KeyError(puma)
     st = df[state].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(2)
-    pu = df[puma].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(5)
-    return (st + pu).rename("GEOID")
+    raw = df[puma].astype(str).str.replace(r"\.0$", "", regex=True)
+    pu = raw.str.zfill(5)
+    na = df[puma].isna() | raw.str.startswith("-")
+    return (st + pu).mask(na).rename("GEOID")
 
 
 def add_puma_geoid(df: pd.DataFrame, puma: str = "PUMA", state: str = "STATE") -> pd.DataFrame:

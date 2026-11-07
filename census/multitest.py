@@ -30,7 +30,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from .stats import CENSUS_SENTINELS, _z_for_confidence, acs5_overlap_years, overlap_factor
+from .stats import CENSUS_SENTINELS, _z_for_confidence, acs_overlap_years, overlap_factor
 from .variance import Z90
 
 METHODS = ("bonferroni", "holm", "bh", "by")
@@ -141,6 +141,7 @@ def batch_z_test(
     year2: Any = None,
     confidence_level: float = 0.90,
     correction: str = "holm",
+    product: str = "5-year",
 ) -> pd.DataFrame:
     """Two-sample Z tests for every row, with a multiple-comparison correction.
 
@@ -169,6 +170,8 @@ def batch_z_test(
         confidence_level: e.g. 0.90 (Census default), 0.95.
         correction: ``holm`` (default; FWER), ``bonferroni``, ``bh`` (FDR,
             suggested for exploratory screening) or ``by``.
+        product: ``'5-year'`` (default) or ``'1-year'``. 1-year releases do not
+            share sample (no overlap adjustment); same release = independent.
 
     Returns:
         DataFrame indexed like ``df`` (``GEOID``/``NAME`` carried when
@@ -224,6 +227,10 @@ def batch_z_test(
     x1, x2 = clean_est(x1, "first"), clean_est(x2, "second")
     m1, m2 = clean_moe(m1, "first"), clean_moe(m2, "second")
 
+    from .api import PRODUCT_PERIOD_YEARS, require_same_product
+
+    product = require_same_product(product)
+    period = PRODUCT_PERIOD_YEARS[product]
     y1, y2 = _years(df, year1), _years(df, year2)
     overlap = np.zeros(n, dtype=float)
     factor = np.ones(n, dtype=float)
@@ -234,12 +241,12 @@ def batch_z_test(
                 factor[i] = np.nan
                 notes[i].append("period year missing; not tested")
                 continue
-            k = acs5_overlap_years(int(y1[i]), int(y2[i]))
+            k = acs_overlap_years(int(y1[i]), int(y2[i]), product)
             overlap[i] = k
-            factor[i] = overlap_factor(k)
-            if 0 < k < 5:
+            factor[i] = overlap_factor(k, period)
+            if 0 < k < period:
                 notes[i].append(NOTE_OVERLAP.format(k=k))
-            if k >= 5:
+            if k >= period:
                 notes[i].append(
                     "both estimates are from the same period: treated as independent samples "
                     "(different geographies or subgroups), no overlap adjustment"

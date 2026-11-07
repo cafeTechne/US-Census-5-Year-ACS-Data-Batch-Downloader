@@ -291,7 +291,7 @@ def cmd_significance(args: argparse.Namespace) -> int:
     return _emit(
         workflows.batch_significance(
             args.input, args.est1, args.moe1, args.est2, args.moe2, args.year1, args.year2,
-            args.confidence, args.correction, args.out,
+            args.confidence, args.correction, args.out, product=args.product,
         ),
         args.json,
     )
@@ -471,6 +471,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--year2", type=int)
     p.add_argument("--confidence", type=float, default=0.90)
     p.add_argument("--correction", default="holm", choices=("holm", "bonferroni", "bh", "by"))
+    p.add_argument("--product", default="5-year", choices=("5-year", "1-year"),
+                   help="ACS product of both estimates (1-year releases do not overlap)")
     p.add_argument("--out")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_significance)

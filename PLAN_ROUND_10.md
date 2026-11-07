@@ -130,5 +130,7 @@ Census publishes verification files for every PUMS release: selected estimates a
 | Interfaces | `census/workflows_microdata.py`: six tools (57 total); `product` and `allow_experimental_2020` on extraction tools |
 | Audit | `PLAN_ROUND_11.md` C1-C7 fixed with 28 tests (`tests/test_audit_r11.py`) |
 
+**PUMS geography note:** per the PUMS data dictionaries, the 2018-2022 5-year PUMS codes PUMAs in two columns (`PUMA10` for data years 2018-2021, `PUMA20` for 2022); the 2019-2023 and 2020-2024 5-year files use 2020 PUMAs throughout. `puma_vintage(2022, "5-year")` refuses the mixed release, as for 2012-2015.
+
 **Not done and carried forward:** the two-model local evaluation (the run was interrupted by a usage limit, and the Linux workstation has no Ollama; the harness and tasks are ready: `python scripts/local_model_eval.py --model qwen3:8b llama3.1:8b`). `make_map` remains in the core profile untested with local models until that run. Round 11 owner decisions R1, R2, Q1, Q2 (D6-D8) remain open.
 
