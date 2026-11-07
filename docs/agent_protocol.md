@@ -184,3 +184,10 @@ Validated in `docs/audits/inference_validation.md` by simulation with known trut
 - **Errata:** every extraction plan lists Census errata and user notes for the table and releases; mention them in write-ups.
 - **Controlled estimates** (Census MOE code -555555555) now keep MOE 0 with a `<code>_CONTROLLED` flag column.
 
+## 14. Microdata, 1-year estimates, and designs
+
+- **PUMS** (`pums_tabulate`, `pums_regression`): use when no published table crosses the variables you need. Standard errors come from the 80 replicate weights. Cells from fewer than 30 records or with CV above 30% are flagged, not suppressed; report the flag. PUMA is the smallest geography.
+- **1-year estimates** (`product="1-year"`): only areas of 65,000+ people; the plan lists requested areas with no 1-year data. There is no standard 2020 1-year release. Never compare a 1-year estimate with a 5-year estimate.
+- **Multilevel models and difference-in-differences** (`multilevel_model`, `difference_in_differences`): pass the outcome's SE column so sampling error is included. DiD needs non-overlapping releases and a pre-treatment reference period; with three or more pre-periods, report the parallel-trends test.
+- **Cost of living** (`adjust_for_place`): only on request; say in results that regional price parities were applied and that they carry their own error.
+

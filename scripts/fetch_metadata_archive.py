@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Download per-vintage ACS 5-year metadata into metadata/ (offline reference archive).
+"""Download per-vintage ACS 5-year and 1-year metadata into metadata/ (offline reference archive).
 
 For each dataset and each vintage listed in the Census API catalog, saves
 ``variables.json`` and ``groups.json`` gzipped, and records source URL,
@@ -38,6 +38,12 @@ DATASETS: Dict[str, str] = {
     "profile": "acs/acs5/profile",
     "subject": "acs/acs5/subject",
     "cprofile": "acs/acs5/cprofile",
+    # ACS 1-year releases (2005 onward; no 2020 release in the API: Census
+    # published only experimental 2020 1-year tables, outside the API).
+    "acs1": "acs/acs1",
+    "acs1/profile": "acs/acs1/profile",
+    "acs1/subject": "acs/acs1/subject",
+    "acs1/cprofile": "acs/acs1/cprofile",
 }
 FILES = ("variables.json", "groups.json")
 
@@ -69,7 +75,7 @@ def main() -> int:
     session = requests.Session()
     manifest = load_manifest()
     manifest["description"] = (
-        "Per-vintage Census API metadata for ACS 5-year datasets. Paths are "
+        "Per-vintage Census API metadata for ACS 5-year and 1-year datasets. Paths are "
         "<dataset>/<year>/<file>.gz; sha256 and bytes refer to the raw "
         "(uncompressed) API response."
     )

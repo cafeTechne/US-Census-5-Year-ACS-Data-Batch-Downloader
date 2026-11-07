@@ -33,8 +33,39 @@ the number is reported in ``attrs["fallbacks"]``. Direction 2020 -> 2010 uses
 2020 block counts. Within a split block, people are assumed evenly spread over
 land (the remaining approximation; most blocks are not split).
 
-The same block files do not identify ZCTAs or places; those crosswalks need
-the block assignment files and are not built here.
+ZCTA and place crosswalks (Round 10 F2)
+---------------------------------------
+The same block pieces are aggregated to (2010 area, 2020 area) pairs instead of
+tract pairs, once each block is assigned to its area. Block assignment sources
+(verified November 2026):
+
+* **2020 blocks -> 2020 ZCTAs**: ``tab20_zcta520_tabblock20_natl.txt`` in
+  ``https://www2.census.gov/geo/docs/maps-data/data/rel2020/zcta520/``
+  (pipe-delimited, one row per 2020 tabulation block with ``GEOID_ZCTA5_20``
+  blank for blocks in no ZCTA; national, about 1.06 GB, streamed once and
+  cached as compact per-state files).
+* **2010 blocks -> 2010 ZCTAs**: no 2010 block assignment file covers ZCTAs, so
+  the ``ZCTA5CE10`` and ``BLOCKCE10`` fields of the TIGER/Line 2010 topological
+  faces, ``https://www2.census.gov/geo/tiger/TIGER2010/FACES/tl_2010_<SSCCC>_faces.zip``
+  (one per county; every face carries its 2010 tabulation block and ZCTA, and
+  2010 ZCTAs are aggregations of 2010 blocks). Read with ``pyogrio``, no geometry.
+* **Blocks -> places** (incorporated places and CDPs): the Census block
+  assignment files, ``BlockAssign_ST<SS>_<AB>_INCPLACE_CDP.txt`` inside
+  ``https://www2.census.gov/geo/docs/maps-data/data/baf/BlockAssign_ST<SS>_<AB>.zip``
+  (2010, comma-delimited ``BLOCKID,PLACEFP``) and
+  ``.../data/baf2020/BlockAssign_ST<SS>_<AB>.zip`` (2020, pipe-delimited).
+
+Weights: ``w(s, t) = mass(s, t) / mass(s)`` where ``mass(s)`` includes mass in
+blocks that fall in *no* target area, so a source's weights sum to less than 1
+when part of its population moved outside every target (common for places:
+annexations and new CDPs). ``target_coverage`` is the share of the block mass
+landing in each target that came from some source area; below 1 the target
+has population that was in no source area, and apportioned totals undercount
+it. Sources with no mass fall back to land-area shares as for tracts. ZCTAs
+cross state lines, so multi-state runs pool pieces before normalizing.
+Place boundaries change every year (annexations), while these files fix them at
+the 2010 and 2020 censuses; ACS place estimates for other vintages carry that
+extra mismatch.
 """
 
 import io
@@ -62,11 +93,22 @@ WEIGHT_LAND = "land_area"
 BLOCK_WEIGHTS = (WEIGHT_POPULATION, WEIGHT_HOUSING)
 COUNT_COLUMN = {WEIGHT_POPULATION: "population", WEIGHT_HOUSING: "housing_units"}
 DIRECTIONS = ("2010_to_2020", "2020_to_2010")
+ZCTA_2020_URL = "https://www2.census.gov/geo/docs/maps-data/data/rel2020/zcta520/tab20_zcta520_tabblock20_natl.txt"
+FACES_2010_URL = "https://www2.census.gov/geo/tiger/TIGER2010/FACES/tl_2010_{state}{county}_faces.zip"
+BAF_URLS = {
+    2010: "https://www2.census.gov/geo/docs/maps-data/data/baf/BlockAssign_ST{state}_{abbr}.zip",
+    2020: "https://www2.census.gov/geo/docs/maps-data/data/baf2020/BlockAssign_ST{state}_{abbr}.zip",
+}
+AREA_GEOGRAPHIES = ("zcta", "place")
 # 50 states, DC, Puerto Rico (the relationship files cover exactly these).
 STATES = tuple(
     "01 02 04 05 06 08 09 10 11 12 13 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 "
     "31 32 33 34 35 36 37 38 39 40 41 42 44 45 46 47 48 49 50 51 53 54 55 56 72".split()
 )
+STATE_ABBR = dict(zip(STATES, (
+    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT "
+    "NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR".split()
+)))
 NOTE_BLOCK = (
     "{weight} weights from 2010/2020 Census block counts (dec/pl) and the Census 2010-2020 "
     "block relationship files; split blocks are divided by land area"
@@ -256,25 +298,21 @@ def _share_within(groups: pd.Series, land: np.ndarray, total: np.ndarray) -> np.
         return np.where(land_sum > 0, land / land_sum, np.where(total_sum > 0, total / total_sum, 1.0 / n))
 
 
-def block_tract_weights(
-    relationships: pd.DataFrame,
+def _block_pieces(
+    rel: pd.DataFrame,
     counts: Optional[pd.DataFrame],
-    direction: str = "2010_to_2020",
-    weight: str = WEIGHT_POPULATION,
-) -> pd.DataFrame:
-    """Tract crosswalk ``source_geoid, target_geoid, weight, part_area, mass``.
-
-    ``relationships`` from :func:`parse_block_relationships`; ``counts`` from
-    :func:`load_block_counts` for the *source* vintage (ignored for
-    ``weight="land_area"``). ``part_area`` is the land (else total) area of
-    each piece, used by ``apportion`` for coverage.
-    """
+    direction: str,
+    weight: str,
+    source_area: Any,
+    target_area: Any,
+) -> "tuple[pd.DataFrame, int]":
+    """Pieces ``source_geoid, target_geoid, mass, land, total`` and the number
+    of source blocks without a decennial count."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction must be one of {DIRECTIONS}")
     if weight not in BLOCK_WEIGHTS + (WEIGHT_LAND,):
         raise ValueError(f"weight must be one of {BLOCK_WEIGHTS + (WEIGHT_LAND,)}")
-    sv, tv = ("2010", "2020") if direction == "2010_to_2020" else ("2020", "2010")
-    rel = relationships
+    sv = "2010" if direction == "2010_to_2020" else "2020"
     land = rel["arealand_int"].to_numpy(dtype=float)
     total = land + rel["areawater_int"].to_numpy(dtype=float)
     missing_blocks = 0
@@ -290,10 +328,20 @@ def block_tract_weights(
         share = _share_within(rel[f"block_{sv}"], land, total)
         mass = block_count.fillna(0).to_numpy() * share
     pieces = pd.DataFrame({
-        "source_geoid": rel[f"tract_{sv}"].to_numpy(),
-        "target_geoid": rel[f"tract_{tv}"].to_numpy(),
+        "source_geoid": np.asarray(source_area, dtype=object),
+        "target_geoid": np.asarray(target_area, dtype=object),
         "mass": mass, "land": land, "total": total,
     })
+    return pieces, missing_blocks
+
+
+def _normalize_pieces(pieces: pd.DataFrame, weight: str) -> "tuple[pd.DataFrame, Dict[str, int]]":
+    """Aggregate pieces to pairs and normalize within each source.
+
+    A blank ``target_geoid`` (block in no target area) counts toward the
+    source's total but is dropped from the output. Blank sources are dropped.
+    """
+    pieces = pieces[pieces["source_geoid"].astype(str) != ""]
     pairs = pieces.groupby(["source_geoid", "target_geoid"], as_index=False, sort=True)[["mass", "land", "total"]].sum()
     g = pairs.groupby("source_geoid")
     msum = g["mass"].transform("sum").to_numpy()
@@ -309,15 +357,38 @@ def block_tract_weights(
                               np.where(use_total, pairs["total"] / tsum, 1.0 / n)))
     pairs["weight"] = w
     pairs["part_area"] = np.where(pairs["land"] > 0, pairs["land"], pairs["total"])
-    out = pairs.loc[pairs["weight"] > 0, ["source_geoid", "target_geoid", "weight", "part_area", "mass"]]
-    out = out.reset_index(drop=True)
+    keep = (pairs["weight"] > 0) & (pairs["target_geoid"].astype(str) != "")
+    out = pairs.loc[keep, ["source_geoid", "target_geoid", "weight", "part_area", "mass"]].reset_index(drop=True)
     src = pairs["source_geoid"]
     fallbacks = {
         "no_count_land_area": int(src[use_land].nunique()) if weight != WEIGHT_LAND else 0,
         "total_area": int(src[use_total].nunique()),
         "equal_split": int(src[~use_mass & ~use_land & ~use_total].nunique()),
-        "blocks_without_counts": missing_blocks,
     }
+    return out, fallbacks
+
+
+def block_tract_weights(
+    relationships: pd.DataFrame,
+    counts: Optional[pd.DataFrame],
+    direction: str = "2010_to_2020",
+    weight: str = WEIGHT_POPULATION,
+) -> pd.DataFrame:
+    """Tract crosswalk ``source_geoid, target_geoid, weight, part_area, mass``.
+
+    ``relationships`` from :func:`parse_block_relationships`; ``counts`` from
+    :func:`load_block_counts` for the *source* vintage (ignored for
+    ``weight="land_area"``). ``part_area`` is the land (else total) area of
+    each piece, used by ``apportion`` for coverage.
+    """
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction must be one of {DIRECTIONS}")
+    sv, tv = ("2010", "2020") if direction == "2010_to_2020" else ("2020", "2010")
+    rel = relationships
+    pieces, missing_blocks = _block_pieces(rel, counts, direction, weight,
+                                           rel[f"tract_{sv}"].to_numpy(), rel[f"tract_{tv}"].to_numpy())
+    out, fallbacks = _normalize_pieces(pieces, weight)
+    fallbacks["blocks_without_counts"] = missing_blocks
     notes = [NOTE_BLOCK.format(weight=weight) if weight != WEIGHT_LAND else
              "land_area weights from Census 2010-2020 block relationship pieces"]
     if fallbacks["no_count_land_area"]:
@@ -379,6 +450,310 @@ def tract_weights(
         failed_states=failed,
         source={"relationship_files": REL_URL, "counts": {y: f"{BASE_URL}/{y}/{d} {p},{h}"
                                                           for y, (d, p, h) in DECENNIAL_COUNTS.items()}},
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# ZCTA and place crosswalks (block assignment)
+# ---------------------------------------------------------------------------
+
+ASSIGN_COLUMNS = ["block_geoid", "area_geoid"]
+
+
+def _assign_frame(blocks: Iterable[str], areas: Iterable[str]) -> pd.DataFrame:
+    df = pd.DataFrame({"block_geoid": pd.Series(list(blocks), dtype=str).str.strip(),
+                       "area_geoid": pd.Series(list(areas), dtype=str).str.strip()})
+    df = df[(df["area_geoid"] != "") & (df["area_geoid"].str.lower() != "nan") & (df["block_geoid"] != "")]
+    return df.drop_duplicates("block_geoid").reset_index(drop=True)
+
+
+def parse_place_assignment(text: str) -> pd.DataFrame:
+    """``BlockAssign_*_INCPLACE_CDP.txt`` (2010 comma- or 2020 pipe-delimited)
+    -> ``block_geoid, area_geoid`` with the 7-digit place GEOID (state + PLACEFP).
+    Blocks in no place are dropped."""
+    text = text.lstrip("\ufeff")
+    sep = "|" if "|" in text.split("\n", 1)[0] else ","
+    df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False)
+    df.columns = [c.strip().upper() for c in df.columns]
+    if not {"BLOCKID", "PLACEFP"} <= set(df.columns):
+        raise BlockDataError("place block assignment file lacks BLOCKID / PLACEFP")
+    placefp = df["PLACEFP"].str.strip()
+    area = np.where(placefp != "", df["BLOCKID"].str[:2] + placefp.str.zfill(5), "")
+    return _assign_frame(df["BLOCKID"], area)
+
+
+def parse_zcta520_blocks(lines: Iterable[str]) -> pd.DataFrame:
+    """Rows of ``tab20_zcta520_tabblock20_natl.txt`` -> ``block_geoid, area_geoid``."""
+    it = iter(lines)
+    header = next(it).lstrip("\ufeff").rstrip("\r\n").split("|")
+    try:
+        zi, bi = header.index("GEOID_ZCTA5_20"), header.index("GEOID_TABBLOCK_20")
+    except ValueError as exc:
+        raise BlockDataError("ZCTA-to-block file lacks GEOID_ZCTA5_20 / GEOID_TABBLOCK_20") from exc
+    blocks, areas = [], []
+    for line in it:
+        parts = line.rstrip("\r\n").split("|")
+        if len(parts) > max(zi, bi) and parts[zi]:
+            blocks.append(parts[bi])
+            areas.append(parts[zi])
+    return _assign_frame(blocks, areas)
+
+
+def faces_to_zcta(faces: pd.DataFrame) -> pd.DataFrame:
+    """TIGER/Line 2010 faces attributes -> 2010 ``block_geoid, area_geoid`` (ZCTA5CE10).
+
+    Faces with no block or ZCTA are skipped; a block on faces with different
+    ZCTAs (not expected; ZCTAs are built from blocks) takes the most common one
+    and is counted in ``attrs["conflicts"]``."""
+    need = ["STATEFP10", "COUNTYFP10", "TRACTCE10", "BLOCKCE10", "ZCTA5CE10"]
+    missing = [c for c in need if c not in faces.columns]
+    if missing:
+        raise BlockDataError(f"faces file lacks column(s) {missing}")
+    f = faces[need].fillna("").astype(str)
+    f = f[(f["BLOCKCE10"].str.strip() != "") & (f["ZCTA5CE10"].str.strip() != "")]
+    block = f["STATEFP10"] + f["COUNTYFP10"] + f["TRACTCE10"] + f["BLOCKCE10"].str[:4]
+    pairs = pd.DataFrame({"block_geoid": block.values, "area_geoid": f["ZCTA5CE10"].values})
+    counts = pairs.value_counts().reset_index(name="n").sort_values(["block_geoid", "n"], ascending=[True, False])
+    conflicts = int(counts["block_geoid"].duplicated().sum())
+    out = _assign_frame(counts["block_geoid"], counts["area_geoid"])
+    out.attrs["conflicts"] = conflicts
+    return out
+
+
+def _assignment_cache(name: str) -> str:
+    return os.path.join(block_cache_dir(), name)
+
+
+def _read_assignment_cache(path: str) -> Optional[pd.DataFrame]:
+    raw = _read_cached(path)
+    if raw is None:
+        return None
+    return pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False)
+
+
+def _write_assignment_cache(path: str, df: pd.DataFrame, url: str) -> None:
+    _write_cached(path, df[ASSIGN_COLUMNS].to_csv(index=False, lineterminator="\n").encode("utf-8"), url, "text/csv")
+
+
+def _fetch_zcta2020(session: Any = None) -> None:
+    """Stream the national 2020 ZCTA-to-block file once; cache one compact file per state."""
+    import requests
+
+    if _offline():
+        raise BlockDataError("2020 ZCTA block file not cached and CENSUS_BLOCK_OFFLINE is set")
+    getter = session if session is not None else requests
+    try:
+        resp = getter.get(ZCTA_2020_URL, headers={"User-Agent": USER_AGENT}, timeout=600, stream=True)
+    except requests.RequestException as exc:
+        raise BlockDataError(f"download failed for {ZCTA_2020_URL}: {exc}") from exc
+    if resp.status_code != 200:
+        raise BlockDataError(f"HTTP {resp.status_code} for {ZCTA_2020_URL}")
+    lines = (ln.decode("utf-8-sig") if isinstance(ln, bytes) else ln for ln in resp.iter_lines())
+    df = parse_zcta520_blocks(lines)
+    if df.empty:
+        raise BlockDataError(f"{ZCTA_2020_URL}: no block rows")
+    for st, part in df.groupby(df["block_geoid"].str[:2]):
+        if st in STATES:
+            _write_assignment_cache(_assignment_cache(f"zcta520_blocks_{st}.csv"), part, ZCTA_2020_URL)
+
+
+def _fetch_zcta2010(st: str, counties: Iterable[str], session: Any = None) -> pd.DataFrame:
+    import tempfile
+
+    import pyogrio
+
+    frames = []
+    for co in sorted(set(counties)):
+        url = FACES_2010_URL.format(state=st, county=co)
+        raw = _get(url, session=session, timeout=300)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, os.path.basename(url))
+            with open(path, "wb") as f:
+                f.write(raw)
+            try:
+                with zipfile.ZipFile(path) as zf:
+                    shp = next(n for n in zf.namelist() if n.lower().endswith(".dbf"))
+            except (zipfile.BadZipFile, StopIteration) as exc:
+                raise BlockDataError(f"{url}: not a TIGER faces zip") from exc
+            faces = pyogrio.read_dataframe(f"zip://{path}!{shp}", read_geometry=False,
+                                           columns=["STATEFP10", "COUNTYFP10", "TRACTCE10", "BLOCKCE10", "ZCTA5CE10"])
+        frames.append(faces_to_zcta(faces))
+    return _assign_frame(pd.concat(frames)["block_geoid"], pd.concat(frames)["area_geoid"]) if frames else \
+        pd.DataFrame(columns=ASSIGN_COLUMNS)
+
+
+def load_block_assignment(
+    state: Any,
+    geography: str,
+    year: int,
+    counties: Optional[Iterable[str]] = None,
+    session: Any = None,
+) -> pd.DataFrame:
+    """Block -> ZCTA or place for one state and census year (2010 or 2020), cached.
+
+    ``counties`` (3-digit codes) is needed only for 2010 ZCTAs (one TIGER faces
+    file per county); by default they come from the block relationship file.
+    """
+    if geography not in AREA_GEOGRAPHIES:
+        raise ValueError(f"geography must be one of {AREA_GEOGRAPHIES}")
+    if year not in (2010, 2020):
+        raise ValueError("year must be 2010 or 2020")
+    st = _state(state)
+    if geography == "place":
+        url = BAF_URLS[year].format(state=st, abbr=STATE_ABBR[st])
+        path = _assignment_cache(f"place{year}_blocks_{st}.csv")
+        cached = _read_assignment_cache(path)
+        if cached is not None:
+            return cached
+        if _offline():
+            raise BlockDataError(f"{os.path.basename(path)} not cached and CENSUS_BLOCK_OFFLINE is set")
+        raw = _get(url, session=session)
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                name = next(n for n in zf.namelist() if "INCPLACE_CDP" in n.upper())
+                text = zf.read(name).decode("utf-8-sig")
+        except (zipfile.BadZipFile, StopIteration) as exc:
+            raise BlockDataError(f"{url}: no INCPLACE_CDP file in the block assignment zip") from exc
+        df = parse_place_assignment(text)
+        _write_assignment_cache(path, df, url)
+        return df
+    path = _assignment_cache(f"zcta{510 if year == 2010 else 520}_blocks_{st}.csv")
+    cached = _read_assignment_cache(path)
+    if cached is not None:
+        return cached
+    if year == 2020:
+        _fetch_zcta2020(session=session)
+        cached = _read_assignment_cache(path)
+        return cached if cached is not None else pd.DataFrame(columns=ASSIGN_COLUMNS)
+    if _offline():
+        raise BlockDataError(f"{os.path.basename(path)} not cached and CENSUS_BLOCK_OFFLINE is set")
+    cos = counties if counties is not None else load_block_relationships(st, session=session)["tract_2010"].str[2:5].unique()
+    df = _fetch_zcta2010(st, cos, session=session)
+    _write_assignment_cache(path, df, FACES_2010_URL.format(state=st, county="<each>"))
+    return df
+
+
+def block_area_weights(
+    relationships: pd.DataFrame,
+    counts: Optional[pd.DataFrame],
+    assign_2010: pd.DataFrame,
+    assign_2020: pd.DataFrame,
+    direction: str = "2010_to_2020",
+    weight: str = WEIGHT_POPULATION,
+    geography: str = "area",
+) -> pd.DataFrame:
+    """ZCTA / place (or any block-built area) crosswalk from block pieces.
+
+    ``assign_2010`` / ``assign_2020``: ``block_geoid, area_geoid`` for each
+    vintage (:func:`load_block_assignment`). Output columns ``source_geoid,
+    target_geoid, weight, part_area, mass, target_coverage``; see the module
+    docstring for why weights can sum to less than 1.
+    """
+    return _area_weights_from_pieces([_area_pieces(relationships, counts, assign_2010, assign_2020,
+                                                   direction, weight)], direction, weight, geography)
+
+
+def _area_pieces(rel, counts, assign_2010, assign_2020, direction, weight):
+    sv, tv = ("2010", "2020") if direction == "2010_to_2020" else ("2020", "2010")
+    maps = {"2010": assign_2010, "2020": assign_2020}
+
+    def area(v: str) -> np.ndarray:
+        a = maps[v]
+        lookup = pd.Series(a["area_geoid"].astype(str).to_numpy(), index=a["block_geoid"].astype(str).to_numpy())
+        lookup = lookup[~lookup.index.duplicated()]
+        return rel[f"block_{v}"].map(lookup).fillna("").to_numpy()
+
+    pieces, missing = _block_pieces(rel, counts, direction, weight, area(sv), area(tv))
+    pieces.attrs["blocks_without_counts"] = missing
+    return pieces
+
+
+def _area_weights_from_pieces(parts: List[pd.DataFrame], direction: str, weight: str, geography: str) -> pd.DataFrame:
+    missing = sum(int(p.attrs.get("blocks_without_counts", 0)) for p in parts)
+    pieces = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(
+        columns=["source_geoid", "target_geoid", "mass", "land", "total"])
+    out, fallbacks = _normalize_pieces(pieces, weight)
+    fallbacks["blocks_without_counts"] = missing
+    # Share of each target's mass (or land) that came from some source area.
+    basis = "mass" if weight != WEIGHT_LAND and pieces["mass"].sum() > 0 else "land"
+    tgt = pieces[pieces["target_geoid"].astype(str) != ""]
+    from_src = tgt[tgt["source_geoid"].astype(str) != ""].groupby("target_geoid")[basis].sum()
+    all_in = tgt.groupby("target_geoid")[basis].sum()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        coverage = (from_src.reindex(all_in.index).fillna(0) / all_in).where(all_in > 0, 1.0)
+    out["target_coverage"] = out["target_geoid"].map(coverage).fillna(1.0).to_numpy()
+    src_mass = pieces[pieces["source_geoid"].astype(str) != ""]
+    total_mass = float(src_mass[basis].sum())
+    unassigned = float(src_mass.loc[src_mass["target_geoid"].astype(str) == "", basis].sum())
+    low = int((coverage < 0.99).sum())
+    notes = [f"{weight} weights from 2010/2020 Census block counts, block relationship files and "
+             f"{geography} block assignments" if weight != WEIGHT_LAND else
+             f"land_area weights from block relationship pieces and {geography} block assignments"]
+    if unassigned > 0:
+        notes.append(f"{unassigned / total_mass:.2%} of source {basis} lies in blocks outside every target "
+                     f"{geography}; those sources' weights sum to less than 1")
+    if low:
+        notes.append(f"{low} target {geography}(s) get under 99% of their block {basis} from source areas "
+                     "(see target_coverage); apportioned totals undercount them")
+    if fallbacks["no_count_land_area"]:
+        notes.append(f"{fallbacks['no_count_land_area']} source {geography}(s) with no counts use land-area weights")
+    out.attrs.update(weight_type=weight, direction=direction, geography=geography, fallbacks=fallbacks,
+                     notes=notes, unassigned_share=(unassigned / total_mass) if total_mass else 0.0)
+    return out
+
+
+def area_weights(
+    geography: str,
+    states: Optional[Sequence[Any]] = None,
+    direction: str = "2010_to_2020",
+    weight: str = WEIGHT_POPULATION,
+    api_key: Optional[str] = None,
+    session: Any = None,
+    on_error: str = "raise",
+) -> pd.DataFrame:
+    """ZCTA (``geography="zcta"``) or place 2010 <-> 2020 crosswalk for ``states``.
+
+    Pieces from all states are pooled before normalizing (ZCTAs cross state
+    lines). ``on_error="skip"`` leaves out failing states (``attrs["failed_states"]``);
+    a ZCTA that straddles a skipped state then gets weights from the other
+    state's pieces only, which the notes say.
+    """
+    if geography not in AREA_GEOGRAPHIES:
+        raise ValueError(f"geography must be one of {AREA_GEOGRAPHIES}")
+    sv = 2010 if direction == "2010_to_2020" else 2020
+    parts: List[pd.DataFrame] = []
+    failed: Dict[str, str] = {}
+    for st in [_state(s) for s in (states or STATES)]:
+        try:
+            rel = load_block_relationships(st, session=session)
+            rel = rel[rel[f"block_{sv}"].astype(str).str[:2] == st]
+            rel = rel.drop_duplicates(["block_2010", "block_2020"])
+            counties = sorted(rel["tract_2010"].astype(str).str[2:5].unique())
+            counts = None if weight == WEIGHT_LAND else load_block_counts(
+                st, sv, counties=sorted(rel[f"tract_{sv}"].astype(str).str[2:5].unique()), api_key=api_key,
+                session=session)
+            # Target blocks may lie in a neighbouring state: load its assignment too.
+            a = {}
+            for year in (2010, 2020):
+                block_states = sorted(set(rel[f"block_{year}"].astype(str).str[:2]) & set(STATES))
+                a[year] = pd.concat([load_block_assignment(
+                    b, geography, year, counties=counties if b == st else None, session=session)
+                    for b in block_states], ignore_index=True)
+            parts.append(_area_pieces(rel, counts, a[2010], a[2020], direction, weight))
+        except (BlockDataError, OSError, ValueError) as exc:
+            if on_error == "raise":
+                raise
+            failed[st] = str(exc)
+    out = _area_weights_from_pieces(parts, direction, weight, geography)
+    if failed:
+        out.attrs["notes"].append(f"block data unavailable for state(s) {', '.join(sorted(failed))}; "
+                                  f"{geography}s there are missing or use only other states' pieces")
+    out.attrs.update(
+        failed_states=failed,
+        source={"relationship_files": REL_URL,
+                "assignment": ({2010: FACES_2010_URL, 2020: ZCTA_2020_URL} if geography == "zcta" else BAF_URLS),
+                "counts": {y: f"{BASE_URL}/{y}/{d} {p},{h}" for y, (d, p, h) in DECENNIAL_COUNTS.items()}},
     )
     return out
 

@@ -37,6 +37,13 @@ planning-region counties appear from the 2022 release. Cartographic ZCTA
 files at 1:500k were published for 2013-2019 (2010 ZCTAs, ``zcta510``) and
 only for 2020 in the 2020s (``zcta520``, unchanged through the decade), so
 ACS 2020+ ZCTA maps use the 2020 cb file.
+
+PUMAs (level ``"puma"``, GEOID = state + 5-digit PUMA): ACS releases through
+2021 use 2010 PUMAs and releases from 2022 use 2020 PUMAs. Cartographic PUMA
+files exist for 2013-2019 (``puma10``) and 2020 (``puma20``) only, so
+``boundary_vintage`` maps 2020-2021 releases to the 2019 cb file and 2022+
+releases to the 2020 cb file; TIGER/Line has ``PUMA/tl_<Y>_<st>_puma10`` for
+2012-2021, ``PUMA/..._puma20`` for 2022-2023 and ``PUMA20/..._puma20`` from 2024.
 """
 
 import hashlib
@@ -72,12 +79,15 @@ LEVELS: Dict[str, Dict[str, Any]] = {
     "place": {"cb": "place", "tiger_dir": "PLACE", "tiger": "place", "per_state": True, "geoid_len": 7},
     "zcta": {"cb": "zcta", "tiger_dir": "ZCTA", "tiger": "zcta", "per_state": False, "geoid_len": 5},
     "cbsa": {"cb": "cbsa", "tiger_dir": "CBSA", "tiger": "cbsa", "per_state": False, "geoid_len": 5},
+    # Public Use Microdata Areas (PUMS geography); GEOID = state (2) + PUMA (5).
+    "puma": {"cb": "puma", "tiger_dir": "PUMA", "tiger": "puma", "per_state": True, "geoid_len": 7},
 }
 _ALIASES = {
     "bg": "block group", "block_group": "block group", "blockgroup": "block group",
     "cousub": "county subdivision", "county_subdivision": "county subdivision",
     "zip code tabulation area": "zcta", "zcta5": "zcta",
     "msa": "cbsa", "metropolitan statistical area/micropolitan statistical area": "cbsa",
+    "puma10": "puma", "puma20": "puma", "pumas": "puma", "public use microdata area": "puma",
     "states": "state", "counties": "county", "tracts": "tract",
 }
 
@@ -135,7 +145,31 @@ VERIFIED_URLS: List[Tuple[str, int]] = [
     ("TIGER2023/PLACE/tl_2023_11_place.zip", 200),
     ("TIGER2023/COUSUB/tl_2023_11_cousub.zip", 200),
     ("TIGER2023/CBSA/tl_2023_us_cbsa.zip", 200),
+    # PUMAs, HEAD 2026-11-03: cb puma10 2013-2019, cb puma20 only for 2020 (none 2021+);
+    # TIGER PUMA/puma10 2012-2021, PUMA/puma20 2022-2023, PUMA20/puma20 2024+.
+    ("GENZ2013/cb_2013_56_puma10_500k.zip", 200),
+    ("GENZ2014/shp/cb_2014_56_puma10_500k.zip", 200),
+    ("GENZ2019/shp/cb_2019_56_puma10_500k.zip", 200),
+    ("GENZ2019/shp/cb_2019_us_puma10_500k.zip", 200),
+    ("GENZ2020/shp/cb_2020_us_puma20_500k.zip", 200),
+    ("GENZ2020/shp/cb_2020_56_puma20_500k.zip", 200),
+    ("GENZ2021/shp/cb_2021_56_puma10_500k.zip", 404),
+    ("GENZ2022/shp/cb_2022_us_puma20_500k.zip", 404),
+    ("TIGER2012/PUMA/tl_2012_56_puma10.zip", 200),
+    ("TIGER2021/PUMA/tl_2021_56_puma10.zip", 200),
+    ("TIGER2022/PUMA/tl_2022_56_puma20.zip", 200),
+    ("TIGER2023/PUMA/tl_2023_56_puma20.zip", 200),
+    ("TIGER2024/PUMA20/tl_2024_56_puma20.zip", 200),
+    ("TIGER2025/PUMA20/tl_2025_56_puma20.zip", 200),
 ]
+
+# PUMA geography: 2010 PUMAs in ACS releases through 2021, 2020 PUMAs from 2022
+# (PLAN_ROUND_10 section 3). PUMAs are fixed for a decade, so the last cb file
+# of each set (2019 for puma10, 2020 for puma20) serves later releases.
+FIRST_PUMA20_ACS_YEAR = 2022
+FIRST_TIGER_PUMA_YEAR = 2012
+CB_PUMA10_LAST_YEAR = 2019
+CB_PUMA20_YEAR = 2020
 
 # Equal-area projections by region.
 CRS_CONUS = "EPSG:5070"  # NAD83 / Conus Albers
@@ -169,6 +203,12 @@ def _zcta_name(year: int, detail: str) -> str:
     return "zcta510" if year < 2020 else "zcta520"
 
 
+def _puma_name(year: int, detail: str) -> str:
+    if detail == "cb":
+        return "puma20" if year >= CB_PUMA20_YEAR else "puma10"
+    return "puma20" if year >= FIRST_PUMA20_ACS_YEAR else "puma10"
+
+
 def boundary_vintage(acs_year: int, level: str, detail: str = "cb") -> int:
     """Boundary file year that matches an ACS 5-year release.
 
@@ -185,11 +225,15 @@ def boundary_vintage(acs_year: int, level: str, detail: str = "cb") -> int:
     first = FIRST_CB_YEAR if detail == "cb" else FIRST_TIGER_YEAR
     if lvl == "zcta" and detail == "tiger":
         first = 2012
+    if lvl == "puma" and detail == "tiger":
+        first = FIRST_TIGER_PUMA_YEAR
     if year < first:
         hint = " (use detail='tiger' for 2011-2012)" if detail == "cb" and year >= FIRST_TIGER_YEAR else ""
         raise ValueError(f"no {detail} {lvl} boundary file for ACS {year}; earliest is {first}{hint}")
     if lvl == "zcta" and detail == "cb" and year >= CB_ZCTA_DECADE_YEAR:
         return CB_ZCTA_DECADE_YEAR
+    if lvl == "puma" and detail == "cb":
+        return CB_PUMA20_YEAR if year >= FIRST_PUMA20_ACS_YEAR else min(year, CB_PUMA10_LAST_YEAR)
     return year
 
 
@@ -254,6 +298,11 @@ def boundary_url(level: str, year: int, state: Optional[Union[str, int]] = None,
         if year < FIRST_CB_YEAR:
             raise ValueError(f"cartographic boundary files start in {FIRST_CB_YEAR}")
         name = _zcta_name(year, detail) if lvl == "zcta" else spec["cb"]
+        if lvl == "puma":
+            if year > CB_PUMA20_YEAR:
+                raise ValueError(f"no cb PUMA file for {year}; use boundary_vintage (2019 for 2010 PUMAs, "
+                                 f"{CB_PUMA20_YEAR} for 2020 PUMAs) or detail='tiger'")
+            name = _puma_name(year, detail)
         if lvl == "zcta" and year > CB_ZCTA_DECADE_YEAR:
             raise ValueError(f"no cb ZCTA file for {year}; use {CB_ZCTA_DECADE_YEAR} "
                              "(boundary_vintage) or detail='tiger'")
@@ -277,6 +326,11 @@ def boundary_url(level: str, year: int, state: Optional[Union[str, int]] = None,
     if lvl == "zcta":
         name = _zcta_name(year, detail)
         tdir = "ZCTA5" if year < 2020 else "ZCTA520"
+    elif lvl == "puma":
+        if year < FIRST_TIGER_PUMA_YEAR:
+            raise ValueError(f"TIGER/Line PUMA files are supported from {FIRST_TIGER_PUMA_YEAR}")
+        name = _puma_name(year, detail)
+        tdir = "PUMA20" if year >= 2024 else "PUMA"
     else:
         name, tdir = spec["tiger"], spec["tiger_dir"]
     return BOUNDARY_SOURCES["tiger"]["url"].format(year=year, dir=tdir, area=area, name=name)

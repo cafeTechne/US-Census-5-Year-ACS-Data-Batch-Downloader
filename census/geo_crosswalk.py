@@ -52,6 +52,13 @@ housing-unit weights for household and housing tables, population weights
 otherwise). Other crosswalks (e.g. NHGIS) can be supplied with
 :func:`load_weight_file`.
 
+:func:`zcta_crosswalk` and :func:`place_crosswalk` build 2010 <-> 2020 ZCTA
+and place weights the same way from block assignments (Census block
+assignment files for places; the 2020 ZCTA-to-block relationship file and the
+TIGER/Line 2010 faces for ZCTAs); see :mod:`census.block_weights`. Their
+weights can sum to less than 1 where population moved outside every target
+area, and ``target_coverage`` flags targets partly built from no source area.
+
 Apportioned estimate and MOE (method ``apportioned``):
 
     X_t   = sum_s w(s, t) X_s
@@ -442,6 +449,50 @@ def _block_crosswalk(
         source=cw.attrs.get("source", {}),
     )
     return out
+
+
+def _area_crosswalk(geography: str, direction: str, weight: str, states: Optional[Sequence[str]]) -> pd.DataFrame:
+    from . import block_weights as bw
+
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction must be one of {DIRECTIONS}")
+    if weight not in BLOCK_WEIGHT_TYPES + (WEIGHT_LAND,):
+        raise ValueError(f"weight must be one of {BLOCK_WEIGHT_TYPES + (WEIGHT_LAND,)}")
+    cw = bw.area_weights(geography, states, direction, weight, on_error="raise")
+    cols = CROSSWALK_COLUMNS + ["part_area", "target_coverage"]
+    out = cw[cols].sort_values(["source_geoid", "target_geoid"]).reset_index(drop=True)
+    out.attrs.update(cw.attrs)
+    return out
+
+
+def zcta_crosswalk(
+    direction: str = "2010_to_2020",
+    weight: str = WEIGHT_POPULATION,
+    states: Optional[Sequence[str]] = None,
+) -> pd.DataFrame:
+    """2010 ZCTA (ACS 2011-2019 releases) <-> 2020 ZCTA (ACS 2020+) weights
+    from census blocks, for ``states`` (default all 52; downloads and caches).
+
+    Columns ``source_geoid, target_geoid, weight, part_area, target_coverage``;
+    5-digit ZCTA GEOIDs (keep leading zeros). Use with :func:`apportion`.
+    """
+    return _area_crosswalk("zcta", direction, weight, states)
+
+
+def place_crosswalk(
+    direction: str = "2010_to_2020",
+    weight: str = WEIGHT_POPULATION,
+    states: Optional[Sequence[str]] = None,
+) -> pd.DataFrame:
+    """2010-census places <-> 2020-census places (incorporated places and CDPs),
+    7-digit GEOIDs (state + PLACEFP), from the Census block assignment files.
+
+    Place boundaries change between censuses (annexations, new CDPs); weights
+    of a source sum to less than 1 when part of its population is now outside
+    every place, and ``target_coverage`` < 1 marks places that grew into
+    territory no source place covered.
+    """
+    return _area_crosswalk("place", direction, weight, states)
 
 
 def load_weight_file(
@@ -1164,7 +1215,7 @@ def _restore_dtypes(out: pd.DataFrame, like: pd.DataFrame) -> pd.DataFrame:
     for col in out.columns:
         if col in like.columns and pd.api.types.is_numeric_dtype(like[col]) and not pd.api.types.is_numeric_dtype(out[col]):
             out[col] = pd.to_numeric(out[col], errors="coerce")
-        elif col in like.columns and like[col].dtype == object:
+        elif col in like.columns and (pd.api.types.is_object_dtype(like[col]) or pd.api.types.is_string_dtype(like[col])):
             out[col] = out[col].fillna("") if not pd.api.types.is_numeric_dtype(out[col]) else out[col]
     return out
 

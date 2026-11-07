@@ -1,0 +1,14 @@
+{
+  "description": "Real ACS 2024 1-year PUMS person records for one Wyoming PUMA, subset of columns",
+  "source_url": "https://www2.census.gov/programs-surveys/acs/data/pums/2024/1-Year/csv_pwy.zip",
+  "source_sha256": "abaa0963ea732336b84546ba7efb4a922e37c89ca8d04a35a673f7865b589132",
+  "subset": "PUMA == '00100' (1281 of 6199 records); columns ['SERIALNO', 'SPORDER', 'STATE', 'PUMA', 'AGEP', 'SEX', 'SCHL', 'PINCP', 'WAGP', 'ESR', 'RELSHIPP', 'PWGTP', 'PWGTP1', 'PWGTP2', 'PWGTP3', 'PWGTP4', 'PWGTP5', 'PWGTP6', 'PWGTP7', 'PWGTP8', 'PWGTP9', 'PWGTP10', 'PWGTP11', 'PWGTP12', 'PWGTP13', 'PWGTP14', 'PWGTP15', 'PWGTP16', 'PWGTP17', 'PWGTP18', 'PWGTP19', 'PWGTP20', 'PWGTP21', 'PWGTP22', 'PWGTP23', 'PWGTP24', 'PWGTP25', 'PWGTP26', 'PWGTP27', 'PWGTP28', 'PWGTP29', 'PWGTP30', 'PWGTP31', 'PWGTP32', 'PWGTP33', 'PWGTP34', 'PWGTP35', 'PWGTP36', 'PWGTP37', 'PWGTP38', 'PWGTP39', 'PWGTP40', 'PWGTP41', 'PWGTP42', 'PWGTP43', 'PWGTP44', 'PWGTP45', 'PWGTP46', 'PWGTP47', 'PWGTP48', 'PWGTP49', 'PWGTP50', 'PWGTP51', 'PWGTP52', 'PWGTP53', 'PWGTP54', 'PWGTP55', 'PWGTP56', 'PWGTP57', 'PWGTP58', 'PWGTP59', 'PWGTP60', 'PWGTP61', 'PWGTP62', 'PWGTP63', 'PWGTP64', 'PWGTP65', 'PWGTP66', 'PWGTP67', 'PWGTP68', 'PWGTP69', 'PWGTP70', 'PWGTP71', 'PWGTP72', 'PWGTP73', 'PWGTP74', 'PWGTP75', 'PWGTP76', 'PWGTP77', 'PWGTP78', 'PWGTP79', 'PWGTP80']",
+  "files": {
+    "psam_p56_2024_1yr_subset.csv.gz": "e75d9719d637af2189ef212c4ddfd51a26c585f3c79193369451c4fb6a02a636",
+    "PUMS_Data_Dictionary_2024_excerpt.csv": "4252a159f6ed93e38f30db593cfbaecb9ba0416fbc05dd0437bb5f56530354b3"
+  },
+  "dictionary_source_url": "https://www2.census.gov/programs-surveys/acs/tech_docs/pums/data_dict/PUMS_Data_Dictionary_2024.csv",
+  "dictionary_source_sha256": "cd562a3719c6cdf79736bd9cfbacf8c20e650d641c62abd7e67fd131da036e18",
+  "dictionary_excerpt": "NAME/VAL rows for RT, SEX, AGEP, SCHL, TEN",
+  "created": "2026-11-03"
+}

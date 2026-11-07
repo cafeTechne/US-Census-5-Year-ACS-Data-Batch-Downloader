@@ -191,6 +191,12 @@ from census.sae_spatial import spatial_fay_herriot
 from census.block_weights import tract_weights
 from census.custom_areas import aggregate_custom_areas, allocate_units, read_areas
 from census.errata import errata_for, errata_summary
+from census.pums import crosstab, fetch_pums, pums_regression, read_pums_csv, tabulate
+from census.multilevel import fit_multilevel
+from census.did import difference_in_differences
+from census.rpp import adjust_for_place, adjust_for_place_and_time
+from census.web_maps import web_choropleth
+from census.api import PRODUCTS, dataset_for_product, dataset_product
 
 __all__ = [
     # api
@@ -414,4 +420,18 @@ __all__ = [
     "read_areas",
     "errata_for",
     "errata_summary",
+    # Round 10: microdata, 1-year, designs, places
+    "crosstab",
+    "fetch_pums",
+    "pums_regression",
+    "read_pums_csv",
+    "tabulate",
+    "fit_multilevel",
+    "difference_in_differences",
+    "adjust_for_place",
+    "adjust_for_place_and_time",
+    "web_choropleth",
+    "PRODUCTS",
+    "dataset_for_product",
+    "dataset_product",
 ]

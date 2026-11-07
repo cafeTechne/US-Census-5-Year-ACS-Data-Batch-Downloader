@@ -346,10 +346,10 @@ def cmd_validate_census(args: argparse.Namespace) -> int:
 
 def cmd_tool(args: argparse.Namespace) -> int:
     """Run any shared workflow tool by name with JSON arguments."""
-    from census import workflows_geo, workflows_inference
+    from census import workflows_geo, workflows_inference, workflows_microdata
 
-    fn = (getattr(workflows_geo, args.name, None) or getattr(workflows_inference, args.name, None)
-          or getattr(workflows, args.name, None))
+    fn = (getattr(workflows_microdata, args.name, None) or getattr(workflows_geo, args.name, None)
+          or getattr(workflows_inference, args.name, None) or getattr(workflows, args.name, None))
     if fn is None or args.name.startswith("_") or not callable(fn):
         return _emit(errors.error_result(errors.INVALID_INPUT, f"Unknown tool '{args.name}'."), args.json)
     try:

@@ -26,7 +26,7 @@ def default_metadata_file(name: str, dataset: str = "acs5", year: Optional[int] 
     Defaults to the latest archived vintage of the dataset.
     """
     year = year or latest_vintage(dataset)
-    return os.path.join(archive_dir(), dataset, str(year), f"{name}.gz")
+    return os.path.join(archive_dir(), *dataset.split("/"), str(year), f"{name}.gz")
 
 VARIABLE_DEFINITIONS: Dict[str, str] = {}
 

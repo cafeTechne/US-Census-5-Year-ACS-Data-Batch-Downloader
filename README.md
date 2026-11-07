@@ -8,7 +8,7 @@ Multi-year panels are built from **concepts**, not raw variable codes. ACS codes
 
 | Interface | Entry point | Intended user |
 | :--- | :--- | :--- |
-| MCP server | `mcp_server.py` (51 tools; `--profile core` gives 14 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
+| MCP server | `mcp_server.py` (57 tools; `--profile core` gives 14 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
 | Command line | `python -m census <command> --json` | Agents and scripts without MCP |
 | Python library | `census` package (`plan_extraction`, `run_batch`) | Notebooks, pipelines |
 | Desktop GUI | `acs_downloader.py` (Tkinter) | Legacy point-and-click use; maintenance mode |
@@ -235,6 +235,18 @@ Built on GeoPandas, Shapely (GEOS), pyogrio (GDAL), pyproj, and PySAL. Outputs a
 | Population-weighted tract crosswalks | `census.block_weights`, `harmonize_panel(weight="auto")` | Decennial block weights; Delaware test: mean error 444 vs 624 people with land-area weights |
 | Block groups and custom polygons | `geo_level="block group"`, `census.custom_areas` / `custom_area_mapping` | Area or block-population allocation |
 | ACS errata and user notes | `census.errata.errata_for`; in every extraction plan | 258 notes from census.gov with sources |
+
+## Microdata, 1-year estimates, and research designs
+
+| Capability | Function / tool | Validation |
+| :--- | :--- | :--- |
+| PUMS custom tabulations (count, mean, proportion, median, ratio, crosstabs) | `census.pums.tabulate` / `pums_tabulate` | Reproduces all 32 Census PUMS verification estimates and SEs (Wyoming, 2024 1-year and 2020–2024 5-year) |
+| PUMS regression with replicate weights | `census.pums.pums_regression` / `pums_regression` | Design-based SEs from the 80 replicate weights |
+| ACS 1-year estimates | `product="1-year"` in `plan_extraction`, `batch_download`, `run_batch` | Areas of 65,000+ only (others reported); 2020 skipped (no standard release); 1-year vs 5-year comparisons refused |
+| Multilevel models | `census.multilevel.fit_multilevel` / `multilevel_model` | Kenward–Roger intervals; coverage 0.89; reproduces the statsmodels `dietox` reference |
+| Difference-in-differences | `census.did.difference_in_differences` | Non-overlapping periods only; coverage 0.90–0.91; reproduces Card and Krueger (1994) |
+| Cost of living between places | `census.rpp.adjust_for_place` / `adjust_for_place` | BEA Regional Price Parities; reproduces BEA real personal income for all states (2008); never applied by default |
+| Interactive maps | `census.web_maps.web_choropleth` / `make_web_map` | Self-contained HTML, no external requests |
 
 ## Advisories and known limitations
 

@@ -1,0 +1,59 @@
+{
+  "description": "Frozen inputs to reproduce Census PUMS verification estimates for Wyoming (56). Person and housing records collapsed to cells with summed full and replicate weights (counts are linear in the weights, so cell sums give identical count estimates and SEs). Recodes: AGEP -> lower bound of the published age group (0,5,10,15,20,25,35,45,55,60,65,75,85); RELSHIPP 20-36 -> 20 (37, 38 kept). n_records is the number of PUMS records in each cell.",
+  "releases": {
+    "2024_1yr": {
+      "release": "ACS 2024 1-year PUMS",
+      "verification_url": "https://www2.census.gov/programs-surveys/acs/tech_docs/pums/estimates/pums_estimates_24.csv",
+      "verification_sha256": "cc27cc9a250802b173a4b3d0c53da6504881291779d9ccb1409b37f6a0922ae9",
+      "person_url": "https://www2.census.gov/programs-surveys/acs/data/pums/2024/1-Year/csv_pwy.zip",
+      "person_sha256": "abaa0963ea732336b84546ba7efb4a922e37c89ca8d04a35a673f7865b589132",
+      "housing_url": "https://www2.census.gov/programs-surveys/acs/data/pums/2024/1-Year/csv_hwy.zip",
+      "housing_sha256": "6f2a3305f3eb6d08e29dab1fec89e8c88a19567ca9adfd765dd51512c7500df0",
+      "records": {
+        "person": 6199,
+        "housing": 3024
+      },
+      "reproduction_from_records": {
+        "characteristics": 32,
+        "compared": 32,
+        "matched": 32,
+        "unmapped": [],
+        "max_abs_error_estimate": 0.0,
+        "max_abs_error_se": 0.4886215122385238,
+        "max_abs_error_moe": 0.49129191931479
+      },
+      "files": {
+        "person_cells_2024_1yr.csv": "2b33f2ba12c78934d367e46a610e07f0db09d2357478bfe4126bfe6218ec252f",
+        "housing_cells_2024_1yr.csv": "639a163c0919f6b068c16af7e6ab7261a0f525e29fa8132b1bfd1562d4bacb4e",
+        "published_pums_estimates_24.csv": "e549bb7e52986fc7f52d35f113c45e2c97c2867197c0a574dfa1b0d2aaf53830"
+      }
+    },
+    "2020_2024_5yr": {
+      "release": "ACS 2020-2024 5-year PUMS",
+      "verification_url": "https://www2.census.gov/programs-surveys/acs/tech_docs/pums/estimates/pums_estimates_20_24.csv",
+      "verification_sha256": "0151cb991f095a14eab367e0cd1c02f27dfca56b2bdcc33d71ae907eba065639",
+      "person_url": "https://www2.census.gov/programs-surveys/acs/data/pums/2024/5-Year/csv_pwy.zip",
+      "person_sha256": "e80900d6826c8fef4c6f7230f3c967457aa86f06e750f050d8cf406888d19b73",
+      "housing_url": "https://www2.census.gov/programs-surveys/acs/data/pums/2024/5-Year/csv_hwy.zip",
+      "housing_sha256": "237dfb058226c66f8dbf9efabadda1290aa69e3951e8198177be39fef608a815",
+      "records": {
+        "person": 29297,
+        "housing": 14599
+      },
+      "reproduction_from_records": {
+        "characteristics": 32,
+        "compared": 32,
+        "matched": 32,
+        "unmapped": [],
+        "max_abs_error_estimate": 0.0,
+        "max_abs_error_se": 0.4975197224895851,
+        "max_abs_error_moe": 0.4743284139881325
+      },
+      "files": {
+        "person_cells_2020_2024_5yr.csv": "37f1f1640b70a977f12f7debf4e2306f1afcadfe7689316cec3a0852155dc648",
+        "housing_cells_2020_2024_5yr.csv": "b7453112823d33350848117c5d796756e45d463a8c698c8ebc86459ddc1843c3",
+        "published_pums_estimates_20_24.csv": "033b6e8454c26b942e6f843f3d4601d948ba772e34a81f61b79201369b0a8bb6"
+      }
+    }
+  }
+}

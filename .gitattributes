@@ -10,3 +10,5 @@ tests/fixtures/** -text
 *.zip binary
 data/*.json -text
 data/*.csv -text
+data/price_parities/*.csv -text
+data/price_parities/*.json -text

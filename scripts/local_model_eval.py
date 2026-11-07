@@ -9,7 +9,13 @@ answers are computed by calling the library directly.
 
     python scripts/local_model_eval.py --model qwen3:8b
     python scripts/local_model_eval.py --base-url http://localhost:1234/v1 --model <name>
+    python scripts/local_model_eval.py --model qwen3:8b llama3.1:8b   # several models, one report
     python scripts/local_model_eval.py --offline-check   # verify expectations only
+
+Map and spatial tasks (Round 10 F1) use the offline DC tract boundary fixture
+(``tests/fixtures/geo``, passed to the server as ``CENSUS_GEO_DIR``) and a
+synthetic frame written to ``.cache/local_model_eval/``; the spatial task runs
+against the ``core_spatial`` profile (core + ``spatial_autocorrelation``).
 
 Writes docs/audits/local_model_eval.md (or --out). Not part of CI.
 """
@@ -28,6 +34,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+FIXTURE_GEO = os.path.join(ROOT, "tests", "fixtures", "geo")
+EVAL_DIR = os.path.join(ROOT, ".cache", "local_model_eval")
 
 SYSTEM_PROMPT = (
     "You are a research assistant using US Census ACS tools. Use the tools to compute "
@@ -60,6 +68,33 @@ class Task:
     check_answer: Callable[[str], bool]
     expected: str
     offline: Callable[[], bool] = lambda: True
+    profile: Optional[str] = None  # None: the --profile argument
+
+
+def _geo_fixture() -> str:
+    """DC tract frame (ACS 2023 boundaries from the offline fixture) with a
+    north-south gradient, so Moran's I is clearly positive. Deterministic."""
+    import numpy as np
+    import pandas as pd
+
+    os.environ.setdefault("CENSUS_GEO_DIR", FIXTURE_GEO)
+    from census import boundaries
+
+    b = boundaries.get_boundaries("tract", 2023, state="11")
+    c = b.geometry.to_crs(5070).centroid
+    rng = np.random.default_rng(10)
+    north = (c.y - c.y.min()) / (c.y.max() - c.y.min())
+    rate = 8 + 20 * north.to_numpy() + rng.normal(0, 3, len(b))
+    df = pd.DataFrame({"GEOID": b["GEOID"].astype(str), "poverty_rate": rate.round(1),
+                       "poverty_rate_se": (rate * rng.uniform(0.08, 0.35, len(b))).round(2)})
+    os.makedirs(EVAL_DIR, exist_ok=True)
+    path = os.path.join(EVAL_DIR, "dc_tracts_2023.csv").replace("\\", "/")
+    df.to_csv(path, index=False)
+    return path
+
+
+def _same_path(a: Any, b: str) -> bool:
+    return os.path.normcase(os.path.abspath(str(a or ""))) == os.path.normcase(os.path.abspath(b))
 
 
 def _tasks() -> List[Task]:
@@ -73,6 +108,21 @@ def _tasks() -> List[Task]:
 
     def lower(t: str) -> str:
         return t.lower()
+
+    from census import workflows_geo
+
+    geo = _geo_fixture()
+    map_dir = os.path.join(EVAL_DIR, "expected_map")
+    expected_map = workflows_geo.make_map(geo, "poverty_rate", "tract", 2023, se_col="poverty_rate_se",
+                                          output_dir=map_dir)
+    sep_match = re.search(r"class separability (\d+(?:\.\d+)?)%", expected_map.get("caption", ""))
+    separability = float(sep_match.group(1)) if sep_match else float("nan")
+    moran = workflows_geo.spatial_autocorrelation(geo, "poverty_rate", "tract", 2023)
+    moran_i = float(moran["global"]["I"]) if moran.get("success") else float("nan")
+
+    def geo_args(a: Dict[str, Any]) -> bool:
+        return (_same_path(a.get("input_path"), geo) and a.get("column") == "poverty_rate"
+                and str(a.get("level", "")).lower() == "tract" and int(a.get("year", 0)) == 2023)
 
     return [
         Task(
@@ -145,6 +195,30 @@ def _tasks() -> List[Task]:
             lambda t: "overlap" in lower(t) and "trend_test" in lower(t),
             "tract_trend recipe (non-overlapping releases, trend_test)",
         ),
+        Task(
+            "map_with_reliability",
+            f"Make a map of poverty_rate for Washington DC census tracts (ACS 2023) from the file {geo}. "
+            "Standard errors are in the column poverty_rate_se. Report the class separability.",
+            "make_map",
+            lambda a: geo_args(a) and a.get("se_col") == "poverty_rate_se"
+            and str(a.get("kind", "estimate")) == "estimate",
+            lambda t: any(_has_number(m.group(0), separability, 0.51)
+                          for m in re.finditer(r".{0,60}separab.{0,60}", lower(t))),
+            f"map written; class separability {separability:g}%",
+            lambda: bool(expected_map.get("success")) and separability == separability,
+        ),
+        Task(
+            "spatial_clustering",
+            f"Is poverty_rate spatially clustered across Washington DC census tracts (ACS 2023)? "
+            f"The data are in {geo}. Give Moran's I and say whether it is significant.",
+            "spatial_autocorrelation",
+            geo_args,
+            lambda t: _has_number(t, moran_i, 0.006) and "significant" in lower(t)
+            and not re.search(r"(not|no)[^.]{0,20}significant", lower(t)),
+            f"Moran's I {moran_i:.3f}, significant (p_sim={moran.get('global', {}).get('p_sim')})",
+            lambda: moran_i > 0.3 and moran["global"]["p_sim"] < 0.01,
+            profile="core_spatial",
+        ),
     ]
 
 
@@ -212,60 +286,82 @@ async def _evaluate(args: argparse.Namespace, tasks: List[Task]) -> List[Dict[st
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    params = StdioServerParameters(command=sys.executable,
-                                   args=[os.path.join(ROOT, "mcp_server.py"), "--profile", args.profile],
-                                   cwd=ROOT)
-    results = []
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            listed = (await session.list_tools()).tools
-            tools = [{"type": "function", "function": {"name": t.name, "description": t.description or "",
-                                                       "parameters": t.inputSchema}} for t in listed]
-            print(f"{len(tools)} tools from profile '{args.profile}'", flush=True)
-            for task in tasks:
-                if args.only and task.name not in args.only:
-                    continue
-                res = await _run_task(session, tools, task, args)
-                print(f"{task.name}: {'PASS' if res['passed'] else 'FAIL'} ({res['seconds']}s)", flush=True)
-                results.append(res)
-    return results
+    env = {**os.environ, "CENSUS_GEO_DIR": os.environ.get("CENSUS_GEO_DIR", FIXTURE_GEO)}
+    selected = [t for t in tasks if not args.only or t.name in args.only]
+    by_name: Dict[str, Dict[str, Any]] = {}
+    for profile in dict.fromkeys(t.profile or args.profile for t in selected):
+        params = StdioServerParameters(command=sys.executable,
+                                       args=[os.path.join(ROOT, "mcp_server.py"), "--profile", profile],
+                                       cwd=ROOT, env=env)
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                listed = (await session.list_tools()).tools
+                tools = [{"type": "function", "function": {"name": t.name, "description": t.description or "",
+                                                           "parameters": t.inputSchema}} for t in listed]
+                print(f"[{args.model}] {len(tools)} tools from profile '{profile}'", flush=True)
+                for task in selected:
+                    if (task.profile or args.profile) != profile:
+                        continue
+                    res = await _run_task(session, tools, task, args)
+                    res.update(profile=profile, n_tools=len(tools))
+                    print(f"[{args.model}] {task.name}: {'PASS' if res['passed'] else 'FAIL'} "
+                          f"({res['seconds']}s)", flush=True)
+                    by_name[task.name] = res
+    return [by_name[t.name] for t in selected if t.name in by_name]
 
 
-def _write_report(path: str, args: argparse.Namespace, results: List[Dict[str, Any]], n_tools: int) -> None:
+def _write_report(path: str, args: argparse.Namespace, runs: Dict[str, List[Dict[str, Any]]],
+                  n_tools: Dict[str, int]) -> None:
     yes = lambda b: "yes" if b else "no"  # noqa: E731
-    passed = sum(r["passed"] for r in results)
+    models = list(runs)
+    profiles = ", ".join(f"`{p}` ({n} tools)" for p, n in n_tools.items())
     lines = [
-        "# Local-model evaluation (PLAN_ROUND_8 J4)",
+        "# Local-model evaluation (PLAN_ROUND_8 J4, Round 10 F1)",
         "",
         f"- Generated: {time.strftime('%Y-%m-%d %H:%M')}",
-        f"- Model: `{args.model}` via `{args.base_url}` (temperature 0"
+        f"- Models: {', '.join(f'`{m}`' for m in models)} via `{args.base_url}` (temperature 0"
         + (", Qwen `/no_think`" if args.no_think else "") + ")",
-        f"- MCP server: `python mcp_server.py --profile {args.profile}` ({n_tools} tools)",
+        f"- MCP server: `python mcp_server.py --profile <profile>`: {profiles}",
         f"- Hardware: {platform.processor() or platform.machine()}, {os.cpu_count()} logical CPUs, "
         f"{args.hardware_note}",
-        f"- Result: **{passed}/{len(results)} tasks passed** (pass = right tool, right arguments, "
-        "and a final answer containing the expected result)",
+        "- Result: " + "; ".join(f"`{m}` **{sum(r['passed'] for r in rs)}/{len(rs)}**" for m, rs in runs.items())
+        + " (pass = right tool, right arguments, and a final answer containing the expected result)",
         "",
-        "Tasks need no Census API calls; expected answers come from calling the library directly.",
+        "Tasks need no Census API calls or network; expected answers come from calling the library "
+        "directly. Map and spatial tasks use the offline DC tract boundary fixture.",
         "",
-        "| Task | Tool | Args | Answer | Pass | Time (s) | Expected |",
-        "| :--- | :---: | :---: | :---: | :---: | ---: | :--- |",
+        "Cells read PASS/FAIL then tool/args/answer correctness.",
+        "",
+        "| Task | Profile | Expected | " + " | ".join(f"{m} | {m} (s)" for m in models) + " |",
+        "| :--- | :--- | :--- | " + " | ".join(":--- | ---:" for _ in models) + " |",
     ]
-    for r in results:
-        lines.append(f"| {r['task']} | {yes(r['tool_ok'])} | {yes(r['args_ok'])} | {yes(r['answer_ok'])} | "
-                     f"**{'PASS' if r['passed'] else 'FAIL'}** | {r['seconds']} | {r['expected']} |")
+    names = list(dict.fromkeys(r["task"] for rs in runs.values() for r in rs))
+    for name in names:
+        row = {m: next((r for r in rs if r["task"] == name), None) for m, rs in runs.items()}
+        first = next(r for r in row.values() if r)
+        cells = []
+        for m in models:
+            r = row[m]
+            if r is None:
+                cells.append("- | -")
+                continue
+            mark = "**PASS**" if r["passed"] else "FAIL"
+            cells.append(f"{mark} {yes(r['tool_ok'])}/{yes(r['args_ok'])}/{yes(r['answer_ok'])} | {r['seconds']}")
+        lines.append(f"| {name} | {first.get('profile', args.profile)} | {first['expected']} | "
+                     + " | ".join(cells) + " |")
     lines += ["", "## Transcripts", ""]
-    for r in results:
-        lines.append(f"### {r['task']}")
-        lines.append("")
-        for c in r["calls"]:
-            lines.append(f"- call `{c['tool']}` `{json.dumps(c['args'])}`")
-        if r["error"]:
-            lines.append(f"- error: `{r['error']}`")
-        answer = (r["answer"] or "(no final answer)").replace("\n", " ")
-        lines.append(f"- final answer: {answer[:600]}")
-        lines.append("")
+    for m, rs in runs.items():
+        for r in rs:
+            lines.append(f"### {m}: {r['task']}")
+            lines.append("")
+            for c in r["calls"]:
+                lines.append(f"- call `{c['tool']}` `{json.dumps(c['args'])}`")
+            if r["error"]:
+                lines.append(f"- error: `{r['error']}`")
+            answer = (r["answer"] or "(no final answer)").replace(chr(10), " ")
+            lines.append(f"- final answer: {answer[:600]}")
+            lines.append("")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -274,7 +370,8 @@ def _write_report(path: str, args: argparse.Namespace, results: List[Dict[str, A
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base-url", default=os.environ.get("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1"))
-    ap.add_argument("--model", default=os.environ.get("LOCAL_LLM_MODEL", "qwen3:8b"))
+    ap.add_argument("--model", nargs="+", default=[os.environ.get("LOCAL_LLM_MODEL", "qwen3:8b")],
+                    help="one or more model names (run one after another into one report)")
     ap.add_argument("--profile", default="core")
     ap.add_argument("--max-turns", type=int, default=5)
     ap.add_argument("--timeout", type=float, default=900.0, help="seconds per model request")
@@ -295,11 +392,20 @@ def main() -> int:
         print("offline expectations:", "OK" if not bad else f"FAILED {bad}")
         return 1 if bad else 0
 
-    results = asyncio.run(_evaluate(args, tasks))
+    models = list(args.model)
+    runs: Dict[str, List[Dict[str, Any]]] = {}
+    for model in models:
+        args.model = model
+        runs[model] = asyncio.run(_evaluate(args, tasks))
+        raw = os.path.join(EVAL_DIR, re.sub(r"[^A-Za-z0-9_.-]", "_", model) + ".json")
+        with open(raw, "w", encoding="utf-8") as f:
+            json.dump(runs[model], f, indent=1)  # raw results, kept if a later model fails
+    args.model = models
     import mcp_server as srv
 
-    n_tools = len(srv.server_for_profile(args.profile)._tool_manager.list_tools())
-    _write_report(args.out, args, results, n_tools)
+    n_tools = {p: len(srv.server_for_profile(p)._tool_manager.list_tools())
+               for p in dict.fromkeys(t.profile or args.profile for t in tasks)}
+    _write_report(args.out, args, runs, n_tools)
     print(f"Wrote {args.out}")
     return 0
 

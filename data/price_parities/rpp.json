@@ -1,0 +1,62 @@
+{
+  "name": "BEA Regional Price Parities",
+  "description": "Regional price parities (U.S. = 100) by state, state metropolitan and nonmetropolitan portion, and metropolitan statistical area; all items and four components",
+  "publisher": "U.S. Bureau of Economic Analysis, Regional Economic Accounts",
+  "documentation": "https://www.bea.gov/data/prices-inflation/regional-price-parities-state-and-metro-area",
+  "sources": {
+    "SARPP": {
+      "url": "https://apps.bea.gov/regional/zip/SARPP.zip",
+      "sha256": "38713c6224c4c26ae020ffecd4549b82dca84f43d34f93dfdb43f4070cf011da",
+      "file": "data/price_parities/source/SARPP.zip",
+      "bea_notes": [
+        "Note: See the included footnote file.",
+        "SARPP: Regional price parities by state",
+        "Last updated: February 19, 2026-- new statistics for 2024; revised statistics for 2008-2023.",
+        "U.S. Bureau of Economic Analysis"
+      ]
+    },
+    "PARPP": {
+      "url": "https://apps.bea.gov/regional/zip/PARPP.zip",
+      "sha256": "eb1378571316b22d5e7557b5565019cbe01fe1b5ea7dcdfcd979fc5751764f79",
+      "file": "data/price_parities/source/PARPP.zip",
+      "bea_notes": [
+        "Note: See the included footnote file.",
+        "PARPP: Regional price parities by portion",
+        "Last updated: February 19, 2026-- new statistics for 2024; revised statistics for 2008-2023.",
+        "U.S. Bureau of Economic Analysis"
+      ]
+    },
+    "MARPP": {
+      "url": "https://apps.bea.gov/regional/zip/MARPP.zip",
+      "sha256": "5dbf2e6ac2af222cc9abc205586c9b480344d89392752eb689c3ec823a34c83e",
+      "file": "data/price_parities/source/MARPP.zip",
+      "bea_notes": [
+        "Note: See the included footnote file.",
+        "MARPP: Regional price parities by MSA",
+        "Last updated: February 19, 2026-- new statistics for 2024; revised statistics for 2008-2023.",
+        "U.S. Bureau of Economic Analysis"
+      ]
+    }
+  },
+  "retrieved_at": "2026-11-03T16:52:19+00:00",
+  "method": "line codes 1-5 of SARPP, PARPP and MARPP copied as published (3 decimals); pce_price_index = SAIRPD line 1 for the United States (RPP = 100, so the U.S. implicit regional price deflator equals the national PCE price index, 2017=100)",
+  "msa_delineation": "OMB bulletin 23-01 (July 21, 2023)",
+  "nonmetro_note": "BEA nonmetropolitan portions include micropolitan counties",
+  "years": [
+    2008,
+    2024
+  ],
+  "counts": {
+    "msa": 387,
+    "state": 51,
+    "state_metro": 51,
+    "state_nonmetro": 51,
+    "us": 1,
+    "us_nonmetro": 1
+  },
+  "csv_sha256": {
+    "rpp.csv": "3e726a9d274636a2cce1301bac17000b66c71cb37090b9ac001c5c1082fd2dd9",
+    "pce_price_index.csv": "1d6c8e9e4bd5f60cf4cd21785c7b50558d398fb3ef5b527b12ce868c90e24b2f"
+  },
+  "estimation_error_note": "RPPs are estimates (CPI price quotes, ACS rents, hedonic models) with their own error, which BEA does not publish as standard errors; it is not in ACS MOEs."
+}

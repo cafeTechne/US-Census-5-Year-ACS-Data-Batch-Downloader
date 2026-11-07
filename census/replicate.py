@@ -540,9 +540,40 @@ VRE_TABLE_EXCLUSIONS: Dict[int, Dict[str, Tuple[str, ...]]] = {
 # fmt: on
 
 
-def vre_years() -> List[int]:
-    """Releases (ACS 5-year end years) with VRE tables in the registry."""
-    return sorted(VRE_LAYOUTS)
+# ACS 1-year: no variance replicate tables are published. Checked 2026-11-03:
+# every release directory under VRE_BASE_URL (2014-2024) holds only
+# ``data/5-year/`` and ``documentation/5-year/``, and the landing page
+# (VRE_LANDING_URL) lists 5-year tables only. 1-year sampling error must come
+# from the published MOEs (or PUMS replicate weights, census.pums).
+VRE_1YEAR_LAYOUTS: Dict[int, Dict[str, Any]] = {}
+VRE_1YEAR_CHECKED = {
+    "checked_on": "2026-11-03",
+    "sources": [VRE_LANDING_URL] + [f"{VRE_BASE_URL}/{y}/data/" for y in range(2014, 2025)],
+    "finding": "only 5-year/ subdirectories are published; no 1-year VRE tables",
+}
+VRE_PRODUCT_LAYOUTS: Dict[str, Dict[int, Dict[str, Any]]] = {
+    "5-year": VRE_LAYOUTS,
+    "1-year": VRE_1YEAR_LAYOUTS,
+}
+
+
+def vre_years(product: str = "5-year") -> List[int]:
+    """Releases (period end years) with VRE tables in the registry for a product."""
+    from census.api import normalize_product
+
+    return sorted(VRE_PRODUCT_LAYOUTS[normalize_product(product)])
+
+
+def check_vre_product(product: str) -> None:
+    """Raise ValueError for a product without published VRE tables (1-year)."""
+    from census.api import PRODUCT_1YR, normalize_product
+
+    if normalize_product(product) == PRODUCT_1YR and not VRE_1YEAR_LAYOUTS:
+        raise ValueError(
+            "The Census Bureau publishes variance replicate tables only for ACS 5-year "
+            f"releases ({VRE_LANDING_URL}); for 1-year estimates use the published MOEs "
+            "or PUMS replicate weights."
+        )
 
 
 def _check_year(year: int) -> Dict[str, Any]:
@@ -744,14 +775,22 @@ def vre_tables(
     return published
 
 
-def vre_availability(table: str, year: int, geo_level: str) -> Dict[str, Any]:
+def vre_availability(
+    table: str, year: int, geo_level: str, product: str = "5-year"
+) -> Dict[str, Any]:
     """Whether Census publishes a VRE file for (table, release, geography), and why.
 
     Offline: uses the registry (published table list plus the "Not Available at
     ... Summary Level" notes in the release's Table_and_Geo_List workbook).
+    ``product='1-year'`` is always unavailable (no 1-year VRE tables exist).
     """
     table = str(table).strip().upper()
     out: Dict[str, Any] = {"table": table, "year": int(year), "geo_level": geo_level}
+    try:
+        check_vre_product(product)
+    except ValueError as exc:
+        out.update(available=False, reason=str(exc), product="1-year")
+        return out
     layout = VRE_LAYOUTS.get(int(year))
     if layout is None:
         out.update(

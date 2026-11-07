@@ -204,11 +204,48 @@ def _aligned(data: pd.DataFrame, var: Optional[str], w, geoid_col: str) -> pd.Da
     return d
 
 
-def _replicate_matrix(replicates: pd.DataFrame, var: str, ids: Sequence[str], geoid_col: str) -> np.ndarray:
+def _release_year(data: pd.DataFrame) -> Optional[int]:
+    """The single release (``Year``) of an estimate frame, None when it has no
+    Year column; refuses frames that mix releases."""
+    if "Year" not in data.columns:
+        return None
+    years = pd.to_numeric(data["Year"], errors="coerce").dropna().unique()
+    if len(years) > 1:
+        raise ValueError(f"estimate frame mixes releases (Year {sorted(int(y) for y in years)}); "
+                         "subset it to one release")
+    return int(years[0]) if len(years) else None
+
+
+def _replicate_matrix(replicates: pd.DataFrame, var: str, ids: Sequence[str], geoid_col: str,
+                      year: Optional[int] = None) -> np.ndarray:
+    """(n, 80) replicate matrix for ``var`` in ``ids`` order.
+
+    Requires exactly one replicate row per area (PLAN_ROUND_11 C3/D3): with a
+    ``Year`` column the release ``year`` (the estimate frame's) is selected
+    first; replicates spanning several releases without a known year, or
+    duplicate area rows (even identical ones), are refused rather than resolved
+    by row order.
+    """
     sub = replicates[replicates["variable"] == var]
     if not len(sub):
         raise ValueError(f"no replicates for variable {var!r}")
-    sub = sub.assign(_gid=sub[geoid_col].astype(str)).drop_duplicates("_gid").set_index("_gid")
+    if "Year" in sub.columns:
+        yrs = pd.to_numeric(sub["Year"], errors="coerce")
+        if year is not None:
+            sub = sub[yrs == int(year)]
+            if not len(sub):
+                raise ValueError(f"no replicates for variable {var!r} in release {int(year)} "
+                                 f"(replicate releases: {sorted(int(y) for y in yrs.dropna().unique())})")
+        elif yrs.nunique(dropna=False) > 1:
+            raise ValueError(f"replicates for {var!r} span several releases "
+                             f"({sorted(int(y) for y in yrs.dropna().unique())}); give the estimate frame a "
+                             "Year column or subset the replicates to one release")
+    sub = sub.assign(_gid=sub[geoid_col].astype(str))
+    dup = sub["_gid"].duplicated(keep=False)
+    if dup.any():
+        raise ValueError(f"{int(sub.loc[dup, '_gid'].nunique())} area(s) have more than one replicate row for "
+                         f"{var!r}: {sorted(sub.loc[dup, '_gid'].unique())[:20]}; keep one row per area and release")
+    sub = sub.set_index("_gid")
     m = sub[REPLICATE_COLUMNS].reindex(list(ids)).to_numpy(float)
     bad = ~np.isfinite(m).all(axis=1)
     if bad.any():
@@ -303,7 +340,7 @@ def morans_i(
                     "seed": seed},
     )
     if replicates is not None and len(replicates):
-        R = _replicate_matrix(replicates, var, list(d.index), geoid_col)
+        R = _replicate_matrix(replicates, var, list(d.index), geoid_col, _release_year(data))
         weights.transform = "r"
         Ws = weights.sparse.tocsr()
         I0 = float(_moran_vector(y[:, None], Ws)[0])
@@ -367,7 +404,7 @@ def local_morans(
              f"{1 / (permutations + 1):.4g}) adjusted with '{correction}' across {len(y)} local tests",
              "islands (no neighbors) have Ii = 0 and are never significant"] if permutations else []
     if replicates is not None and len(replicates):
-        R = _replicate_matrix(replicates, var, list(d.index), geoid_col)
+        R = _replicate_matrix(replicates, var, list(d.index), geoid_col, _release_year(data))
         weights.transform = "r"
         Ws = weights.sparse.tocsr()
         Z = R - R.mean(axis=0, keepdims=True)
@@ -532,7 +569,8 @@ def spatial_regression(
         used = [v for v in formula_variables(formula, d) if v in set(replicates["variable"])]
         if not used:
             raise ValueError("no formula variable has replicates in the replicate frame")
-        mats = {v: _replicate_matrix(replicates, v, list(d.index), geoid_col) for v in used}
+        yr = _release_year(data)
+        mats = {v: _replicate_matrix(replicates, v, list(d.index), geoid_col, yr) for v in used}
         B, failed = [], 0
         for k in range(REPLICATE_COUNT):
             dd = d.copy()

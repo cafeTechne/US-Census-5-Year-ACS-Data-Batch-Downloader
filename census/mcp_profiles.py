@@ -7,6 +7,8 @@ better with about ten short, flat tools than with the full set, so:
 - ``core``: one tool per step of the standard workflow, with short
   descriptions (overrides below) and results that always carry ``summary`` and
   ``next_step`` (plus ``fix`` on failures).
+- ``core_spatial``: ``core`` plus ``spatial_autocorrelation``, styled like
+  ``core``; used by the local-model evaluation's spatial task (Round 10 F1).
 - ``review``: concordance and rule review tools only, for reviewer agents.
 - ``full``: every tool, descriptions unchanged (the default).
 
@@ -56,6 +58,10 @@ PROFILES: Dict[str, Optional[List[str]]] = {
     ],
     "full": None,
 }
+# core plus the global/local Moran's I tool (Round 10 F1 evaluation).
+PROFILES["core_spatial"] = list(PROFILES["core"]) + ["spatial_autocorrelation"]
+# Profiles built like core: short descriptions and guided results.
+CORE_STYLE_PROFILES = ("core", "core_spatial")
 
 # Core-profile parameters that are nested objects by necessity (J2 exceptions).
 NESTED_PARAM_EXCEPTIONS: Dict[str, List[str]] = {
@@ -152,6 +158,13 @@ DESCRIPTION_OVERRIDES: Dict[str, str] = {
         "year: ACS release. se_col or moe_col: marks unreliable areas. kind: estimate | uncertainty | significance.\n"
         "Example: make_map(input_path=\"frame.parquet\", column=\"poverty_rate\", level=\"county\", "
         "year=2023, se_col=\"poverty_rate_se\")"
+    ),
+    "spatial_autocorrelation": (
+        "Test whether one variable is spatially clustered: Moran's I with its p-value.\n"
+        "input_path: CSV/Parquet with GEOID. column: variable. level: tract | county | state | place.\n"
+        "year: ACS release. weights: queen | rook | knn. local: true adds LISA clusters.\n"
+        "Example: spatial_autocorrelation(input_path=\"frame.csv\", column=\"poverty_rate\", "
+        "level=\"tract\", year=2023)"
     ),
     "make_figure": (
         "Write a journal-ready figure (PDF, SVG, PNG) with values CSV and caption.\n"
@@ -290,11 +303,11 @@ def build_profile_server(base: Any, profile: str) -> Any:
 
     manager = base._tool_manager
     available = [t.name for t in manager.list_tools()]
-    instructions = CORE_INSTRUCTIONS if profile == "core" else REVIEW_INSTRUCTIONS
+    instructions = CORE_INSTRUCTIONS if profile in CORE_STYLE_PROFILES else REVIEW_INSTRUCTIONS
     server = FastMCP(f"{base.name} [{profile}]", instructions=instructions)
     for name in tools_for(profile, available):
         tool = manager.get_tool(name)
-        if profile == "core":
+        if profile in CORE_STYLE_PROFILES:
             fn = with_guidance(name, tool.fn)
             description = DESCRIPTION_OVERRIDES.get(name, tool.description)
         else:

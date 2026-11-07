@@ -37,3 +37,4 @@ docs/audits/*.csv
 !crosswalks/**/*.csv
 !data/geo_crosswalks/*.csv
 !tests/fixtures/**/*.csv
+!data/price_parities/*.csv
