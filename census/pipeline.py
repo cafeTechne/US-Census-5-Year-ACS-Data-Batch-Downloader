@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import subprocess
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
@@ -23,12 +23,25 @@ import pandas as pd
 
 from census import errors
 from census.api import (
+    ACS1_AREAS_URL,
+    ACS1_EXPERIMENTAL_URL,
+    ACS1_EXPERIMENTAL_YEAR,
+    ACS1_GEO_LEVELS,
+    ACS1_MIN_POPULATION,
     BLOCK_GROUP,
     BLOCK_GROUP_FIRST_YEAR,
+    COMPARING_ACS_URL,
+    GEO_LEVELS,
+    MIXED_PRODUCTS_MESSAGE,
+    PRODUCT_1YR,
+    PRODUCT_5YR,
     CensusAPIClient,
     DATASETS,
+    dataset_for_product,
+    dataset_product,
     infer_dataset,
     normalize_geo_level,
+    normalize_product,
 )
 from census.cache import get_default_cache
 from census.concordance import (
@@ -76,7 +89,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.9.1"
+PACKAGE_VERSION = "0.10.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
@@ -144,6 +157,13 @@ class ResearchOptions:
     concordance_mode: str = "fail"
     continuity_check: bool = True
     allow_unverified_concordance: bool = False
+    # ACS product: "5-year" (default) or "1-year" (acs1 datasets; areas of
+    # 65,000+ only; 1-year and 5-year estimates are never compared).
+    product: str = PRODUCT_5YR
+    # 1-year only: the 2020 1-year release is unavailable (Census published only
+    # experimental estimates, outside the API). True drops 2020 from the request
+    # with an advisory instead of refusing the plan.
+    allow_experimental_2020: bool = False
 
 
 @dataclass
@@ -581,8 +601,16 @@ def plan_extraction(
     dataset: Optional[str] = None,
     variables: Optional[Sequence[str]] = None,
     client: Optional[CensusAPIClient] = None,
+    product: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Dry run: validate, build the concordance, check continuity, count calls.
+
+    ``product`` ('5-year' default, or '1-year'; overrides ``options.product``)
+    selects the ACS release family; a generic ``dataset`` ('acs5', 'profile',
+    ...) is mapped to the product's endpoint, and an explicit 1-year dataset
+    ('acs1', 'acs1/subject', ...) implies '1-year'. 1-year plans probe which
+    requested areas each release publishes (one cached listing call per year
+    and state) and report unavailable ones under ``geography_availability``.
 
     Makes at most one national-level API call per year (for the continuity
     check; cached), and no data downloads. The returned dict is JSON-safe
@@ -601,9 +629,28 @@ def plan_extraction(
         return errors.error_result(errors.INVALID_INPUT, "No years requested.")
     if not entities:
         return errors.error_result(errors.INVALID_INPUT, "No geographic entities requested.")
-    dataset = dataset or infer_dataset(table_code)
+    explicit_product = product is not None or options.product != PRODUCT_5YR
+    try:
+        product = normalize_product(product if product is not None else options.product)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_INPUT, str(exc))
+    if dataset and dataset in DATASETS:
+        ds_product = dataset_product(dataset)
+        if ds_product != product:
+            if not explicit_product:
+                product = ds_product
+            elif ds_product == PRODUCT_5YR:
+                dataset = dataset_for_product(dataset, product)
+            else:
+                return errors.error_result(
+                    errors.INVALID_DATASET,
+                    f"Dataset '{dataset}' is {ds_product} but product='{product}' was requested. "
+                    + MIXED_PRODUCTS_MESSAGE,
+                )
+    dataset = dataset or infer_dataset(table_code, product)
     if dataset not in DATASETS:
         return errors.error_result(errors.INVALID_DATASET, f"Unsupported dataset '{dataset}'.")
+    options = replace(options, product=product)
     if options.concordance_mode not in CONCORDANCE_MODES:
         return errors.error_result(
             errors.INVALID_INPUT, f"concordance_mode must be one of {CONCORDANCE_MODES}."
@@ -615,8 +662,51 @@ def plan_extraction(
     if client is None:
         client = CensusAPIClient(cache=get_default_cache() if options.use_cache else None)
 
-    multi_year = len(years) > 1
     geo_level = entities[0].geo_level
+    excluded_years: List[int] = []
+    acs1_advisories: List[str] = []
+    if product == PRODUCT_1YR:
+        if normalize_geo_level(geo_level) not in ACS1_GEO_LEVELS:
+            return errors.error_result(
+                errors.INVALID_GEO_LEVEL,
+                f"ACS 1-year estimates are not published for '{geo_level}' (1-year levels here: "
+                f"{list(ACS1_GEO_LEVELS)}; areas of {ACS1_MIN_POPULATION:,}+ only, {ACS1_AREAS_URL}). "
+                "Use the 5-year product for small areas.",
+            )
+        if ACS1_EXPERIMENTAL_YEAR in years:
+            if not options.allow_experimental_2020:
+                return errors.error_result(
+                    errors.VINTAGE_UNAVAILABLE,
+                    "The 2020 ACS 1-year release is unavailable: because of COVID-19 data-collection "
+                    "disruptions Census published only experimental 2020 1-year estimates (different "
+                    f"weighting, not in the API; {ACS1_EXPERIMENTAL_URL}). Drop 2020, or pass "
+                    "allow_experimental_2020=True to skip it with an advisory.",
+                    unavailable_years=[ACS1_EXPERIMENTAL_YEAR],
+                )
+            years = [y for y in years if y != ACS1_EXPERIMENTAL_YEAR]
+            excluded_years = [ACS1_EXPERIMENTAL_YEAR]
+            acs1_advisories.append(
+                "EXPERIMENTAL 2020: the 2020 ACS 1-year standard release does not exist; Census "
+                "published experimental estimates (experimental weights, limited tables) only as "
+                f"downloadable files ({ACS1_EXPERIMENTAL_URL}), not through the API. 2020 is excluded "
+                "from this extraction; do not splice experimental tables into a 1-year series "
+                "without noting the method change."
+            )
+            if not years:
+                return errors.error_result(
+                    errors.VINTAGE_UNAVAILABLE,
+                    "Only 2020 was requested and the 2020 ACS 1-year release is unavailable "
+                    f"({ACS1_EXPERIMENTAL_URL}).",
+                    unavailable_years=[ACS1_EXPERIMENTAL_YEAR],
+                )
+        acs1_advisories.append(
+            f"ACS 1-year: published only for areas with {ACS1_MIN_POPULATION:,}+ population "
+            f"({ACS1_AREAS_URL}); 1-year periods do not overlap, so comparisons between releases "
+            "use no overlap adjustment; never compare these with 5-year estimates "
+            f"({COMPARING_ACS_URL})."
+        )
+
+    multi_year = len(years) > 1
     if options.harmonize_tracts_to is not None:
         if options.harmonize_tracts_to not in (2010, 2020):
             return errors.error_result(errors.INVALID_INPUT, "harmonize_tracts_to must be 2010 or 2020.")
@@ -701,6 +791,28 @@ def plan_extraction(
             "drift can block the run. Name the variables your analysis uses."
         )
 
+    advisories.extend(acs1_advisories)
+    geography_availability: Dict[str, Any] = {}
+    if product == PRODUCT_1YR:
+        geography_availability = probe_acs1_geographies(client, dataset, years, entities)
+        entities = geography_availability.pop("_entities")
+        if geography_availability["unavailable"] and not any(
+            e.applies(y) for e in entities for y in years
+        ):
+            return errors.error_result(
+                errors.INVALID_GEO_LEVEL,
+                "None of the requested areas is published in the ACS 1-year releases "
+                f"{years} (areas of {ACS1_MIN_POPULATION:,}+ only; {ACS1_AREAS_URL}). "
+                "Use the 5-year product.",
+                geography_availability=geography_availability,
+            )
+        if geography_availability["unavailable"]:
+            advisories.append(
+                f"{len(geography_availability['unavailable'])} requested area(s) are not published "
+                "in some or all 1-year releases (under 65,000 population); they are skipped for "
+                "those years. See geography_availability."
+            )
+
     block_group_availability: Dict[str, Any] = {}
     if geo_level == BLOCK_GROUP:
         block_group_availability = probe_block_group_availability(client, table_code, years, entities)
@@ -751,7 +863,9 @@ def plan_extraction(
         "success": True,
         "table_code": table_code,
         "dataset": dataset,
+        "product": product,
         "years": years,
+        "excluded_years": excluded_years,
         "geo_level": geo_level,
         "output_format": output_format,
         "concordance_mode": options.concordance_mode,
@@ -760,6 +874,7 @@ def plan_extraction(
         "request_targets": len(entities),
         "states_covered": _states_covered(entities),
         "block_group_availability": block_group_availability or None,
+        "geography_availability": geography_availability or None,
         "selected_concepts": len(selected),
         "selection": resolution,
         "concordance_summary": conc.summary(),
@@ -776,8 +891,82 @@ def plan_extraction(
             "passed": sum(1 for r in continuity_report.values() if r["passed"]),
         },
         "_concordance": conc,
+        "_entities": list(entities),
+        "_options": options,
         "_selected": selected,
         "_continuity": continuity_report,
+    }
+
+
+def _entity_codes(ent: Entity) -> Tuple[str, Optional[List[str]]]:
+    """(API key column, requested codes or None for a wildcard) for a 1-year probe."""
+    level = normalize_geo_level(ent.geo_level)
+    raw = {"county": ent.county_code, "place": ent.place_code, "msa": ent.msa_code}.get(level)
+    key = GEO_LEVELS[level][0]
+    if raw is None or str(raw).strip() in ("", "*"):
+        return key, None
+    return key, [c.strip() for c in str(raw).split(",") if c.strip()]
+
+
+def probe_acs1_geographies(
+    client: CensusAPIClient, dataset: str, years: Sequence[int], entities: Sequence[Entity]
+) -> Dict[str, Any]:
+    """Which requested areas each ACS 1-year release publishes (65,000+ population).
+
+    One cached listing request (``get=NAME``) per year and state (counties,
+    places) or per year (metropolitan areas); nation and states are always
+    published. Wildcard requests ("every county") need no check: the API
+    returns only published areas. Requested codes missing from a release's
+    listing are reported under ``unavailable``; targets with no published code
+    in a year get that year removed (``Entity.years``) in ``_entities``.
+    Years whose listing fails (offline) are ``unchecked_years``.
+    """
+    listings: Dict[Tuple[int, str, str], Optional[Set[Tuple[str, str]]]] = {}
+    unchecked: Set[int] = set()
+    unavailable: List[Dict[str, Any]] = []
+    out_entities: List[Entity] = []
+    for ent in entities:
+        level = normalize_geo_level(ent.geo_level)
+        if level in ("us", "state"):
+            out_entities.append(ent)
+            continue
+        key, codes = _entity_codes(ent)
+        if codes is None:
+            out_entities.append(ent)
+            continue
+        state = "" if level == "msa" else str(ent.state_code or "*")
+        states = None if state in ("", "*") else set(state.split(","))
+        keep: List[int] = []
+        missing_by_year: Dict[str, List[str]] = {}
+        applicable = [y for y in years if ent.applies(y)]
+        for year in applicable:
+            lk = (int(year), level, state)
+            if lk not in listings:
+                rows = client.list_geographies(year, level, state_code=state or None, dataset=dataset)
+                listings[lk] = {(str(r.get("state", "")), str(r.get(key, ""))) for r in rows} if rows else None
+            published = listings[lk]
+            if published is None:
+                unchecked.add(int(year))
+                keep.append(year)
+                continue
+            found = {c for st, c in published if states is None or st in states}
+            missing = [c for c in codes if c not in found]
+            if missing:
+                missing_by_year[str(year)] = missing
+            if len(missing) < len(codes):
+                keep.append(year)
+        if missing_by_year:
+            unavailable.append({
+                "entity": ent.name, "geo_level": level, "state_code": ent.state_code,
+                "missing_codes_by_year": missing_by_year,
+            })
+        out_entities.append(ent if keep == applicable else replace(ent, years=tuple(keep)))
+    return {
+        "min_population": ACS1_MIN_POPULATION,
+        "source": ACS1_AREAS_URL,
+        "unavailable": unavailable,
+        "unchecked_years": sorted(unchecked),
+        "_entities": out_entities,
     }
 
 
@@ -905,6 +1094,7 @@ def run_batch(
     progress: Optional[ProgressFn] = None,
     variables: Optional[Sequence[str]] = None,
     plan: Optional[Mapping[str, Any]] = None,
+    product: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Plan, then download ``table_code`` for every entity x year and write outputs.
 
@@ -922,12 +1112,15 @@ def run_batch(
 
     if plan is None:
         plan = plan_extraction(
-            table_code, entities, years, output_format, options, dataset, variables, client
+            table_code, entities, years, output_format, options, dataset, variables, client,
+            product=product,
         )
     if not plan.get("success"):
         return plan
     years = plan["years"]
     dataset = plan["dataset"]
+    entities = plan.get("_entities") or entities
+    options = plan.get("_options") or options
     conc: Concordance = plan["_concordance"]
     selected: Set[str] = plan["_selected"]
     multi_year = len(years) > 1
@@ -1162,6 +1355,9 @@ def run_batch(
         "git_commit": _git_commit(),
         "table_code": table_code,
         "dataset": dataset,
+        "product": plan.get("product", PRODUCT_5YR),
+        "excluded_years": plan.get("excluded_years") or [],
+        "geography_availability": plan.get("geography_availability"),
         "endpoint": client.endpoint(years[0], dataset).replace(str(years[0]), "{year}", 1),
         "years": years,
         "geo_level": geo_level,

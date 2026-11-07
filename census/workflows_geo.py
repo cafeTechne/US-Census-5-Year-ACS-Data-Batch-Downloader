@@ -18,6 +18,17 @@ _MAP_KINDS = ("estimate", "uncertainty", "significance")
 _GEO_ERRORS = (FileNotFoundError, OSError, KeyError, ValueError, TypeError, RuntimeError)
 
 
+def _release_replicates(reps: Optional[pd.DataFrame], year: int) -> Optional[pd.DataFrame]:
+    """Select the requested release from a replicate frame with a Year column
+    (PLAN_ROUND_11 C3): never let row order pick among releases."""
+    if reps is None or "Year" not in reps.columns:
+        return reps
+    sel = reps[pd.to_numeric(reps["Year"], errors="coerce") == int(year)]
+    if not len(sel):
+        raise ValueError(f"replicates have no rows for release {int(year)}")
+    return sel
+
+
 def _per_state(level: str, boundary_year: int) -> bool:
     """Whether boundaries for ``level`` must come from per-state files: tract and
     block group always (smaller downloads), other per-state levels (place,
@@ -181,7 +192,7 @@ def spatial_autocorrelation(
 
     try:
         gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
-        reps = _read_replicates(replicates_path)
+        reps = _release_replicates(_read_replicates(replicates_path), year)
         res = spatial.morans_i(gdf, column, w, replicates=reps)
         payload: Dict[str, Any] = {"global": res.__dict__ if hasattr(res, "__dict__") else res,
                                    "weights_report": getattr(w, "census_report", {})}
@@ -214,7 +225,7 @@ def spatial_regression(
 
     try:
         gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
-        res = spatial.spatial_regression(formula, gdf, w, model=model, replicates=_read_replicates(replicates_path))
+        res = spatial.spatial_regression(formula, gdf, w, model=model, replicates=_release_replicates(_read_replicates(replicates_path), year))
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()

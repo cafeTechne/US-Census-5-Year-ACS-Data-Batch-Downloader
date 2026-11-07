@@ -1,0 +1,27 @@
+{
+  "source": "statsmodels documentation, Linear Mixed Effects Models example notebook",
+  "url": "https://www.statsmodels.org/stable/examples/notebooks/generated/mixed_lm_example.html",
+  "retrieved_at": "2026-11-03",
+  "data": "dietox (R package geepack), via https://raw.githubusercontent.com/vincentarelbundock/Rdatasets/master/csv/geepack/dietox.csv",
+  "note": "Values copied from the printed summaries on the page (statsmodels MixedLM, REML, lbfgs) and, where noted, the lme4 lmer output shown on the same page.",
+  "random_intercept": {
+    "formula": "Weight ~ Time, groups=Pig",
+    "Intercept": {"estimate": 15.724, "se": 0.788},
+    "Time": {"estimate": 6.943, "se": 0.033},
+    "group_var": 40.395,
+    "scale": 11.3669,
+    "loglik": -2404.7753,
+    "lmer": {"Intercept": {"estimate": 15.72352, "se": 0.78805}, "Time": {"estimate": 6.94251, "se": 0.03339}}
+  },
+  "random_slope": {
+    "formula": "Weight ~ Time, groups=Pig, re_formula='~Time'",
+    "Intercept": {"estimate": 15.739, "se": 0.550},
+    "Time": {"estimate": 6.939, "se": 0.080},
+    "group_var_statsmodels": 19.503,
+    "group_var_lmer": 19.493,
+    "group_time_cov": 0.294,
+    "time_var": 0.416,
+    "scale": 6.0372,
+    "loglik": -2217.0475
+  }
+}

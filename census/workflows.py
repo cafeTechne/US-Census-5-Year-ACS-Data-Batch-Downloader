@@ -461,6 +461,7 @@ def batch_significance(
     confidence_level: float = 0.90,
     correction: str = "holm",
     output_path: Optional[str] = None,
+    product: str = "5-year",
 ) -> Dict[str, Any]:
     """Test many geographies at once for a difference between two estimates, with
     a multiple-comparison correction.
@@ -469,18 +470,20 @@ def batch_significance(
         input_path: Wide CSV/Parquet with one row per geography and the four
             columns named below (e.g. a file with 2018 and 2023 values side by side).
         est1, moe1, est2, moe2: Column names.
-        year1, year2: ACS 5-year release years, to apply the overlapping-period
-            adjustment. Prefer non-overlapping periods (5+ years apart).
+        year1, year2: ACS release end years, to apply the overlapping-period
+            adjustment (5-year only). Prefer non-overlapping periods (5+ years apart).
         confidence_level: 0.90 matches ACS MOEs.
         correction: 'holm' (default; family-wise error), 'bonferroni', 'bh'
             (false discovery rate, for exploratory screening), or 'by'.
+        product: '5-year' (default) or '1-year'. 1-year releases never share
+            sample, so no overlap adjustment is applied.
 
     Testing 3,000 tracts at 90% yields about 300 false positives with no
     correction. Report significant_adjusted, not significant_raw.
     """
     try:
         df = _load_frame(input_path)
-        out = batch_z_test(df, est1, moe1, est2, moe2, year1, year2, confidence_level, correction)
+        out = batch_z_test(df, est1, moe1, est2, moe2, year1, year2, confidence_level, correction, product)
     except (FileNotFoundError, OSError) as exc:
         return errors.error_result(errors.INVALID_INPUT, str(exc))
     except (KeyError, ValueError) as exc:

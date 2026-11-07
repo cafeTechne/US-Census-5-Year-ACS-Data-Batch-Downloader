@@ -5,6 +5,28 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.10.0 (Round 10): microdata, 1-year estimates, research designs; Round 11 audit fixes
+
+- **PUMS microdata** (A, B): `census.pums` tabulations, crosstabs, weighted
+  medians, and survey-weighted regression with 80 replicate weights; reproduces
+  all 32 Census PUMS verification estimates and SEs for Wyoming (2024 1-year and
+  2020-2024 5-year). PUMA boundaries.
+- **ACS 1-year** (C): `product="1-year"` across planning and extraction;
+  2005-2025 metadata archive (no standard 2020 release); 65,000+ geography checks;
+  1-year vs 5-year comparisons refused; product-aware overlap.
+- **Designs** (D): `census.multilevel` (Kenward-Roger intervals) and `census.did`
+  (non-overlapping periods, full replicate refits); simulation coverage 0.89-0.91.
+- **Regional price parities** (E): `census.rpp`, BEA RPPs for states, metro and
+  nonmetro portions, and MSAs; never applied by default.
+- **Carryovers** (F): ZCTA and place crosswalks, self-contained interactive HTML
+  maps, local-model harness tasks for maps and spatial tools.
+- **Round 11 audit fixes** (C1-C7 in `PLAN_ROUND_11.md`): undefined PUMS
+  replicates no longer report zero uncertainty; zero-weight records no longer move
+  weighted medians; spatial replicates are aligned to the estimate's release;
+  scalar SE/CV decode Census sentinels; two-group DiD requires a pre-treatment
+  reference; regression outputs name the SE behind each interval.
+- Concept DOI for citation: [10.5281/zenodo.23925301](https://doi.org/10.5281/zenodo.23925301).
+
 ## 0.9.1 (hotfix): Zenodo metadata
 
 - Zenodo archiving: add `.zenodo.json` with an explicit creator name (Zenodo could not build creators from the alias-only `CITATION.cff` author), so releases are archived and receive a DOI. No code changes.

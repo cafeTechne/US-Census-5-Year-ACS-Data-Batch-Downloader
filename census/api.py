@@ -16,13 +16,54 @@ load_dotenv()
 BASE_URL = "https://api.census.gov/data"
 DEFAULT_API_KEY = os.getenv("CENSUS_API_KEY", "")
 
-# ACS 5-year dataset paths
+# ACS dataset paths: 5-year (default) and 1-year releases
 DATASETS: Dict[str, str] = {
     "acs5": "acs/acs5",  # Detailed tables (B/C)
     "profile": "acs/acs5/profile",  # Data Profiles (DP02-DP05)
     "subject": "acs/acs5/subject",  # Subject tables (S....)
     "cprofile": "acs/acs5/cprofile",  # Comparison Profiles (CP02-CP05)
+    # ACS 1-year (api.census.gov/data.json catalog: acs1 and acs1/profile from
+    # 2005, acs1/subject from 2010, acs1/cprofile from 2010; no 2020 release)
+    "acs1": "acs/acs1",
+    "acs1/profile": "acs/acs1/profile",
+    "acs1/subject": "acs/acs1/subject",
+    "acs1/cprofile": "acs/acs1/cprofile",
 }
+
+# ACS products. Every dataset key belongs to exactly one product.
+PRODUCT_5YR = "5-year"
+PRODUCT_1YR = "1-year"
+PRODUCTS: Tuple[str, ...] = (PRODUCT_5YR, PRODUCT_1YR)
+PRODUCT_PERIOD_YEARS: Dict[str, int] = {PRODUCT_5YR: 5, PRODUCT_1YR: 1}
+_TABLE_TYPES = ("detailed", "profile", "subject", "cprofile")
+PRODUCT_DATASETS: Dict[str, Dict[str, str]] = {
+    PRODUCT_5YR: dict(zip(_TABLE_TYPES, ("acs5", "profile", "subject", "cprofile"))),
+    PRODUCT_1YR: dict(zip(_TABLE_TYPES, ("acs1", "acs1/profile", "acs1/subject", "acs1/cprofile"))),
+}
+_DATASET_TABLE_TYPE: Dict[str, Tuple[str, str]] = {
+    ds: (product, kind) for product, m in PRODUCT_DATASETS.items() for kind, ds in m.items()
+}
+
+# 1-year estimates are published only for areas with 65,000+ population
+# (https://www.census.gov/programs-surveys/acs/geography-acs/areas-published.html),
+# and not for tracts, block groups or ZCTAs (acs1 geography.json, 2005-2024).
+ACS1_MIN_POPULATION = 65000
+ACS1_GEO_LEVELS = ("us", "state", "county", "place", "msa")
+ACS1_AREAS_URL = "https://www.census.gov/programs-surveys/acs/geography-acs/areas-published.html"
+# 2020: the standard 1-year release was not published (COVID-19 data-collection
+# disruption); Census released only experimental estimates with
+# experimental weights, as downloadable tables outside the API and data.census.gov.
+ACS1_EXPERIMENTAL_YEAR = 2020
+ACS1_EXPERIMENTAL_URL = "https://www.census.gov/programs-surveys/acs/data/experimental-data.html"
+# "Can I compare ACS 1-year estimates with ACS 5-year estimates? No. Only
+# compare 1-year estimates with 1-year estimates, and 5-year estimates with
+# 5-year estimates."
+COMPARING_ACS_URL = "https://www.census.gov/programs-surveys/acs/guidance/comparing-acs-data.html"
+MIXED_PRODUCTS_MESSAGE = (
+    "Comparing ACS 1-year with ACS 5-year estimates is not supported: Census advises "
+    "\"Only compare 1-year estimates with 1-year estimates, and 5-year estimates with "
+    f"5-year estimates\" ({COMPARING_ACS_URL})."
+)
 
 # Geography levels -> (Census API "for" predicate name, summary level)
 GEO_LEVELS: Dict[str, Tuple[str, str]] = {
@@ -55,8 +96,7 @@ def normalize_geo_level(geo_level: str) -> str:
     return BLOCK_GROUP if key in BLOCK_GROUP_ALIASES else key
 
 
-def infer_dataset(table_code: str) -> str:
-    """Pick the ACS 5-year endpoint from a table code prefix."""
+def _table_type(table_code: str) -> str:
     code = table_code.upper()
     if code.startswith("DP"):
         return "profile"
@@ -64,7 +104,53 @@ def infer_dataset(table_code: str) -> str:
         return "cprofile"
     if code.startswith("S"):
         return "subject"
-    return "acs5"
+    return "detailed"
+
+
+def normalize_product(product: Optional[str]) -> str:
+    """Canonical product name: '5-year' (default) or '1-year' ('acs1', '1yr', '1' accepted)."""
+    if product is None:
+        return PRODUCT_5YR
+    key = str(product).strip().lower().replace("_", "-").replace(" ", "-")
+    if key in ("5-year", "5yr", "5-yr", "5", "acs5", "five-year"):
+        return PRODUCT_5YR
+    if key in ("1-year", "1yr", "1-yr", "1", "acs1", "one-year"):
+        return PRODUCT_1YR
+    raise ValueError(f"Unsupported ACS product '{product}'. Choose from {list(PRODUCTS)}.")
+
+
+def infer_dataset(table_code: str, product: str = PRODUCT_5YR) -> str:
+    """Pick the endpoint for a table code prefix within a product (5-year by default)."""
+    return PRODUCT_DATASETS[normalize_product(product)][_table_type(table_code)]
+
+
+def dataset_product(dataset: str) -> str:
+    """'5-year' or '1-year' for a dataset key (ValueError when unknown)."""
+    try:
+        return _DATASET_TABLE_TYPE[dataset][0]
+    except KeyError:
+        raise ValueError(f"Unsupported dataset: {dataset}. Choose from {sorted(DATASETS)}.") from None
+
+
+def dataset_for_product(dataset: str, product: str) -> str:
+    """The same table type in another product ('profile', '1-year' -> 'acs1/profile')."""
+    kind = _DATASET_TABLE_TYPE[dataset][1] if dataset in _DATASET_TABLE_TYPE else dataset
+    return PRODUCT_DATASETS[normalize_product(product)][kind]
+
+
+def require_same_product(*products_or_datasets: str) -> str:
+    """Return the shared product; raise ValueError (Census guidance) when 1-year and 5-year mix.
+
+    Accepts product names or dataset keys.
+    """
+    found = set()
+    for p in products_or_datasets:
+        if p is None:
+            continue
+        found.add(dataset_product(p) if p in DATASETS else normalize_product(p))
+    if len(found) > 1:
+        raise ValueError(MIXED_PRODUCTS_MESSAGE)
+    return found.pop() if found else PRODUCT_5YR
 
 
 def build_geo_params(
@@ -238,12 +324,13 @@ class CensusAPIClient:
         zcta_code: Optional[str] = None,
         msa_code: Optional[str] = None,
     ) -> Optional[List[List[str]]]:
-        """Fetch ACS 5-year data for a specific year, geography, and table.
+        """Fetch ACS data for a specific year, geography, and table.
 
         Geography levels: 'us', 'state', 'county', 'tract', 'block group'
         (one county per request; 2013+ releases, acs5 only), 'place', 'zcta', 'msa'.
-        Dataset ('acs5', 'profile', 'subject', 'cprofile') is inferred from the
-        table code when not given.
+        Dataset ('acs5', 'profile', 'subject', 'cprofile'; 1-year: 'acs1',
+        'acs1/profile', 'acs1/subject', 'acs1/cprofile') is inferred from the
+        table code (5-year) when not given.
         """
         endpoint, params = self.build_request(
             year=year,
@@ -265,14 +352,17 @@ class CensusAPIClient:
         geo_level: str,
         state_code: Optional[str] = None,
         county_code: Optional[str] = None,
+        dataset: str = "acs5",
     ) -> List[Dict[str, str]]:
         """List entities (NAME + FIPS components) at a geography level.
 
-        Used to enumerate counties or tracts within a county.
+        Used to enumerate counties or tracts within a county, and (with a
+        1-year ``dataset``) the areas a 1-year release publishes.
         """
-        endpoint = self.endpoint(year, "acs5")
+        endpoint = self.endpoint(year, dataset)
         params = build_geo_params(
-            geo_level, state_code=state_code, county_code=county_code, year=year
+            geo_level, state_code=state_code, county_code=county_code, year=year,
+            place_code="*" if normalize_geo_level(geo_level) == "place" else None,
         )
         params["get"] = "NAME"
         if self.api_key:

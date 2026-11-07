@@ -133,16 +133,33 @@ def _z_for_confidence(confidence_level: float) -> float:
     return normal_ppf(1 - (1 - confidence_level) / 2)
 
 
+def _is_sentinel(value: object) -> bool:
+    """True when ``value`` is one of the Census API jam values (raw input)."""
+    if value is None or _isnan(value):
+        return False
+    v = float(value)  # type: ignore[arg-type]
+    return v.is_integer() and int(v) in CENSUS_SENTINELS
+
+
 def standard_error(moe: float, moe_confidence: float = 0.90) -> float:
-    """Convert a margin of error to a standard error (default: ACS 90% MOE)."""
+    """Convert a margin of error to a standard error (default: ACS 90% MOE).
+
+    Raw Census sentinels are decoded first, as in :func:`moe_to_se` and the
+    cleaned pipeline: ``-555555555`` (controlled estimate) -> 0; any other
+    sentinel -> NaN (uncertainty undefined). An ordinary negative MOE keeps the
+    long-standing ``|moe|`` compatibility behavior.
+    """
     if moe is None or _isnan(moe):
         return math.nan
+    if _is_sentinel(moe):
+        return 0.0 if int(float(moe)) == CONTROLLED_MOE else math.nan
     return abs(float(moe)) / _z_for_confidence(moe_confidence)
 
 
 def coefficient_of_variation(estimate: float, moe: float) -> float:
-    """CV (%) = SE / estimate * 100. Undefined (NaN) when estimate is 0 or missing."""
-    if estimate is None or _isnan(estimate) or float(estimate) == 0:
+    """CV (%) = SE / estimate * 100. Undefined (NaN) when estimate is 0, missing
+    or a Census sentinel."""
+    if estimate is None or _isnan(estimate) or _is_sentinel(estimate) or float(estimate) == 0:
         return math.nan
     se = standard_error(moe)
     if _isnan(se):
@@ -165,14 +182,19 @@ def calculate_cv(estimate: float, moe: float) -> Dict[str, object]:
     """Return SE, CV and reliability flag for a single estimate/MOE pair."""
     se = standard_error(moe)
     cv = coefficient_of_variation(estimate, moe)
+    # Interval half-width from the decoded SE: 0 for a controlled estimate,
+    # undefined for a missing/suppressed MOE or a sentinel estimate.
+    half = math.nan if _isnan(se) else (0.0 if se == 0 else abs(float(moe)))
+    if estimate is None or _isnan(estimate) or _is_sentinel(estimate):
+        half = math.nan
     return {
         "estimate": estimate,
         "moe": moe,
         "standard_error": se,
         "cv_percent": cv,
         "reliability": reliability_flag(cv),
-        "lower_90": estimate - abs(moe) if not _isnan(moe) else math.nan,
-        "upper_90": estimate + abs(moe) if not _isnan(moe) else math.nan,
+        "lower_90": float(estimate) - half if not _isnan(half) else math.nan,
+        "upper_90": float(estimate) + half if not _isnan(half) else math.nan,
     }
 
 
@@ -220,6 +242,25 @@ def acs5_overlap_years(year1: int, year2: int) -> int:
     return max(0, 5 - abs(int(year1) - int(year2)))
 
 
+def acs_overlap_years(
+    year1: int, year2: int, product1: str = "5-year", product2: Optional[str] = None
+) -> int:
+    """Sample years shared by two ACS releases of the same product (by end year).
+
+    5-year: ``max(0, 5 - |y1 - y2|)``. 1-year: different releases never share
+    sample (0); the same release returns 1 (= the period, i.e. "same period",
+    which :func:`overlap_factor` treats as independent subgroups). Mixing 1-year
+    and 5-year estimates raises ``ValueError``: Census advises against that
+    comparison (https://www.census.gov/programs-surveys/acs/guidance/comparing-acs-data.html).
+    """
+    from census.api import PRODUCT_1YR, require_same_product  # local: keep stats light
+
+    product = require_same_product(product1, product2 if product2 is not None else product1)
+    if product == PRODUCT_1YR:
+        return 1 if int(year1) == int(year2) else 0
+    return acs5_overlap_years(year1, year2)
+
+
 def z_test(
     est1: float,
     moe1: float,
@@ -227,12 +268,30 @@ def z_test(
     moe2: float,
     confidence_level: float = 0.90,
     overlap_years: int = 0,
+    product1: Optional[str] = None,
+    product2: Optional[str] = None,
+    product: Optional[str] = None,
 ) -> Dict[str, object]:
     """Two-tailed Z-test for the difference between two ACS estimates.
 
     Z = |X1 - X2| / sqrt(SE1^2 + SE2^2), with the denominator scaled by
     sqrt(1 - C) when the two 5-year periods overlap by ``overlap_years``.
+    ``product1``/``product2`` ('5-year' / '1-year' or dataset keys), when
+    given, must match: a 1-year vs 5-year comparison raises ``ValueError``.
+    1-year releases never overlap; pass ``overlap_years=0`` (see
+    :func:`acs_overlap_years`). ``product`` is shorthand for both. The overlap
+    share C = overlap_years / period uses the product's period length (5 or
+    1), so a same-release 1-year comparison (overlap 1 of 1) is treated as
+    independent (factor 1.0), not as 1 of 5 shared years.
     """
+    period = 5
+    if product is not None:
+        product1 = product if product1 is None else product1
+        product2 = product if product2 is None else product2
+    if product1 is not None or product2 is not None:
+        from census.api import PRODUCT_PERIOD_YEARS, require_same_product
+
+        period = PRODUCT_PERIOD_YEARS[require_same_product(product1, product2)]
     level = confidence_level if confidence_level <= 1 else confidence_level / 100
     critical = _z_for_confidence(level)
     label = f"{level * 100:g}%"
@@ -274,8 +333,8 @@ def z_test(
             "verdict": "Not tested: " + "; ".join(notes) + ".",
         }
     se1, se2 = standard_error(m1), standard_error(m2)
-    se_diff = math.sqrt(se1**2 + se2**2) * overlap_factor(overlap_years)
-    if overlap_years >= 5:
+    se_diff = math.sqrt(se1**2 + se2**2) * overlap_factor(overlap_years, period)
+    if overlap_years >= period:
         notes.append("same period: treated as independent samples (no overlap adjustment)")
     if se_diff == 0:
         z = math.inf if diff != 0 else 0.0

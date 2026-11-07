@@ -1,0 +1,33 @@
+STATE,STATENAME,CHARACTERISTIC,PUMS_EST_24,PUMS_SE_24,PUMS_MOE_24
+56,Wyoming,Total population,587618,0,0
+56,Wyoming,Housing unit population (RELSHIPP=20-36),573820,0,0
+56,Wyoming,GQ population (RELSHIPP=37-38),13798,0,0
+56,Wyoming,GQ institutional population (RELSHIPP=37),6504,3,5
+56,Wyoming,GQ noninstitutional population (RELSHIPP=38),7294,3,5
+56,Wyoming,Total males (SEX=1),301673,1948,3205
+56,Wyoming,Total females (SEX=2),285945,1948,3205
+56,Wyoming,Age 0-4,29232,1160,1908
+56,Wyoming,Age 5-9,30661,1548,2546
+56,Wyoming,Age 10-14,40636,1692,2783
+56,Wyoming,Age 15-19,39840,1453,2390
+56,Wyoming,Age 20-24,37613,1678,2760
+56,Wyoming,Age 25-34,75561,1827,3005
+56,Wyoming,Age 35-44,79245,1339,2202
+56,Wyoming,Age 45-54,67498,1339,2203
+56,Wyoming,Age 55-59,33165,2520,4145
+56,Wyoming,Age 60-64,36659,1828,3007
+56,Wyoming,Age 65-74,71021,1204,1981
+56,Wyoming,Age 75-84,35462,1249,2055
+56,Wyoming,Age 85 and over,11025,1175,1932
+56,Wyoming,Total housing units (TYPEHUGQ=1),281789,81,133
+56,Wyoming,Total occupied units,256290,1607,2644
+56,Wyoming,"Owner occupied units (TEN in 1,2)",183409,2377,3910
+56,Wyoming,"Renter occupied units (TEN in 3,4)",72881,2199,3617
+56,Wyoming,Owned with a mortgage (TEN=1),96111,2966,4879
+56,Wyoming,Owned free and clear (TEN=2),87298,2864,4712
+56,Wyoming,Rented for cash (TEN=3),67385,2264,3724
+56,Wyoming,No cash rent (TEN=4),5496,917,1509
+56,Wyoming,Total vacant units,25499,1634,2688
+56,Wyoming,For rent (VACS=1),2535,627,1031
+56,Wyoming,For sale only (VACS=3),1283,615,1012
+56,Wyoming,"All Other Vacant (VACS in 2,4,5,6,7)",21681,1756,2888

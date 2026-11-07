@@ -191,7 +191,16 @@ def fit_model(
         out["notes"] = list(out.get("notes") or []) + [
             "No replicates supplied: standard errors include model error only, not ACS sampling error."
         ]
-    return _ok(result.summary(), "make_table or make_figure; report se_total and the uncertainty sources",
+    # Report the SE that the displayed intervals and p-values actually use
+    # (PLAN_ROUND_11 C7): se_model for target="population", se_sampling for
+    # "these_areas", se_total for "conservative" and the corrected methods.
+    se_basis = models.interval_se_column(result)
+    out["interval_se_column"] = se_basis
+    next_step = (f"make_table or make_figure; report each coefficient with {se_basis} (the SE behind its "
+                 "confidence interval and p-value) and the uncertainty sources it includes")
+    if method == "simex":
+        next_step += "; SIMEX under-covers and is exploratory only, not for confirmatory claims"
+    return _ok(f"{result.summary()}; intervals and p-values use {se_basis}", next_step,
                **{k: v for k, v in out.items() if k != "summary"})
 
 

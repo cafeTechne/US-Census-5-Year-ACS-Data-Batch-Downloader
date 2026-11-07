@@ -26,6 +26,12 @@ DATASET_PATHS: Dict[str, str] = {
     "profile": "acs/acs5/profile",
     "subject": "acs/acs5/subject",
     "cprofile": "acs/acs5/cprofile",
+    # 1-year releases archive under metadata/acs1/<year>/ and
+    # metadata/acs1/<profile|subject|cprofile>/<year>/
+    "acs1": "acs/acs1",
+    "acs1/profile": "acs/acs1/profile",
+    "acs1/subject": "acs/acs1/subject",
+    "acs1/cprofile": "acs/acs1/cprofile",
 }
 
 SOURCE_ARCHIVE = "archive"
@@ -70,7 +76,7 @@ def available_vintages(dataset: str, client: Any = None, refresh: bool = False) 
 
 
 def _archive_path(dataset: str, year: int, name: str) -> str:
-    return os.path.join(archive_dir(), dataset, str(year), f"{name}.gz")
+    return os.path.join(archive_dir(), *dataset.split("/"), str(year), f"{name}.gz")
 
 
 @lru_cache(maxsize=128)

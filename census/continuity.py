@@ -17,7 +17,8 @@ from census.concordance import (
     Concordance,
     Issue,
 )
-from census.stats import CENSUS_SENTINELS, acs5_overlap_years, z_test
+from census.api import dataset_product
+from census.stats import CENSUS_SENTINELS, acs_overlap_years, z_test
 
 # Thresholds for an "implausible" one-year change at the national level.
 # 5-year periods overlap by 4 years, so true national changes are small.
@@ -94,7 +95,10 @@ def check_concepts(
             e1, m1, pct = p1
             e2, m2, _ = p2
             checked += 1
-            result = z_test(e1, m1, e2, m2, 0.90, overlap_years=acs5_overlap_years(y1, y2))
+            product = dataset_product(conc.dataset)
+            # 1-year releases do not overlap; 5-year releases share sample years.
+            result = z_test(e1, m1, e2, m2, 0.90, overlap_years=acs_overlap_years(y1, y2, product),
+                            product=product)
             rel_limit, pp_limit = implausibility_thresholds(y2 - y1)
             if pct:
                 change = abs(e2 - e1)

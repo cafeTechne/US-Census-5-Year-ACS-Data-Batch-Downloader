@@ -539,3 +539,223 @@ def spatial_config(fast: bool = True, **overrides: Any) -> SimConfig:
     reps = {k: 0 for k in base.reps}
     reps.update(SPATIAL_REPS_FAST if fast else SPATIAL_REPS_FULL)
     return replace(base, reps=reps, fh_areas=49 if fast else 100, **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Round 10 (PLAN_ROUND_10 sec. 6): multilevel models and difference-in-differences
+# ---------------------------------------------------------------------------
+# Registered in STUDIES with no default reps (run_study(FULL/FAST) output is
+# unchanged); run with run_study(designs_config(fast=...), studies=list(DESIGN_STUDIES)).
+
+DESIGN_REPS_FULL = {"multilevel_known_variance": 1000, "multilevel_random_slope": 500,
+                    "multilevel_replicate": 1000, "did_two_group": 1000, "did_event": 1000, "did_replicate": 1000}
+DESIGN_REPS_FAST = {"multilevel_known_variance": 40, "multilevel_random_slope": 20,
+                    "multilevel_replicate": 40, "did_two_group": 60, "did_event": 40, "did_replicate": 40}
+ML_GROUP_SIZE = (2, 9)        # tracts per county (uniform integer range)
+ML_SIGMA_B = 4.0              # county random-intercept SD
+ML_SIGMA_SLOPE = 0.15         # county random-slope SD (random-slope study)
+ML_SIGMA_V = 3.0              # tract-level model error SD
+DID_DELTA = 3.0               # true treatment effect
+DID_SIGMA_U = 1.5             # area-by-period model error SD
+DID_TREATED_SHARE = 0.4
+DID_YEARS_TWO = [2008, 2013, 2018, 2023]
+DID_YEARS_EVENT = [2003, 2008, 2013, 2018, 2023]
+DID_TREAT_YEAR = 2018
+
+
+def _ml_population(cfg: SimConfig, rng: np.random.Generator):
+    sizes: List[int] = []
+    while sum(sizes) < cfg.n_areas:
+        sizes.append(int(rng.integers(ML_GROUP_SIZE[0], ML_GROUP_SIZE[1] + 1)))
+    groups = np.repeat([f"G{j:03d}" for j in range(len(sizes))], sizes)
+    n = len(groups)
+    x = cfg.x_mean + cfg.x_sd * rng.standard_normal(n)
+    se = draw_cv(n, "tract", rng) / 100 * (10.0 + cfg.beta * cfg.x_mean)
+    return groups, x, se, len(sizes)
+
+
+def _ml_draw(cfg: SimConfig, rng: np.random.Generator, groups, x, slope: bool) -> np.ndarray:
+    codes = pd.factorize(groups)[0]
+    k = codes.max() + 1
+    b0 = ML_SIGMA_B * rng.standard_normal(k)
+    b1 = ML_SIGMA_SLOPE * rng.standard_normal(k) if slope else np.zeros(k)
+    return (10.0 + cfg.beta * x + b0[codes] + b1[codes] * (x - cfg.x_mean)
+            + ML_SIGMA_V * rng.standard_normal(len(x)))
+
+
+def _ml_frame(groups, x, y, se) -> pd.DataFrame:
+    f = acs_frame(_geoids(len(x)), {"y": y, "x": x}, {"y": se})
+    f["x_c"] = x - 50.0
+    f["county"] = groups
+    return f
+
+
+def study_multilevel_known_variance(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Tracts in counties, known ACS sampling variance: coverage of the superpopulation slope."""
+    from .multilevel import fit_multilevel
+    rng = np.random.default_rng(cfg.seed + 11)
+    groups, x, se, k = _ml_population(cfg, rng)
+    cov, cov_naive, ests = [], [], []
+    for _ in range(reps):
+        theta = _ml_draw(cfg, rng, groups, x, slope=False)
+        f = _ml_frame(groups, x, theta + se * rng.standard_normal(len(x)), se)
+        c = fit_multilevel("y ~ x", f, "county", sampling_se=True).coefficients.set_index("term").loc["x"]
+        cov.append(c.ci_lower <= cfg.beta <= c.ci_upper)
+        ests.append(c.estimate)
+        n = fit_multilevel("y ~ x", f, "county").coefficients.set_index("term").loc["x"]
+        cov_naive.append(n.ci_lower <= cfg.beta <= n.ci_upper)
+    label = f"fit_multilevel known variance (REML), {len(x)} tracts in {k} counties, random intercept"
+    return [coverage_summary(label, "superpopulation slope beta (population)", cov,
+                             {"bias": float(np.mean(ests) - cfg.beta)}),
+            coverage_summary("fit_multilevel MixedLM ignoring sampling variance (same data)",
+                             "superpopulation slope beta (population)", cov_naive, gated=False)]
+
+
+def study_multilevel_random_slope(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Random intercept and slope with known sampling variance: coverage of the mean slope."""
+    from .multilevel import fit_multilevel
+    rng = np.random.default_rng(cfg.seed + 12)
+    groups, x, se, k = _ml_population(cfg, rng)
+    cov = []
+    for _ in range(reps):
+        theta = _ml_draw(cfg, rng, groups, x, slope=True)
+        f = _ml_frame(groups, x, theta + se * rng.standard_normal(len(x)), se)
+        c = fit_multilevel("y ~ x_c", f, "county", re_formula="~x_c", sampling_se=True
+                           ).coefficients.set_index("term").loc["x_c"]
+        cov.append(c.ci_lower <= cfg.beta <= c.ci_upper)
+    return [coverage_summary(f"fit_multilevel known variance, random intercept + slope, {k} counties",
+                             "superpopulation mean slope beta (population)", cov)]
+
+
+def study_multilevel_replicate(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Replicate SEs (target these_areas): coverage of the GLS slope of the true tract values."""
+    from .multilevel import BlockGLS, _known_vfun, fit_multilevel
+    rng = np.random.default_rng(cfg.seed + 13)
+    groups, x, se, k = _ml_population(cfg, rng)
+    theta = _ml_draw(cfg, rng, groups, x, slope=False)  # fixed finite population
+    X = np.column_stack([np.ones(len(x)), x])
+    g = _geoids(len(x))
+    cov, ratio = [], []
+    for _ in range(reps):
+        y = theta + se * rng.standard_normal(len(x))
+        R = make_replicates(y[:, None], se[:, None], rng)
+        res = fit_multilevel("y ~ x", _ml_frame(groups, x, y, se), "county", sampling_se=True,
+                             target="these_areas", replicates=replicate_long(g, ["y"], y[:, None], R))
+        pv = res.provenance
+        eng = BlockGLS(groups, y, X, _known_vfun(1, True, pv["variance_scale"]), D=se ** 2)
+        target = eng.gls(np.asarray(pv["variance_parameters"]), theta)[1]
+        c = res.coefficients.set_index("term").loc["x"]
+        cov.append(c.ci_lower <= target <= c.ci_upper)
+        ratio.append(c.se_sampling / res.diagnostics["se_sampling_analytic"]["x"])
+    return [coverage_summary(f"fit_multilevel replicate GLS refits, {len(x)} tracts in {k} counties",
+                             "slope for these tracts' true values (these_areas)", cov,
+                             {"se_replicate_vs_analytic": float(np.mean(ratio))})]
+
+
+def _did_panel(cfg: SimConfig, rng: np.random.Generator, years: Sequence[int]):
+    n = cfg.n_areas
+    T = (np.arange(n) < int(DID_TREATED_SHARE * n)).astype(float)
+    alpha = cfg.x_mean + 10.0 * rng.standard_normal(n)
+    se = {yr: draw_cv(n, "tract", rng) / 100 * cfg.x_mean for yr in years}
+    return T, alpha, se
+
+
+def _did_truth(T, alpha, years, rng) -> Dict[int, np.ndarray]:
+    return {yr: alpha + 1.5 * k + DID_DELTA * T * (yr >= DID_TREAT_YEAR) + DID_SIGMA_U * rng.standard_normal(len(T))
+            for k, yr in enumerate(years)}
+
+
+def _did_frame(T, years, values, se) -> pd.DataFrame:
+    g = _geoids(len(T))
+    return pd.concat([pd.DataFrame({"GEOID": g, "Year": yr, "y": values[yr], "y_se": se[yr], "treated": T})
+                      for yr in years], ignore_index=True)
+
+
+def study_did_two_group(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Two-group DiD (2 pre, 2 post non-overlapping periods): coverage of delta."""
+    from .did import difference_in_differences
+    rng = np.random.default_rng(cfg.seed + 14)
+    T, alpha, se = _did_panel(cfg, rng, DID_YEARS_TWO)
+    cov, ests = [], []
+    for _ in range(reps):
+        th = _did_truth(T, alpha, DID_YEARS_TWO, rng)
+        y = {yr: th[yr] + se[yr] * rng.standard_normal(len(T)) for yr in DID_YEARS_TWO}
+        c = difference_in_differences(_did_frame(T, DID_YEARS_TWO, y, se), "y", "treated", DID_TREAT_YEAR
+                                      ).coefficients.set_index("term").loc["did"]
+        cov.append(c.ci_lower <= DID_DELTA <= c.ci_upper)
+        ests.append(c.estimate)
+    return [coverage_summary(f"difference_in_differences two_group (REML), {cfg.n_areas} areas x 4 periods",
+                             "superpopulation delta (population)", cov, {"bias": float(np.mean(ests) - DID_DELTA)})]
+
+
+def study_did_event(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Event-style DiD, 3 pre + 2 post periods: coverage of leads (0) and lags (delta); PT test size."""
+    from .did import difference_in_differences
+    rng = np.random.default_rng(cfg.seed + 15)
+    T, alpha, se = _did_panel(cfg, rng, DID_YEARS_EVENT)
+    cov, reject = [], []
+    for _ in range(reps):
+        th = _did_truth(T, alpha, DID_YEARS_EVENT, rng)
+        y = {yr: th[yr] + se[yr] * rng.standard_normal(len(T)) for yr in DID_YEARS_EVENT}
+        res = difference_in_differences(_did_frame(T, DID_YEARS_EVENT, y, se), "y", "treated", DID_TREAT_YEAR,
+                                        design="event")
+        tab = res.coefficients[res.coefficients["role"] == "effect"]
+        truth = np.where(tab["term"].str.startswith("lag"), DID_DELTA, 0.0)
+        cov.append((tab["ci_lower"].to_numpy() <= truth) & (truth <= tab["ci_upper"].to_numpy()))
+        reject.append(res.diagnostics["parallel_trends"]["p_value"] < 1 - NOMINAL)
+    C = np.vstack(cov)
+    row = coverage_summary(f"difference_in_differences event (REML), {cfg.n_areas} areas x 5 periods",
+                           "leads (0) and lags (delta), pooled (population)", C.ravel())
+    # terms within a repetition share one fit: MC SE from between-repetition variation
+    row["mc_se"] = float(C.mean(axis=1).std(ddof=1) / math.sqrt(reps)) if reps > 1 else float("nan")
+    return [row, coverage_summary("parallel-trends Wald test (3 pre-periods) under true parallel trends",
+                                  "non-rejection rate at 10% (1 - size)", ~np.asarray(reject, bool), gated=False)]
+
+
+def study_did_replicate(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """Two-group DiD with full replicate refits (these_areas): coverage of the GLS DiD of the true values."""
+    from .did import _did_vfun, _differences, _prepare, difference_in_differences
+    from .multilevel import BlockGLS
+    rng = np.random.default_rng(cfg.seed + 16)
+    T, alpha, se = _did_panel(cfg, rng, DID_YEARS_TWO)
+    th = _did_truth(T, alpha, DID_YEARS_TWO, rng)  # fixed finite population
+    g = _geoids(len(T))
+    true_vec = np.concatenate([th[yr] for yr in DID_YEARS_TWO])
+    cov = []
+    for _ in range(reps):
+        y = {yr: th[yr] + se[yr] * rng.standard_normal(len(T)) for yr in DID_YEARS_TWO}
+        frame = _did_frame(T, DID_YEARS_TWO, y, se)
+        reps_long = pd.concat([replicate_long(g, ["y"], y[yr][:, None],
+                                              make_replicates(y[yr][:, None], se[yr][:, None], rng)).assign(Year=yr)
+                               for yr in DID_YEARS_TWO], ignore_index=True)
+        res = difference_in_differences(frame, "y", "treated", DID_TREAT_YEAR, replicates=reps_long,
+                                        target="these_areas")
+        P = _prepare(frame, "y", "treated", "Year", "GEOID", DID_TREAT_YEAR, None, "two_group", None, 5)
+        d = _differences(P, "y", "treated", "Year", "GEOID", "two_group")
+        eng = BlockGLS(d["unit"], d["dy"], d["X"], _did_vfun, D=d["D"], extra={"Dr": d["Dr"]})
+        dt = _differences(P, "y", "treated", "Year", "GEOID", "two_group", y_override=true_vec)
+        # estimand: the GLS DiD of these areas' true values at the generating A (fixed, not data-dependent)
+        target = eng.gls(np.array([DID_SIGMA_U ** 2]), dt["dy"])[-1]
+        c = res.coefficients.set_index("term").loc["did"]
+        cov.append(c.ci_lower <= target <= c.ci_upper)
+    return [coverage_summary(f"difference_in_differences replicate GLS refits, {cfg.n_areas} areas",
+                             "delta for these areas' true values (these_areas)", cov)]
+
+
+DESIGN_STUDIES: Dict[str, Callable[[SimConfig, int], List[Dict[str, Any]]]] = {
+    "multilevel_known_variance": study_multilevel_known_variance,
+    "multilevel_random_slope": study_multilevel_random_slope,
+    "multilevel_replicate": study_multilevel_replicate,
+    "did_two_group": study_did_two_group,
+    "did_event": study_did_event,
+    "did_replicate": study_did_replicate,
+}
+STUDIES.update(DESIGN_STUDIES)
+
+
+def designs_config(fast: bool = True, **overrides: Any) -> SimConfig:
+    """Config that runs only the Round 10 design studies (multilevel, DiD)."""
+    base = FAST if fast else FULL
+    reps = {k: 0 for k in base.reps}
+    reps.update(DESIGN_REPS_FAST if fast else DESIGN_REPS_FULL)
+    return replace(base, reps=reps, **overrides)

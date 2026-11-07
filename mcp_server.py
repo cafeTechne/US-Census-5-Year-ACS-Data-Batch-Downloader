@@ -59,8 +59,8 @@ from census.concordance import BLOCKING_KINDS
 from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
-from census.stats import acs5_overlap_years
-from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference
+from census.stats import acs_overlap_years
+from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference, workflows_microdata
 
 load_dotenv()
 
@@ -578,6 +578,8 @@ def plan_extraction(
     include_pr: bool = False,
     allow_provisional_index: bool = False,
     harmonize_tracts_to: Optional[int] = None,
+    product: str = "5-year",
+    allow_experimental_2020: bool = False,
 ) -> Dict[str, Any]:
     """Dry run of batch_download: call counts, concordance issues, and whether it
     would block. Downloads no data (at most one cached national call per year for
@@ -606,6 +608,8 @@ def plan_extraction(
             price_index=price_index,
             allow_provisional_index=allow_provisional_index,
             harmonize_tracts_to=harmonize_tracts_to,
+            product=product,
+            allow_experimental_2020=allow_experimental_2020,
         ),
         dataset,
         variables,
@@ -642,6 +646,8 @@ def batch_download(
     include_pr: bool = False,
     allow_provisional_index: bool = False,
     harmonize_tracts_to: Optional[int] = None,
+    product: str = "5-year",
+    allow_experimental_2020: bool = False,
 ) -> Dict[str, Any]:
     """Batch-download a table across years and geographies to research-ready files.
 
@@ -683,6 +689,10 @@ def batch_download(
             published months (2025: October never published); adds an advisory.
         harmonize_tracts_to: 2010 or 2020: apportion a tract panel spanning the
             2010/2020 tract change to one tract vintage (panel/parquet only).
+        product: "5-year" (default) or "1-year" (areas of 65,000+ people only;
+            timelier, non-overlapping releases; never mix with 5-year in one comparison).
+        allow_experimental_2020: 1-year only: Census published no standard 2020
+            1-year estimates; opt in to acknowledge the gap (2020 is skipped with an advisory).
     """
     if start_year > end_year:
         return errors.error_result(errors.INVALID_INPUT, "start_year must be <= end_year.")
@@ -696,6 +706,8 @@ def batch_download(
     options = _options(
         allow_provisional_index=allow_provisional_index,
         harmonize_tracts_to=harmonize_tracts_to,
+            product=product,
+            allow_experimental_2020=allow_experimental_2020,
         clean_sentinels=clean_sentinels,
         compute_reliability=compute_reliability,
         inflation_base_year=inflation_base_year,
@@ -886,6 +898,7 @@ def calculate_significance(
     confidence_level: float = 0.90,
     year1: Optional[int] = None,
     year2: Optional[int] = None,
+    product: str = "5-year",
 ) -> Dict[str, Any]:
     """Two-tailed Z-test for whether two ACS estimates differ significantly.
 
@@ -897,10 +910,15 @@ def calculate_significance(
         est1, moe1: First estimate and its 90% MOE.
         est2, moe2: Second estimate and its 90% MOE.
         confidence_level: 0.90, 0.95 or 0.99 (default 0.90, the ACS standard).
-        year1, year2: Optional ACS 5-year end years for the overlap adjustment.
+        year1, year2: Optional ACS end years for the overlap adjustment.
+        product: '5-year' (default) or '1-year' (1-year releases never overlap).
     """
-    overlap = acs5_overlap_years(year1, year2) if year1 and year2 else 0
-    return z_test(est1, moe1, est2, moe2, confidence_level, overlap_years=overlap)
+    try:
+        overlap = acs_overlap_years(year1, year2, product) if year1 and year2 else 0
+        return z_test(est1, moe1, est2, moe2, confidence_level, overlap_years=overlap,
+                      product1=product, product2=product)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_INPUT, str(exc))
 
 
 @mcp.tool()
@@ -1041,6 +1059,12 @@ for _tool in (
     workflows_geo.spatial_regression,
     workflows_geo.spatial_small_area_estimates,
     workflows_geo.custom_area_mapping,
+    workflows_microdata.pums_tabulate,
+    workflows_microdata.pums_regression,
+    workflows_microdata.multilevel_model,
+    workflows_microdata.difference_in_differences,
+    workflows_microdata.adjust_for_place,
+    workflows_microdata.make_web_map,
 ):
     mcp.tool()(_tool)
 
@@ -1073,6 +1097,12 @@ spatial_autocorrelation = workflows_geo.spatial_autocorrelation
 spatial_regression = workflows_geo.spatial_regression
 spatial_small_area_estimates = workflows_geo.spatial_small_area_estimates
 custom_area_mapping = workflows_geo.custom_area_mapping
+pums_tabulate = workflows_microdata.pums_tabulate
+pums_regression = workflows_microdata.pums_regression
+multilevel_model = workflows_microdata.multilevel_model
+difference_in_differences = workflows_microdata.difference_in_differences
+adjust_for_place = workflows_microdata.adjust_for_place
+make_web_map = workflows_microdata.make_web_map
 get_recipe = recipes.get_recipe
 
 

@@ -7,7 +7,8 @@ The MCP server is standard MCP over stdio with plain JSON results, so any MCP-ca
 | Profile | Tools | Use for |
 | :--- | :--- | :--- |
 | `full` (default) | every tool, full descriptions | frontier models, Claude Code |
-| `core` | about 12 tools: `get_recipe`, `search_tables`, `describe_variable`, `plan_extraction`, `batch_download`, `derive_estimate`, `calculate_significance`, `trend_test`, `minimum_detectable_difference`, `build_analysis_frame`, `fit_model`, `make_figure` (and `run_manifest` once available) | local models |
+| `core` | 14 tools: `get_recipe`, `search_tables`, `describe_variable`, `plan_extraction`, `download_table`, `derive_estimate`, `calculate_significance`, `trend_test`, `minimum_detectable_difference`, `build_analysis_frame`, `fit_model`, `make_figure`, `make_map`, `run_manifest` | local models |
+| `core_spatial` | `core` plus `spatial_autocorrelation` (15 tools), same short descriptions | local models doing spatial work; the evaluation's spatial task |
 | `review` | concordance and rule review tools | reviewer agents |
 
 Select a profile with a flag or an environment variable (the flag wins):
@@ -66,7 +67,9 @@ python scripts/local_model_eval.py --model qwen3:8b               # Ollama defau
 python scripts/local_model_eval.py --base-url http://localhost:1234/v1 --model <name>
 ```
 
-The harness runs scripted tasks with known answers (a rate with its MOE, a two-county significance test, a trend across non-overlapping releases, a refused overlapping trend, a minimum detectable difference, and a recipe lookup), scores tool choice, arguments, and the final answer, and writes `docs/audits/local_model_eval.md`. For Qwen3 models it appends `/no_think` to skip the reasoning phase (pass `--think` to allow it). It is not part of CI.
+Several models can be compared in one report: `--model qwen3:8b llama3.1:8b`.
+
+The harness runs scripted tasks with known answers (a rate with its MOE, a two-county significance test, a trend across non-overlapping releases, a refused overlapping trend, a minimum detectable difference, a recipe lookup, a reliability-aware tract map with `make_map`, and Moran's I with `spatial_autocorrelation` on the `core_spatial` profile), scores tool choice, arguments, and the final answer, and writes `docs/audits/local_model_eval.md`. The map and spatial tasks need no network: the server gets `CENSUS_GEO_DIR=tests/fixtures/geo` (the DC tract cartographic file) and a synthetic DC tract frame is written to `.cache/local_model_eval/`. For Qwen3 models it appends `/no_think` to skip the reasoning phase (pass `--think` to allow it). It is not part of CI.
 
 ## Tips for small models
 
