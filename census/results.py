@@ -127,6 +127,79 @@ SMALL_AREA_COLUMNS = [
 ]
 
 
+# Interval targets (census.models.INTERVAL_TARGETS) -> the SE column their
+# intervals and p-values use; results without a target (regression
+# calibration, SIMEX, Fay-Herriot regression) use se_total. This is the single
+# mapping every consumer (tables, figures, methods text, workflows) reads.
+TARGET_SE = {"population": "se_model", "these_areas": "se_sampling", "conservative": "se_total"}
+_ESTIMAND = {
+    "population": "the population (superpopulation) association",
+    "these_areas": "the association among these areas in this period (finite population)",
+    "conservative": "the population association with conservative intervals (se_total double-counts outcome "
+                    "sampling error)",
+}
+_CORRECTED_ESTIMAND = {
+    "regression_calibration": "the association corrected for predictor measurement error",
+    "simex": "the association corrected for predictor measurement error (SIMEX, exploratory only)",
+}
+
+
+def interval_description(result: Any) -> Dict[str, Any]:
+    """What a ModelResult's intervals mean, read from its existing fields.
+
+    Returns ``basis_column`` (the SE behind intervals and p-values),
+    ``target``, ``level``, ``distribution`` ("t" when the coefficient table
+    carries a finite ``df`` column, else "normal"), ``df`` ({term: df} or
+    None), ``estimand`` (always an association, not a causal effect),
+    ``undefined_terms`` (terms whose basis SE is undefined: no interval,
+    never significant), ``replicates_incomplete`` and a one-line ``text``.
+    """
+    diag = getattr(result, "diagnostics", None) or {}
+    target = diag.get("interval_target")
+    basis = TARGET_SE.get(target, "se_total")
+    level = float(getattr(result, "confidence_level", 0.90))
+    coefs = getattr(result, "coefficients", None)
+    df = None
+    undefined: List[str] = []
+    if isinstance(coefs, pd.DataFrame) and len(coefs):
+        terms = coefs["term"].astype(str).tolist()
+        if "df" in coefs.columns:
+            d = pd.to_numeric(coefs["df"], errors="coerce").to_numpy(float)
+            if np.isfinite(d).any():
+                df = {t: (float(v) if np.isfinite(v) else None) for t, v in zip(terms, d)}
+        if basis in coefs.columns:
+            se = pd.to_numeric(coefs[basis], errors="coerce").to_numpy(float)
+            ok = np.isfinite(se)
+            for c in ("ci_lower", "ci_upper"):
+                if c in coefs.columns:
+                    ok &= np.isfinite(pd.to_numeric(coefs[c], errors="coerce").to_numpy(float))
+            undefined = [t for t, v in zip(terms, ok) if not v]
+    sources = list(getattr(result, "uncertainty_sources", None) or [])
+    # se_model carries model-based sampling error (known variances) but never replicate refits
+    basis_sources = {"se_model": [x for x in sources if x != SOURCE_SAMPLING_REPLICATE],
+                     "se_sampling": [x for x in sources if x == SOURCE_SAMPLING_REPLICATE]}.get(basis, sources)
+    distribution = "t" if df else "normal"
+    method = str(getattr(result, "method", ""))
+    what = _ESTIMAND.get(target) or _CORRECTED_ESTIMAND.get(method, "the association")
+    estimand = f"{what} of {_outcome_of(getattr(result, 'formula', ''))} with the predictors; an association, not a causal effect"
+    rep = (diag.get("replicates_incomplete")
+           or (getattr(result, "provenance", None) or {}).get("replicates_incomplete"))
+    dist_text = "t with per-term df" if df else "normal"
+    text = (f"{level * 100:g}% {dist_text} intervals and p-values from {basis}"
+            + (f" (includes {', '.join(basis_sources)})" if basis_sources else "")
+            + (f", {target} target" if target else "") + f"; estimand: {estimand}"
+            + (f"; undefined uncertainty (no interval) for {undefined}" if undefined else "")
+            + (f"; REPLICATES INCOMPLETE: {rep['note']}" if rep else ""))
+    return {"target": target, "basis_column": basis, "level": level, "distribution": distribution, "df": df,
+            "basis_sources": basis_sources,
+            "estimand": estimand, "undefined_terms": undefined, "replicates_incomplete": bool(rep), "text": text}
+
+
+def _outcome_of(formula: str) -> str:
+    left = str(formula).split("~", 1)[0].strip() if "~" in str(formula) else ""
+    return left or "the outcome"
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, pd.DataFrame):
         return [_jsonable(r) for r in value.to_dict(orient="records")]
@@ -162,9 +235,10 @@ class ModelResult:
     provenance: Dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> str:
+        info = interval_description(self)
         return (
             f"{self.model_type} '{self.formula}', n={self.n_obs}, method={self.method}, "
-            f"SEs include: {', '.join(self.uncertainty_sources)}"
+            f"SEs include: {', '.join(self.uncertainty_sources)}; {info['text']}"
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -174,6 +248,8 @@ class ModelResult:
             "uncertainty_sources": self.uncertainty_sources,
             "confidence_level": self.confidence_level, "notes": self.notes,
             "diagnostics": self.diagnostics, "provenance": self.provenance,
+            "interval_se_column": interval_description(self)["basis_column"],
+            "interval": interval_description(self),
             "summary": self.summary(),
         })
 

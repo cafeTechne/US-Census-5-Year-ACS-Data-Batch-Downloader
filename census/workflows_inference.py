@@ -16,6 +16,7 @@ import pandas as pd
 
 from census import errors
 from census.workflows import ROOT, _jsonable, _load_frame, _records, _replicates_for, _write_frame
+from census.results import interval_description
 
 try:  # statsmodels formulas raise patsy errors for bad formulas
     from patsy import PatsyError as _PatsyError
@@ -42,6 +43,19 @@ def replicate_flag(result: Any) -> str:
     if not info:
         return ""
     return f" (REPLICATES INCOMPLETE: {info['note']})"
+
+
+def interval_next_step(info: Dict[str, Any]) -> str:
+    """next_step guidance from census.results.interval_description (one wording for every model workflow)."""
+    dist = "t with each coefficient's df" if info["distribution"] == "t" else "normal"
+    step = (f"make_table or make_figure; report each coefficient with {info['basis_column']} (the SE behind its "
+            f"{info['level'] * 100:g}% {dist} confidence interval and p-value; includes "
+            f"{', '.join(info['basis_sources']) or 'no listed source'}) as {info['estimand']}")
+    if info["undefined_terms"]:
+        step += f"; uncertainty is undefined for {info['undefined_terms']}: report no interval or significance there"
+    if info["replicates_incomplete"]:
+        step += "; disclose that replicates were incomplete (sampling SE may be understated)"
+    return step
 
 
 def _fail(code: str, message: str, next_step: str = "") -> Dict[str, Any]:
@@ -203,10 +217,10 @@ def fit_model(
     # Report the SE that the displayed intervals and p-values actually use
     # (PLAN_ROUND_11 C7): se_model for target="population", se_sampling for
     # "these_areas", se_total for "conservative" and the corrected methods.
-    se_basis = models.interval_se_column(result)
+    info = interval_description(result)
+    se_basis = info["basis_column"]
     out["interval_se_column"] = se_basis
-    next_step = (f"make_table or make_figure; report each coefficient with {se_basis} (the SE behind its "
-                 "confidence interval and p-value) and the uncertainty sources it includes")
+    next_step = interval_next_step(info)
     if method == "simex":
         next_step += "; SIMEX under-covers and is exploratory only, not for confirmatory claims"
     return _ok(f"{result.summary()}{replicate_flag(result)}; intervals and p-values use {se_basis}", next_step,

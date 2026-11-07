@@ -167,3 +167,107 @@ class TestSimulationSmoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKnownVarianceDenseReference(unittest.TestCase):
+    """Independent dense-matrix reference for the known-variance GLS algebra (PLAN_ROUND_12 A1).
+
+    Scope: this validates the FIXED-VARIANCE algebra layer only -- the
+    BlockGLS solve, the log-Cholesky/scale parametrization of _known_vfun,
+    size-class batching of unequal blocks and the analytic sampling
+    sandwich -- at variance components chosen here and held fixed. It does
+    NOT validate REML estimation of the components or the Kenward-Roger
+    small-sample adjustment.
+
+    Model: y = X beta + Z b + u + e with b_j ~ N(0, G) (random intercept and
+    slope), u ~ N(0, s2 I) (area effect), e ~ N(0, diag(D)) known,
+    heterogeneous D. The expected answer assembles the dense n x n matrix
+    V = Z_blockdiag G Z' + s2 I + diag(D) directly and uses textbook GLS:
+    beta = (X'V^-1X)^-1 X'V^-1 y, cov(beta) = (X'V^-1X)^-1, and the
+    sampling-only part Q X'V^-1 diag(D) V^-1 X Q. Nothing from
+    census.multilevel is used to build the expected values.
+    """
+
+    # Groups deliberately interleaved and of unequal size (2, 3, 4) so row
+    # ordering and multiple size classes are exercised.
+    groups = np.array(["a", "b", "c", "a", "b", "c", "c", "b", "c"])
+    x = np.array([1.0, 2.0, 0.5, 3.0, 4.0, 1.5, 2.5, 5.0, 4.0])
+    y = np.array([2.1, 3.9, 1.0, 5.2, 6.8, 2.9, 4.4, 8.1, 6.0])
+    se = np.array([0.3, 1.2, 0.6, 0.9, 0.4, 1.5, 0.7, 0.5, 1.1])  # heterogeneous known SEs
+    G = np.array([[0.8, -0.25], [-0.25, 0.15]])  # nonzero intercept-slope covariance
+    s2 = 0.35
+    c = 2.5  # production variance scale; the parametrization below must absorb it
+
+    def _dense_reference(self):
+        n = len(self.y)
+        X = np.column_stack([np.ones(n), self.x])
+        Z = X  # random intercept and slope on x
+        D = self.se ** 2
+        V = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if self.groups[i] == self.groups[j]:
+                    V[i, j] = Z[i] @ self.G @ Z[j]
+        V += np.diag(self.s2 + D)
+        Vi = np.linalg.inv(V)
+        Q = np.linalg.inv(X.T @ Vi @ X)
+        beta = Q @ X.T @ Vi @ self.y
+        S = Q @ X.T @ Vi @ np.diag(D) @ Vi @ X @ Q
+        return X, Z, D, V, beta, Q, S
+
+    def _theta(self):
+        # Invert the documented parametrization: G = c L L' with L lower
+        # triangular (log diagonal, raw off-diagonal); s2 = c exp(2 theta_last).
+        L = np.linalg.cholesky(self.G / self.c)
+        return np.array([np.log(L[0, 0]), L[1, 0], np.log(L[1, 1]), 0.5 * np.log(self.s2 / self.c)])
+
+    def test_fixed_component_gls_matches_dense_matrices(self):
+        X, Z, D, V, beta, Q, S = self._dense_reference()
+        eng = BlockGLS(self.groups, self.y, X, _known_vfun(2, True, self.c), D=D, Z=Z)
+        sol = eng._solve(self._theta(), keep=True)
+        # Tolerance: cond(V) and cond(X'V^-1X) are asserted < 1e3 below, so
+        # both computations agree to ~cond * 1e-16 = 1e-13 relative; rtol
+        # 1e-9 leaves four orders of margin yet is far below the 0.13-0.32
+        # relative changes the mistakes in the next test produce.
+        self.assertLess(np.linalg.cond(V), 1e3)
+        self.assertLess(np.linalg.cond(np.linalg.inv(Q)), 1e3)
+        np.testing.assert_allclose(sol["beta"], beta, rtol=1e-9, atol=1e-12)
+        np.testing.assert_allclose(sol["Q"], Q, rtol=1e-9, atol=1e-12)
+        np.testing.assert_allclose(eng.sandwich_sampling_cov(sol["vinv"], sol["Q"]), S, rtol=1e-9, atol=1e-12)
+        # Replicate-refit path (V held fixed, new y) agrees too.
+        y2 = self.y[::-1].copy()
+        np.testing.assert_allclose(eng.gls(self._theta(), y2, vinv=sol["vinv"]),
+                                   Q @ X.T @ np.linalg.inv(V) @ y2, rtol=1e-9, atol=1e-12)
+
+    def test_reference_is_sensitive_to_the_errors_it_guards(self):
+        """The test above would fail if known variance, within-block covariance or heterogeneity were mishandled."""
+        X, Z, D, V, beta, Q, _ = self._dense_reference()
+
+        def gls(Vx):
+            Vi = np.linalg.inv(Vx)
+            Qx = np.linalg.inv(X.T @ Vi @ X)
+            return Qx @ X.T @ Vi @ self.y, Qx
+
+        within = V - np.diag(np.diag(V))
+        wrong = {
+            "known variance omitted": V - np.diag(D),
+            "within-block covariance omitted": V - within,
+            "homogeneous (mean) D": V - np.diag(D) + D.mean() * np.eye(len(D)),
+            "intercept-slope covariance dropped": V - self._cross_term(Z),
+        }
+        for label, Vw in wrong.items():
+            bw, Qw = gls(Vw)
+            gap = max(np.max(np.abs(bw - beta) / np.abs(beta)), np.max(np.abs(Qw - Q) / np.abs(Q)))
+            # Measured gaps 0.14 (within-block) to 0.32 (D omitted); 1e-2 is
+            # still seven orders above the rtol used above.
+            self.assertGreater(gap, 1e-2, label)
+
+    def _cross_term(self, Z):
+        """Contribution of G[0, 1] to V: G01 (z0_i z1_j + z1_i z0_j) within each block."""
+        n = len(self.y)
+        M = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if self.groups[i] == self.groups[j]:
+                    M[i, j] = self.G[0, 1] * (Z[i, 0] * Z[j, 1] + Z[i, 1] * Z[j, 0])
+        return M

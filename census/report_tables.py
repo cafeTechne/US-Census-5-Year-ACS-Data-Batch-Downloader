@@ -26,6 +26,7 @@ import pandas as pd
 from scipy import stats
 
 from .models import interval_se_column
+from .results import interval_description
 from .multitest import adjust_pvalues
 from .results import CorrelationResult, ModelResult
 from .variance import Z90
@@ -173,7 +174,8 @@ def regression_table(
             p_adj[fam] = np.asarray(adjust_pvalues(p[fam], correction), dtype=float)
         else:
             p_adj = p.copy()
-        se_col = interval_se_column(res)
+        info = interval_description(res)
+        se_col = info["basis_column"]
         for i, row in c.iterrows():
             t = str(row["term"])
             if t not in terms:
@@ -184,6 +186,9 @@ def regression_table(
                               "ci_upper": row["ci_upper"], "se_basis": se_col,
                               "se_reported": row.get(se_col), "p_value": p[i], "p_adjusted": p_adj[i],
                               "marker": stars(p_adj[i]), "confidence_level": res.confidence_level,
+                              "distribution": info["distribution"],
+                              "df": (info["df"] or {}).get(t, math.nan) if info["df"] else math.nan,
+                              "interval_defined": t not in info["undefined_terms"],
                               "method": res.method, "n_obs": res.n_obs})
     data = pd.DataFrame(data_rows)
     models = list(results)
@@ -197,15 +202,18 @@ def regression_table(
                 continue
             r = r.iloc[0]
             top[m] = _fmt(r["estimate"], digits) + r["marker"]
-            bottom[m] = (f"({_fmt(r['se_reported'], digits)})" if uncertainty == "se"
-                         else f"[{_fmt(r['ci_lower'], digits)}, {_fmt(r['ci_upper'], digits)}]")
+            if not r["interval_defined"]:
+                bottom[m] = "(SE undefined)" if uncertainty == "se" else "[undefined]"
+            else:
+                bottom[m] = (f"({_fmt(r['se_reported'], digits)})" if uncertainty == "se"
+                             else f"[{_fmt(r['ci_lower'], digits)}, {_fmt(r['ci_upper'], digits)}]")
         disp += [top, bottom]
     disp.append({"Term": "N", **{m: f"{results[m].n_obs:,}" for m in models}})
     notes = []
     for m, res in results.items():
-        se_desc = "standard errors" if uncertainty == "se" else \
-            f"{res.confidence_level * 100:g}% confidence intervals"
-        notes.append(f"{m}: {res.method}; {se_desc} include {', '.join(res.uncertainty_sources)}"
+        info = interval_description(res)
+        notes.append(f"{m}: {res.method}; {info['text']}; uncertainty sources across se_model/se_sampling/"
+                     f"se_total: {', '.join(res.uncertainty_sources)}"
                      + (f" ({'; '.join(res.notes)})" if res.notes else "") + ".")
     if uncertainty == "se":
         bases = sorted({interval_se_column(r) for r in results.values()})

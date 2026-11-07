@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .results import IncompleteReplicatesError
+from .results import IncompleteReplicatesError, ModelResult, interval_description
 
 SCHEMA_VERSION = 1
 AUTHOR_RE = re.compile(r"^(human|agent):\S+$")
@@ -797,15 +797,16 @@ _METHOD_TEXT = {
                       "estimates; sampling standard errors came from refitting on each of the 80 ACS replicate "
                       "estimates, Var = 4/80 sum (b_r - b)^2, combined with the model standard error as "
                       "se_total = sqrt(se_model^2 + se_sampling^2). Reported standard errors, intervals and p-values use "
-                      "the {target_se} ({target} target). Without replicates only model standard "
-                      "errors are reported.", ["vre", "design", "statsmodels"]),
+                      "the {target_se} ({target} target: {estimand}), with normal-theory intervals. Without "
+                      "replicates only model standard errors are reported.", ["vre", "design", "statsmodels"]),
     "regression_calibration": ("Covariates measured with known ACS sampling error ({cov}) were corrected by "
                                "regression calibration with heteroscedastic known error variances; standard "
-                               "errors (se_total, used for intervals and p-values) by row bootstrap "
-                               "re-estimating the calibration.", ["carroll"]),
+                               "errors (se_total, used for normal-theory intervals and p-values) by row bootstrap "
+                               "re-estimating the calibration. Coefficients are {estimand}.", ["carroll"]),
     "simex": ("Covariates measured with known ACS sampling error ({cov}) were corrected by "
               "simulation-extrapolation (SIMEX, quadratic extrapolation) with the measurement-error jackknife "
-              "variance (se_total, used for intervals and p-values).", ["simex", "carroll"]),
+              "variance (se_total, used for normal-theory intervals and p-values). Coefficients are "
+              "{estimand}.", ["simex", "carroll"]),
     "fh_regression": ("The outcome's known sampling variance was modelled with an area-level Fay-Herriot model "
                       "(GLS coefficients, REML variance component).", ["fh"]),
     "fay_herriot": ("Small-area estimates are Fay-Herriot EBLUPs (REML) with Prasad-Rao/Datta-Lahiri MSE.",
@@ -866,9 +867,15 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
         text, refs = _METHOD_TEXT[a["method"]]
         args = a.get("args") or {}
         tgt = args.get("target", "population")
-        text = text.format(model=args.get("model", "ols").upper(), target=tgt,
-                           target_se={"population": "model SE (se_model)", "these_areas": "replicate sampling SE "
-                                      "(se_sampling)", "conservative": "combined SE (se_total)"}.get(tgt, "se_total"),
+        # the same interpretation contract as the fitted result (census.results.interval_description)
+        probe = ModelResult(model_type="", formula=str(a.get("formula") or ""), n_obs=0,
+                            coefficients=pd.DataFrame(columns=["term"]), method=a["method"], uncertainty_sources=[],
+                            confidence_level=level,
+                            diagnostics={"interval_target": tgt} if a["method"] == "fit_replicate" else {})
+        info = interval_description(probe)
+        text = text.format(model=args.get("model", "ols").upper(), target=tgt, estimand=info["estimand"],
+                           target_se={"se_model": "model SE (se_model)", "se_sampling": "replicate sampling SE "
+                                      "(se_sampling)", "se_total": "combined SE (se_total)"}[info["basis_column"]],
                            cov=", ".join(a.get("error_covariates") or args.get("error_covariates") or []),
                            rep=" and replicate-based standard errors" if a.get("replicates") else "")
         target = a.get("formula") or a.get("variables") or a.get("variable")
