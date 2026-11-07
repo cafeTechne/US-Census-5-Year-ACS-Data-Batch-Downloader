@@ -1,7 +1,7 @@
 # Round 12: Verifiable and Reproducible Research Workflows
 
 **Date:** 2026-11-05
-**Status:** Draft proposal; no implementation authorized or started
+**Status:** Implementation authorized by the owner (2026-11-07); Round 11 closed (C1-C7 fixed; R1/R2/Q1/Q2 decided, see PLAN_ROUND_11.md)
 **Prerequisite:** Reconcile the final Round 10 baseline and close or explicitly disposition Round 11's relevant correctness findings
 **Companion:** [PLAN_ROUND_11.md](PLAN_ROUND_11.md)
 
@@ -157,12 +157,12 @@ These are explicit planning stubs with current evidence and a bounded next actio
 | :--- | :--- | :--- | :--- |
 | P12-1 Baseline readiness | Pending; active Round 10 changes remain protected | Revalidate Round 11 findings and final contracts at handoff | No implementation against an assumed historical baseline |
 | P12-2 Independent references | Source pass complete; A1 identifies limited-independence examples, not invalid results | Select two smallest nonredundant reference cases; derive expected values independently | If Round 11 supplied an equivalent oracle, reuse it and reduce scope |
-| P12-3 Report versus gate | Source-established unconditional zero exit from current report command | Decide intended command compatibility and required-study failure signaling | No silent exit-code change or second validation runner |
+| P12-3 Report versus gate | **Decided 2026-11-07: both.** The command stays a report by default (exit 0, compatible); a `--gate` flag exits nonzero when any required study fails or is missing; info rows never fail the gate | Implement in scripts/inference_validation.py with synthetic report tests | No silent exit-code change or second validation runner |
 | P12-4 Interpretation fields | Existing ModelResult, interval helper and table basis already present | Inventory selected artifacts against B1 before adding fields | No universal schema or duplicated target mapping |
 | P12-5 Example choice | Recommend existing income/population manifest and regression/preregistered recipes | Confirm a complete deterministic input/derivation/target path; label synthetic evidence | If completion requires new data acquisition/engine, simplify the example |
 | P12-6 Reproducibility limits | Existing bundle, manifest and extraction replay have different roles | Verify exact supported promises using current tests and frozen adapters | No claim of full analysis replay from extraction metadata alone |
 | P12-7 Resource/runtime budget | No benchmark or full-suite runtime measured in planning | Measure the selected checks before setting PR/release budgets | Do not require long stochastic suites on every documentation change |
-| P12-8 Human readability | Not evaluated; no user study claimed | Second reader follows the canonical workflow and interprets artifacts | Correct confusing instructions before adding another example |
+| P12-8 Human readability | Not evaluated; no user study claimed. **Owner decision: an independent agent session may act as the second reader** (agents may review, as for overrides) | Second reader follows the canonical workflow and interprets artifacts | Correct confusing instructions before adding another example |
 
 ## 10. Explicit deferrals and reopening criteria
 
@@ -188,3 +188,17 @@ Deferral is not a future promise. Keep this list short; do not convert every ide
 - Earlier plans, unrelated edits, datasets and credentials remain preserved. Implementation handoff lists actual changes, results, compatibility impact, remaining decisions and deferred work; no commits or pushes without permission.
 
 **Current handoff:** Draft informed by three parallel read-only reviews and parent source verification. No implementation, dependency setup, new runtime results, external verification or release action is claimed.
+
+---
+
+## 12. Implementation status (2026-11-07)
+
+| Slice | Result |
+| :--- | :--- |
+| 12.A Independent evidence | Dense hand-assembled references for the known-variance multilevel GLS layer (fixed components, heterogeneous D, within-block covariance) and the two-group DiD (explicit contrasts, reference-period edge case); no production defect found. `scripts/inference_validation.py --gate` (P12-3: report by default, gate on request); `docs/audits/CHECK_MAP.md` maps each method to its focused test and release study |
+| 12.B Interpretation | `census.results.interval_description` is the single source for estimand, interval basis, level, normal vs t (df), undefined terms, and replicate completeness; six disagreements fixed across serialization, tables, figures, methods text, workflow guidance, and CLI/MCP adapters |
+| 12.C Executable workflow | `docs/reference_workflow.md` with offline frozen synthetic inputs; `tests/test_reference_workflow.py` runs the documented commands twice with network refused and compares substantive results; blocked case under strict replicate policy. Fixed: results bundles lost hypothesis results (truncated repr) |
+| Second reader (P12-8) | Independent agent followed the doc with no prior context; all expected values reproduced; verdict "usable with fixes". Fixed: blocked runs labeled `confirmatory` (now `confirmatory_incomplete`); synthetic data cited as Census API data (new manifest `data_source`, SYNTHETIC citations, caller-supplied replicates described and hashed); doc setup, cleanup, fixture hash, method naming |
+
+**Deferred:** multilevel and DiD design studies are not yet in the `--gate` required set (run on demand per CHECK_MAP.md); CLI/MCP `run_manifest` cannot take replicates (Python route documented); no CLI command loads frozen responses into the cache (Python step documented).
+

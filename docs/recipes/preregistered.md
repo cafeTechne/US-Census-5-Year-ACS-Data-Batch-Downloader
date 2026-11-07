@@ -7,3 +7,5 @@ Goal: a confirmatory analysis fixed before the data are pulled.
 3. Run it with `run_manifest` and the manifest path. It runs `plan_extraction`, the download, derivations and models exactly as written.
 4. Do not change the manifest after seeing results. Anything you run outside it on the same data is exploratory; label it so.
 5. Report the manifest hash with every result, plus estimates with 90% MOEs or model SEs with their uncertainty sources.
+
+Worked example (synthetic, offline, executable): docs/reference_workflow.md runs examples/manifests/income_population_tracts.json end to end, including a rerun check and a blocked incomplete-replicates case.

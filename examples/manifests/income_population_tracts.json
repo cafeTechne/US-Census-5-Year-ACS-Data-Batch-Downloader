@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "title": "Median household income and population size, Manhattan tracts (ACS 2015-2019)",
+  "title": "Median household income and population size across census tracts, ACS 2015-2019",
   "authors": ["human:example-researcher", "agent:claude"],
   "created": "2026-11-02T00:00:00Z",
   "releases": [2019],

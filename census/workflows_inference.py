@@ -16,6 +16,7 @@ import pandas as pd
 
 from census import errors
 from census.workflows import ROOT, _jsonable, _load_frame, _records, _replicates_for, _write_frame
+from census.results import interval_description
 
 try:  # statsmodels formulas raise patsy errors for bad formulas
     from patsy import PatsyError as _PatsyError
@@ -44,6 +45,25 @@ def replicate_flag(result: Any) -> str:
     return f" (REPLICATES INCOMPLETE: {info['note']})"
 
 
+def result_summary(result: Any) -> str:
+    """``result.summary()`` plus the REPLICATES INCOMPLETE flag, which appears at most once."""
+    text = result.summary()
+    return text if "REPLICATES INCOMPLETE" in text else text + replicate_flag(result)
+
+
+def interval_next_step(info: Dict[str, Any]) -> str:
+    """next_step guidance from census.results.interval_description (one wording for every model workflow)."""
+    dist = "t with each coefficient's df" if info["distribution"] == "t" else "normal"
+    step = (f"make_table or make_figure; report each coefficient with {info['basis_column']} (the SE behind its "
+            f"{info['level'] * 100:g}% {dist} confidence interval and p-value; includes "
+            f"{', '.join(info['basis_sources']) or 'no listed source'}) as {info['estimand']}")
+    if info["undefined_terms"]:
+        step += f"; uncertainty is undefined for {info['undefined_terms']}: report no interval or significance there"
+    if info["replicates_incomplete"]:
+        step += "; disclose that replicates were incomplete (sampling SE may be understated)"
+    return step
+
+
 def _fail(code: str, message: str, next_step: str = "") -> Dict[str, Any]:
     out = errors.error_result(code, message)
     out["summary"] = message
@@ -61,7 +81,8 @@ def _out_dir(path: Optional[str], default: str) -> str:
 def _read_replicates(path: Optional[str]) -> Optional[pd.DataFrame]:
     if not path:
         return None
-    return pd.read_parquet(path) if path.lower().endswith(".parquet") else pd.read_csv(path, dtype={"GEOID": str})
+    from census.manifest import read_replicates
+    return read_replicates(path)
 
 
 def build_analysis_frame(
@@ -203,13 +224,13 @@ def fit_model(
     # Report the SE that the displayed intervals and p-values actually use
     # (PLAN_ROUND_11 C7): se_model for target="population", se_sampling for
     # "these_areas", se_total for "conservative" and the corrected methods.
-    se_basis = models.interval_se_column(result)
+    info = interval_description(result)
+    se_basis = info["basis_column"]
     out["interval_se_column"] = se_basis
-    next_step = (f"make_table or make_figure; report each coefficient with {se_basis} (the SE behind its "
-                 "confidence interval and p-value) and the uncertainty sources it includes")
+    next_step = interval_next_step(info)
     if method == "simex":
         next_step += "; SIMEX under-covers and is exploratory only, not for confirmatory claims"
-    return _ok(f"{result.summary()}{replicate_flag(result)}; intervals and p-values use {se_basis}", next_step,
+    return _ok(f"{result_summary(result)}; intervals and p-values use {se_basis}", next_step,
                **{k: v for k, v in out.items() if k != "summary"})
 
 
@@ -478,11 +499,19 @@ def create_manifest(manifest_path: str) -> Dict[str, Any]:
                "commit the manifest, then run_manifest with the same path", **res)
 
 
-def run_manifest(manifest_path: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
-    """Run a pre-registered analysis exactly as written: extraction, derived
-    variables, models, tests with the registered correction, then a results
-    bundle (tables, figures, methods.md). Every output carries the manifest hash;
-    anything that could not run is listed under deviations, never substituted.
+def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
+                 replicates_path: Optional[str] = None, replicates_synthetic: Optional[bool] = None) -> Dict[str, Any]:
+    """Run a pre-registered analysis exactly as written and write a results bundle
+    (tables, figures, methods.md); anything that could not run is a deviation.
+
+    Args:
+        manifest_path: the manifest JSON.
+        replicates_path: optional CSV/Parquet of replicate estimates (long format:
+            GEOID, Year, variable, rep_1..rep_80), needed for "replicates": "required".
+        replicates_synthetic: mark supplied replicates synthetic.
+
+    Returns analysis_status, data_source, replicates, deviations, hypotheses;
+    success is False when analysis_status is "confirmatory_incomplete".
 
     Example: run_manifest("examples/manifests/income_population_tracts.json")
     """
@@ -490,7 +519,12 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None) -> Dict[s
 
     folder = _out_dir(output_dir, "manifest_run")
     try:
-        res = _run(manifest_path, folder)
+        reps = _read_replicates(replicates_path)
+    except (FileNotFoundError, OSError, ValueError, ImportError) as exc:
+        return _fail(errors.INVALID_INPUT, f"replicates_path unreadable: {type(exc).__name__}: {exc}",
+                     "pass a CSV or Parquet file in the analysis replicate long format")
+    try:
+        res = _run(manifest_path, folder, replicates=reps, replicates_synthetic=replicates_synthetic)
     except (FileNotFoundError, OSError, ValueError) as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     if res.get("errors"):
@@ -498,18 +532,24 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None) -> Dict[s
                      "fix the manifest with create_manifest")
     hyp = res.get("hypotheses")
     devs = res.get("deviations") or []
+    status = res.get("analysis_status")
     out = {
         "manifest_hash": res.get("manifest_hash"), "output_dir": res.get("output_dir"),
-        "deviations": devs, "hypotheses": hyp if isinstance(hyp, pd.DataFrame) else hyp,
-        "bundle": res.get("bundle"),
+        "analysis_status": status, "data_source": res.get("data_source"), "replicates": res.get("replicates"),
+        "deviations": devs, "hypotheses": hyp, "bundle": res.get("bundle"),
     }
     payload = _jsonable(out)
     if not res.get("success"):
-        payload.update({"success": False, "error_code": errors.NO_DATA,
-                        "error": f"Manifest ran with {len(devs)} deviation(s) that block results.",
-                        "summary": f"Run incomplete: {len(devs)} deviation(s); see deviations.",
-                        "next_step": "report the deviations; do not substitute variables or releases"})
+        kinds = sorted({str(d.get("kind")) for d in devs})
+        payload.update({"success": False, "error_code": errors.INVALID_INPUT if "data_source_mismatch" in kinds
+                        else errors.NO_DATA,
+                        "error": f"Manifest ran with {len(devs)} deviation(s) that block confirmatory results "
+                                 f"({', '.join(kinds)}); analysis_status {status}.",
+                        "summary": f"Run incomplete ({status}): {len(devs)} deviation(s); see deviations.",
+                        "next_step": "report the run as confirmatory_incomplete with its deviations; do not "
+                                     "substitute variables, releases or data sources"
+                                     + ("; supply replicates_path" if "replicates_unavailable" in kinds else "")})
         return payload
-    return _ok(f"Manifest run complete; {len(devs)} deviation(s); results in {res.get('output_dir')}.",
+    return _ok(f"Manifest run complete ({status}); {len(devs)} deviation(s); results in {res.get('output_dir')}.",
                "read methods.md and the tables in the output folder; report deviations if any",
                **out)

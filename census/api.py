@@ -233,7 +233,11 @@ class CensusAPIClient:
         max_retries: int = 3,
         backoff_factor: float = 1.0,
         cache: Optional[QueryCache] = None,
+        synthetic: Optional[bool] = None,
     ) -> None:
+        # synthetic: True when this client serves generated (non-Census) data;
+        # None defers to the cache's synthetic marker (QueryCache.mark_synthetic)
+        self._synthetic = synthetic
         self.api_key = api_key if api_key is not None else DEFAULT_API_KEY
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -251,6 +255,26 @@ class CensusAPIClient:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
+
+    @property
+    def synthetic(self) -> bool:
+        """True when the data this client serves are synthetic (explicit flag or marked cache)."""
+        if getattr(self, "_synthetic", None) is not None:
+            return bool(self._synthetic)
+        return self.synthetic_marker() is not None
+
+    @synthetic.setter
+    def synthetic(self, value: Optional[bool]) -> None:
+        self._synthetic = value
+
+    def synthetic_marker(self) -> Optional[Dict[str, Any]]:
+        cache = getattr(self, "cache", None)
+        if cache is None or not hasattr(cache, "synthetic_marker"):
+            return None
+        try:
+            return cache.synthetic_marker()
+        except Exception:  # noqa: BLE001 - an unreadable marker is no marker
+            return None
 
     def endpoint(self, year: int, dataset: str = "acs5") -> str:
         if dataset not in DATASETS:

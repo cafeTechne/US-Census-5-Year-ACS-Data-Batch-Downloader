@@ -159,3 +159,149 @@ class TestSimulationSmoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTwoGroupDenseReference(unittest.TestCase):
+    """Independent two-group DiD reference from hand-built differences (PLAN_ROUND_12 A1).
+
+    Model (census.did docstring): y_it = alpha_i + lambda_t + delta w_it + u_it
+    + e_it, u ~ N(0, A), e ~ N(0, SE_it^2) independent. A is estimated by
+    REML in production; this test reads the reported A and (a) rebuilds the
+    GLS answer at that A from first principles and (b) checks that A is a
+    stationary point of an independently written REML likelihood. The
+    expected values never call census.did/census.multilevel helpers:
+
+    * Differences: for unit i with levels covariance Sigma_i = A I +
+      diag(SE_i^2), the contrast C_i (rows e_t - e_ref) gives d_i = C_i y_i
+      with covariance C_i Sigma_i C_i' (this carries the shared reference-
+      period sampling error without writing it as a formula).
+    * Design rows per difference (t vs ref): period[t] dummies and
+      did = treated_i * 1[t >= treatment_period].
+    * Cross-check: GLS on LEVELS with explicit unit dummies and Sigma =
+      blockdiag(Sigma_i) must give the same period/DiD coefficients.
+    Edge cases: any pre-treatment reference gives the same answer (it would
+    not if the reference-period error term were dropped); a post-treatment
+    reference raises ValueError.
+    """
+
+    YEARS = [2008, 2013, 2018]  # non-overlapping 5-year releases
+    TREAT = 2018
+    # unit: (treated, levels by year, SEs by year)
+    UNITS = {
+        "u1": (1, [10.0, 13.5, 15.8], [0.8, 0.5, 1.4]),
+        "u2": (1, [14.0, 13.2, 20.1], [1.6, 0.9, 0.6]),
+        "u3": (1, [9.0, 12.8, 12.0], [0.4, 1.2, 0.7]),
+        "u4": (0, [12.0, 11.1, 14.9], [1.1, 0.6, 1.0]),
+        "u5": (0, [8.5, 12.4, 10.2], [0.7, 1.5, 0.5]),
+        "u6": (0, [15.0, 14.2, 18.3], [0.9, 0.4, 1.3]),
+    }
+
+    def _frame(self):
+        rows = [{"GEOID": u, "Year": t, "treated": tr, "y": ys[k], "y_se": ss[k]}
+                for u, (tr, ys, ss) in self.UNITS.items() for k, t in enumerate(self.YEARS)]
+        return pd.DataFrame(rows)
+
+    def _differenced(self, A, ref):
+        others = [t for t in self.YEARS if t != ref]
+        r = self.YEARS.index(ref)
+        blocks_d, blocks_X, blocks_V, blocks_S = [], [], [], []
+        for tr, ys, ss in self.UNITS.values():
+            C = np.zeros((len(others), len(self.YEARS)))
+            for k, t in enumerate(others):
+                C[k, self.YEARS.index(t)] = 1.0
+                C[k, r] = -1.0
+            D = np.diag(np.square(ss))
+            blocks_d.append(C @ np.array(ys))
+            blocks_V.append(C @ (A * np.eye(len(self.YEARS)) + D) @ C.T)
+            blocks_S.append(C @ D @ C.T)
+            blocks_X.append(np.array([[1.0 * (t == p) for p in others] + [tr * (t >= self.TREAT)] for t in others]))
+        m = len(others)
+        n = m * len(blocks_d)
+        V = np.zeros((n, n))
+        S = np.zeros((n, n))
+        for i, (Vb, Sb) in enumerate(zip(blocks_V, blocks_S)):
+            V[i * m:(i + 1) * m, i * m:(i + 1) * m] = Vb
+            S[i * m:(i + 1) * m, i * m:(i + 1) * m] = Sb
+        return np.concatenate(blocks_d), np.vstack(blocks_X), V, S, [f"period[{p}]" for p in others] + ["did"]
+
+    @staticmethod
+    def _gls(d, X, V):
+        Vi = np.linalg.inv(V)
+        Q = np.linalg.inv(X.T @ Vi @ X)
+        return Q @ X.T @ Vi @ d, Q, Vi
+
+    def _levels(self, A):
+        """GLS on levels with unit dummies (no differencing): period/did columns only returned."""
+        ys, X, var = [], [], []
+        units = list(self.UNITS)
+        for i, (tr, yl, ss) in enumerate(self.UNITS.values()):
+            for k, t in enumerate(self.YEARS):
+                unit_d = [1.0 * (i == j) for j in range(len(units))]
+                period_d = [1.0 * (t == p) for p in self.YEARS[:-1]]  # last period is the omitted category
+                X.append(unit_d + period_d + [tr * (t >= self.TREAT)])
+                ys.append(yl[k])
+                var.append(A + ss[k] ** 2)
+        b, Q, _ = self._gls(np.array(ys), np.array(X), np.diag(var))
+        return b[-1], Q[-1, -1]
+
+    def _reml(self, A, d, X):
+        V = self._differenced(A, self.YEARS[1])[2]
+        b, Q, Vi = self._gls(d, X, V)
+        r = d - X @ b
+        return -0.5 * (np.linalg.slogdet(V)[1] - np.linalg.slogdet(Q)[1] + r @ Vi @ r)
+
+    def test_matches_hand_built_differences_and_levels(self):
+        res = difference_in_differences(self._frame(), "y", "treated", self.TREAT, se="y_se")
+        A = res.diagnostics["A_area_period_var"]
+        # Data chosen so REML A is interior (about 2.75, comparable to SE^2), so
+        # both A and the known variances shape V.
+        self.assertGreater(A, 0.5)
+        d, X, V, S, names = self._differenced(A, ref=2013)
+        beta, Q, Vi = self._gls(d, X, V)
+        tab = res.coefficients.set_index("term")
+        # Tolerance: dense problem of 12 rows with cond(V) < 1e2 (asserted),
+        # so double-precision paths agree to ~1e-13; rtol 1e-9 is ample and
+        # far tighter than the effect of any error checked below (>1e-2).
+        self.assertLess(np.linalg.cond(V), 1e2)
+        np.testing.assert_allclose(tab.loc[names, "estimate"].to_numpy(), beta, rtol=1e-9)
+        np.testing.assert_allclose(tab.loc[names, "se_model"].to_numpy(), np.sqrt(np.diag(Q)), rtol=1e-9)
+        Ssamp = Q @ X.T @ Vi @ S @ Vi @ X @ Q
+        np.testing.assert_allclose([res.diagnostics["se_sampling_analytic"][n] for n in names],
+                                   np.sqrt(np.diag(Ssamp)), rtol=1e-9)
+        # Levels + unit dummies: the fixed-effects GLS the differencing claims to equal.
+        did_lv, var_lv = self._levels(A)
+        self.assertAlmostEqual(tab.loc["did", "estimate"], did_lv, delta=1e-9 * abs(did_lv))
+        self.assertAlmostEqual(tab.loc["did", "se_model"], math.sqrt(var_lv), delta=1e-9)
+        # A is a REML stationary point of the independent likelihood: a 1%
+        # move either way does not increase it (production maximizer
+        # tolerance is far below 1%; the loglik is smooth in A).
+        ll = self._reml(A, d, X)
+        for f in (0.99, 1.01):
+            self.assertGreaterEqual(ll + 1e-10, self._reml(A * f, d, X))
+        # Sensitivity: dropping the shared reference-period sampling error
+        # (V without the off-diagonal D_ref terms) visibly changes the answer:
+        # measured did 1.640 -> 1.551 and Var(did) 3.64 -> 4.18.
+        V_wrong = V.copy()
+        for i in range(0, len(d), 2):
+            V_wrong[i, i + 1] = V_wrong[i + 1, i] = A
+        bw, Qw, _ = self._gls(d, X, V_wrong)
+        self.assertGreater(abs(bw[-1] - beta[-1]) + abs(Qw[-1, -1] - Q[-1, -1]), 1e-2)
+
+    def test_reference_period_edge_cases(self):
+        frame = self._frame()
+        default = difference_in_differences(frame, "y", "treated", self.TREAT, se="y_se")
+        early = difference_in_differences(frame, "y", "treated", self.TREAT, se="y_se", reference=2008)
+        self.assertEqual(early.diagnostics["reference_period"], 2008)
+        # Any pre-treatment reference is a full-rank contrast of the same
+        # levels model, so the DiD and its SE are invariant (REML A too).
+        a, b = (r.coefficients.set_index("term").loc["did"] for r in (default, early))
+        # rtol 1e-6: A comes from a 1-D optimizer run separately for each
+        # reference, so agreement is limited by its tolerance, not algebra.
+        self.assertAlmostEqual(a["estimate"], b["estimate"], delta=1e-6 * abs(a["estimate"]))
+        self.assertAlmostEqual(a["se_model"], b["se_model"], delta=1e-6 * a["se_model"])
+        # Independent check at reference 2008 too.
+        d, X, V, _, names = self._differenced(early.diagnostics["A_area_period_var"], ref=2008)
+        beta = self._gls(d, X, V)[0]
+        np.testing.assert_allclose(early.coefficients.set_index("term").loc[names, "estimate"], beta, rtol=1e-9)
+        with self.assertRaisesRegex(ValueError, "pre-treatment reference"):
+            difference_in_differences(frame, "y", "treated", self.TREAT, se="y_se", reference=2018)

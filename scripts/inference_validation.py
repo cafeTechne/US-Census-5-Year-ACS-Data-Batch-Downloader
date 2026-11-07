@@ -8,8 +8,15 @@ supported interval method; writes
     docs/audits/inference_validation.csv   one row per (method, target)
 
 Usage:
-    python scripts/inference_validation.py          # full configuration (~30 min)
+    python scripts/inference_validation.py          # full configuration (~40 min)
     python scripts/inference_validation.py --fast   # the CI configuration
+    python scripts/inference_validation.py --gate   # also exit 1 on a failed/missing required study
+
+Report versus gate (PLAN_ROUND_12 decision P12-3): by default the command is a
+report generator and always exits 0. With --gate it exits 1 when any gated
+row has status FAIL or a required study (REQUIRED_STUDIES) produced no gated
+row (missing); rows with status "info" never fail the gate. See
+docs/audits/CHECK_MAP.md for which study covers which method.
 """
 
 import argparse
@@ -23,9 +30,34 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from census.simulation import BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, run_study, spatial_config  # noqa: E402
+from census.simulation import (BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, STUDIES,  # noqa: E402
+                               run_study, spatial_config)
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
+
+# Studies whose gated rows are release claims (the default run of this script).
+# Other studies (fit_replicate_noisy_x, simex, *_low_rel, morans_i_replicate_se)
+# report info rows only. Fixed here, not derived from the results, so a study
+# that silently stops producing gated rows is reported as missing.
+REQUIRED_STUDIES = ("fit_replicate", "regression_calibration", "fay_herriot", "correlation", "linear_trend",
+                    "spatial_fay_herriot")
+
+
+def gate(df, required=REQUIRED_STUDIES):
+    """Release-gate verdict for a results frame (columns study, method, target, status).
+
+    Returns (ok, problems). A problem is a gated row (status other than
+    "info") whose status is not "pass", or a required study with no gated
+    row in ``df``. Info rows never fail the gate.
+    """
+    problems = []
+    gated = df[df["status"] != "info"] if len(df) else df
+    for r in gated.to_dict(orient="records"):
+        if r["status"] != "pass":
+            problems.append(f"{r['study']}: {r['method']} / {r['target']}: status {r['status']}")
+    present = set(gated["study"]) if len(gated) else set()
+    problems += [f"{s}: required study missing (no gated rows in results)" for s in required if s not in present]
+    return not problems, problems
 
 
 def _f(x, d=3):
@@ -98,18 +130,30 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fast", action="store_true", help="CI configuration (prints only unless --out)")
     ap.add_argument("--out", default=None, help="output Markdown path")
-    ap.add_argument("--studies", nargs="*", default=None)
+    ap.add_argument("--studies", nargs="+", default=None,
+                    help="run only these studies (at least one name; omit the flag for every study)")
+    ap.add_argument("--gate", action="store_true",
+                    help="exit 1 if a required study fails or is missing (default: report only, exit 0); "
+                         "with --studies only the selected required studies are required")
     args = ap.parse_args()
     cfg, label = (FAST, "fast") if args.fast else (FULL, "full")
     out = args.out or (None if args.fast else OUT_MD)
     t0 = datetime.now()
-    df = run_study(cfg, studies=args.studies, log=lambda m: print(m, flush=True))
+    import pandas as _pd
+
+    unknown = sorted(set(args.studies or ()) - set(STUDIES))
+    if unknown:
+        ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
+    main_studies = None if args.studies is None else [s for s in args.studies if s not in SPATIAL_STUDIES]
+    frames = []
+    if main_studies is None or main_studies:
+        frames.append(run_study(cfg, studies=main_studies, log=lambda m: print(m, flush=True)))
     spatial = [s for s in SPATIAL_STUDIES if args.studies is None or s in args.studies]
     if spatial:  # Round 9 spatial studies (own lattice configuration)
-        sdf = run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True))
-        import pandas as _pd
-
-        df = _pd.concat([df, sdf], ignore_index=True)
+        frames.append(run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True)))
+    frames = [f for f in frames if len(f)]
+    df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(
+        columns=["study", "method", "target", "reps", "nominal", "coverage", "mc_se", "status"])
     secs = (datetime.now() - t0).total_seconds()
     if out:
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -118,7 +162,14 @@ def main() -> int:
         df.to_csv(os.path.splitext(out)[0] + ".csv", index=False, lineterminator="\n")
         print(f"wrote {out}")
     print(df[["study", "method", "target", "coverage", "mc_se", "status"]].to_string(index=False))
-    return 0
+    if not args.gate:
+        return 0
+    required = [s for s in REQUIRED_STUDIES if args.studies is None or s in args.studies]
+    ok, problems = gate(df, required)
+    print(f"gate: {'PASS' if ok else 'FAIL'} (required studies: {', '.join(required) or 'none selected'})")
+    for p in problems:
+        print(f"  - {p}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

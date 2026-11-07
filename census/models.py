@@ -67,6 +67,8 @@ from scipy import stats as sps
 from .analysis import formula_variables
 from .results import (
     COEFFICIENT_COLUMNS,
+    TARGET_SE,
+    interval_description,
     SOURCE_MODEL,
     SOURCE_SAMPLING_MODEL,
     SOURCE_SAMPLING_REPLICATE,
@@ -180,7 +182,7 @@ def _z(confidence_level: float) -> float:
 INTERVAL_TARGETS = ("population", "these_areas", "conservative")
 
 
-_TARGET_SE = {"population": "se_model", "these_areas": "se_sampling", "conservative": "se_total"}
+_TARGET_SE = TARGET_SE
 
 
 def interval_se_column(result: Any) -> str:
@@ -188,9 +190,9 @@ def interval_se_column(result: Any) -> str:
 
     fit_replicate records ``diagnostics['interval_target']``; corrected
     methods (regression calibration, SIMEX) and Fay-Herriot use se_total.
+    See census.results.interval_description for the full interpretation.
     """
-    target = (getattr(result, "diagnostics", None) or {}).get("interval_target")
-    return _TARGET_SE.get(target, "se_total")
+    return interval_description(result)["basis_column"]
 
 
 def _table(params: pd.Series, se_model: pd.Series, se_sampling: pd.Series, confidence_level: float,
@@ -381,8 +383,7 @@ def fit_replicate(
                      "replicates, regression_calibration/simex for noisy covariates, or " + FH_POINTER)
 
     table = _table(params, bse, se_sampling, confidence_level, target)
-    notes.append(f"intervals and p-values use the '{target}' target ("
-                 + {"population": "se_model", "these_areas": "se_sampling", "conservative": "se_total"}[target] + ")")
+    notes.append(f"intervals and p-values use the '{target}' target ({TARGET_SE[target]})")
     diagnostics["interval_target"] = target
     diagnostics.update(_numeric_diagnostics(formula, data, full, model, table, weights, exposure,
                                             n_trials, cv_threshold))

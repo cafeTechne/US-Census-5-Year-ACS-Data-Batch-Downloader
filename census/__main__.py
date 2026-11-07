@@ -356,6 +356,16 @@ def cmd_tool(args: argparse.Namespace) -> int:
         kwargs = json.loads(args.arguments) if args.arguments else {}
     except json.JSONDecodeError as exc:
         return _emit(errors.error_result(errors.INVALID_INPUT, f"Arguments are not valid JSON: {exc}"), args.json)
+    if not isinstance(kwargs, dict):
+        return _emit(errors.error_result(errors.INVALID_INPUT, "Arguments must be a JSON object."), args.json)
+    for item in getattr(args, "arg", None) or []:
+        key, sep, raw = item.partition("=")
+        if not sep or not key:
+            return _emit(errors.error_result(errors.INVALID_INPUT, f"--arg needs KEY=VALUE, got {item!r}"), args.json)
+        try:  # JSON values (numbers, lists, true) when valid, else the literal string (e.g. a Windows path)
+            kwargs[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            kwargs[key] = raw
     try:
         result = fn(**kwargs)
     except TypeError as exc:
@@ -525,6 +535,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tool", help="run any MCP workflow tool by name, e.g. tool fit_model '{\"input_path\": ...}'")
     p.add_argument("name", help="tool name, e.g. fit_model, small_area_estimates, make_figure")
     p.add_argument("arguments", nargs="?", help="JSON object of keyword arguments")
+    p.add_argument("--arg", action="append", metavar="KEY=VALUE",
+                   help="one keyword argument (repeatable); VALUE is parsed as JSON when valid, else kept as a "
+                        "string, so paths need no JSON escaping (portable to Windows backslash paths)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tool)
 

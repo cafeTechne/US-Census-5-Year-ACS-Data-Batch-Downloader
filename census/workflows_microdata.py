@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional
 
 from census import errors
 from census.workflows import _load_frame, _records, _write_frame
-from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, replicate_flag
+from census.results import interval_description
+from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, interval_next_step, result_summary
 
 _ERRORS = (FileNotFoundError, OSError, KeyError, ValueError, TypeError, RuntimeError, ZeroDivisionError)
 _PUMS_NAME = re.compile(r"\b[A-Z][A-Z0-9_]{1,15}\b")
@@ -115,7 +116,7 @@ def pums_regression(
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
     warns = _memory_warnings(df)
-    return _ok(res.summary() + replicate_flag(res) + _warning_suffix(warns),
+    return _ok(result_summary(res) + _warning_suffix(warns),
                "report coefficients with the SE named in uncertainty_sources",
                **{k: v for k, v in out.items() if k not in ("summary", "warnings")}, warnings=warns)
 
@@ -148,7 +149,7 @@ def multilevel_model(
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary() + replicate_flag(res), "report coefficients with df and the SE named in uncertainty_sources",
+    return _ok(result_summary(res), interval_next_step(interval_description(res)),
                **{k: v for k, v in out.items() if k != "summary"})
 
 
@@ -190,7 +191,7 @@ def difference_in_differences(
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(res.summary() + replicate_flag(res), "report the DiD estimate with its interval and the parallel-trends result",
+    return _ok(result_summary(res), "report the DiD estimate with its interval and the parallel-trends result",
                **{k: v for k, v in out.items() if k != "summary"})
 
 

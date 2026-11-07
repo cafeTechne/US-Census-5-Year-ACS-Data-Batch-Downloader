@@ -32,7 +32,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from scipy import stats
 
-from .results import CorrelationResult, ModelResult, SmallAreaResult
+from .results import CorrelationResult, ModelResult, SmallAreaResult, interval_description, interval_row
 from .variance import Z90
 
 OKABE_ITO = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
@@ -286,8 +286,10 @@ def coefficient_plot(
     if isinstance(results, ModelResult):
         results = {results.method: results}
     rows = []
+    infos = {label: interval_description(res) for label, res in results.items()}
     for label, res in results.items():
         c = res.coefficients
+        info = infos[label]
         for _, row in c.iterrows():
             t = str(row["term"])
             if drop_intercept and t.lower() in ("intercept", "const", "(intercept)"):
@@ -296,11 +298,12 @@ def coefficient_plot(
                 continue
             rows.append({"model": label, "term": t, "estimate": row["estimate"],
                          "ci_lower": row["ci_lower"], "ci_upper": row["ci_upper"],
-                         "se_total": row.get("se_total", math.nan),
+                         "se_total": row.get("se_total", math.nan), **interval_row(info, t, row),
                          "confidence_level": res.confidence_level, "method": res.method,
                          "uncertainty_sources": ";".join(res.uncertainty_sources)})
     values = pd.DataFrame(rows, columns=["model", "term", "estimate", "ci_lower", "ci_upper",
-                                         "se_total", "confidence_level", "method",
+                                         "se_total", "se_basis", "se_reported", "distribution", "df",
+                                         "interval_defined", "confidence_level", "method",
                                          "uncertainty_sources"])
     order = list(terms) if terms is not None else list(dict.fromkeys(values["term"]))
     models = list(results.keys())
@@ -313,8 +316,10 @@ def coefficient_plot(
         ax.axvline(0, color="0.6", lw=0.6, ls=":")
         for i, m in enumerate(models):
             sub = values[values["model"] == m]
+            # undefined uncertainty: draw the point without whiskers (never a zero-width interval)
+            err = np.nan_to_num(_err(sub["estimate"], sub["ci_lower"], sub["ci_upper"]), nan=0.0)
             ax.errorbar(sub["estimate"].to_numpy(float), sub["position"].to_numpy(float),
-                        xerr=_err(sub["estimate"], sub["ci_lower"], sub["ci_upper"]),
+                        xerr=err,
                         fmt=MARKERS[i % len(MARKERS)], color=SERIES_COLORS[i % len(SERIES_COLORS)],
                         mfc="white" if i % 2 else None, ms=4, capsize=0, elinewidth=0.8,
                         ls="none", label=str(m))
@@ -323,11 +328,14 @@ def coefficient_plot(
         ax.set_xlabel("Coefficient")
         if k > 1:
             ax.legend(frameon=False, loc="best")
-    levels = sorted({_pct(r.confidence_level) for r in results.values()})
-    methods = "; ".join(f"{m}: {r.method} (SEs include {', '.join(r.uncertainty_sources)})"
-                        for m, r in results.items())
-    caption = _caption(title or "Model coefficients with confidence intervals", data_source,
-                       f"Bars show {' / '.join(levels)} confidence intervals", methods)
+    methods = "; ".join(f"{m}: {r.method}, {infos[m]['text']}" for m, r in results.items())
+    shown = ", ".join(f"{m}: {_pct(i['level'])} {'t (per-term df)' if i['distribution'] == 't' else 'normal'} "
+                      f"from {i['basis_column']}" for m, i in infos.items())
+    undefined = [f"{m}: {', '.join(g['term'])}" for m, g in values[~values["interval_defined"].astype(bool)].groupby(
+        "model", sort=False)]
+    interval = (f"Bars show confidence intervals ({shown})"
+                + (f"; no bar is drawn where uncertainty is undefined ({'; '.join(undefined)})" if undefined else ""))
+    caption = _caption(title or "Model coefficients with confidence intervals", data_source, interval, methods)
     prov = _provenance("coefficient_plot", data_source, None, result_id, manifest_hash,
                        dict(provenance or {}, models={m: r.summary() for m, r in results.items()},
                             model_provenance={m: r.provenance for m, r in results.items()}))
