@@ -1,5 +1,7 @@
 # US Census ACS 5-Year Data Batch Downloader
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23925301.svg)](https://doi.org/10.5281/zenodo.23925301)
+
 A Python toolkit for extracting American Community Survey (ACS) 5-year data from the US Census Bureau API into research-ready files. It handles multi-year, multi-geography batches. It keeps estimates paired with their margins of error and derives proportions, ratios, sums, medians for custom areas, and significance tests with multiple-comparison correction, using Census replicate weights for exact variances where Census publishes them. It converts dollar values to constant dollars with the Census Bureau's index (R-CPI-U-RS), harmonizes tract panels across the 2010/2020 boundary change, and writes tidy panels, Parquet files, codebooks, and replayable provenance metadata.
 
 Calculations are checked against values the Census Bureau publishes itself (profile percentages, comparison-profile inflation adjustments and significance flags, replicate-based MOEs, medians). See [Validation](#validation-against-census-published-values).
@@ -303,7 +305,7 @@ python -m census validate-crosswalks
 
 ## Citation and attribution
 
-Created and maintained by [cafeTechne](https://github.com/cafeTechne). If you use this toolkit in research, cite it using [CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" button produces APA and BibTeX), and cite the Census Bureau as the source of the data, naming the ACS 5-year release(s) and table(s) used. Forks and derivative works must keep this attribution and the license notice.
+Created and maintained by [cafeTechne](https://github.com/cafeTechne). If you use this toolkit in research, cite it using [CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" button produces APA and BibTeX) or the concept DOI [10.5281/zenodo.23925301](https://doi.org/10.5281/zenodo.23925301), which always resolves to the latest release (each release also has its own version DOI on Zenodo), and cite the Census Bureau as the source of the data, naming the ACS 5-year release(s) and table(s) used. Forks and derivative works must keep this attribution and the license notice.
 
 ## License
 

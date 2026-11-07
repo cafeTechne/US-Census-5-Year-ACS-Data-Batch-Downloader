@@ -2,7 +2,7 @@
 
 **Planning Round:** 10
 **Date:** 2026-11-03
-**Status:** Decisions made (section 11); in implementation
+**Status:** Implemented (section 13); audit fixes from PLAN_ROUND_11.md C1-C7 included
 **Branch:** `phase10/microdata-and-designs` (from `defaultBranch` after the Round 9 merge)
 
 ---
@@ -114,3 +114,21 @@ Census publishes verification files for every PUMS release: selected estimates a
 4. Multilevel and DiD designs meet coverage targets in simulation and reproduce a published reference example.
 5. RPP adjustment reproduces BEA published real personal income for at least two areas.
 6. The Round 7 and Round 8 validation batteries still pass; CI green on Linux and Windows, Python 3.10–3.12.
+
+---
+
+## 13. Implementation status
+
+| Workstream | Result |
+| :--- | :--- |
+| A PUMS | `census/pums.py`: download, dictionaries, tabulations, crosstabs, weighted medians, replicate-weight regression; PUMA boundaries |
+| B PUMS validation | `census/pums_validation.py`: all 32 Census verification estimates and SEs reproduced for Wyoming (2024 1-year, 2020-2024 5-year), max SE error 0.498 (published values are whole numbers) |
+| C ACS 1-year | acs1 datasets 2005-2025 (no standard 2020 release; `/2020/acs/acs1` returns 404); 26 MB metadata archive; 65,000+ availability probe; mixed-product comparisons refused; no 1-year replicate tables exist |
+| D Designs | `census/multilevel.py` (Kenward-Roger/Satterthwaite intervals, coverage 0.891/0.890), `census/did.py` (coverage 0.909 two-group, 0.902 event and these-areas after full replicate refits); references verified against the statsmodels documentation page and Card and Krueger (1994) |
+| E Regional price parities | `census/rpp.py`: BEA SARPP/PARPP/MARPP 2008-2024; BEA real personal income reproduced for all states in 2008 within 2e-5 (requires a common per-year scaling BEA does not document; recorded in the module) |
+| F Carryovers | ZCTA and place crosswalks; `census/web_maps.py` self-contained HTML maps; evaluation harness tasks for `make_map` and `spatial_autocorrelation` |
+| Interfaces | `census/workflows_microdata.py`: six tools (57 total); `product` and `allow_experimental_2020` on extraction tools |
+| Audit | `PLAN_ROUND_11.md` C1-C7 fixed with 28 tests (`tests/test_audit_r11.py`) |
+
+**Not done and carried forward:** the two-model local evaluation (the run was interrupted by a usage limit, and the Linux workstation has no Ollama; the harness and tasks are ready: `python scripts/local_model_eval.py --model qwen3:8b llama3.1:8b`). `make_map` remains in the core profile untested with local models until that run. Round 11 owner decisions R1, R2, Q1, Q2 (D6-D8) remain open.
+
