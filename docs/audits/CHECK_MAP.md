@@ -18,6 +18,8 @@ All commands use `.venv/bin/python` from the repository root.
 | Correlation, Fisher z (`census.correlation`) | `-m pytest -q tests/test_correlation.py` | `correlation` (gated observed-value row; true-value row info) |
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
+| Spatial lag / error regression, LM diagnostics (`census.spatial.spatial_regression`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `spatial_regression_coverage` (info, D15-1) |
+| Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1) |
 | Multilevel, known variance (`census.multilevel`) | `-m pytest -q tests/test_multilevel.py` (includes the dense fixed-variance reference `TestKnownVarianceDenseReference`) | `multilevel_known_variance`, `multilevel_random_slope`, `multilevel_replicate` |
 | Difference-in-differences (`census.did`) | `-m pytest -q tests/test_did.py` (includes the hand-built differenced reference `TestTwoGroupDenseReference`) | `did_two_group`, `did_event`, `did_replicate`; serial correlation (info only): `did_ar1_sensitivity`, `did_serial` |
 | Release gate itself (`scripts/inference_validation.py`) | `-m pytest -q tests/test_validation_gate.py` | n/a |
@@ -64,6 +66,30 @@ Release studies:
   found coverage 0.882-0.914 at every rho for both designs, so no
   degradation was observed in these short (4-5 period) panels. Results and
   scope note: `census.did` docstring.
+- Spatial regression and local Moran's I (PLAN_ROUND_15 workstream B,
+  decision D15-1): `spatial_regression_coverage` and `local_morans_size`
+  are in the spatial group, so they run in every full report (and with
+  `--studies NAME`), but every row is `info`: they are not in
+  `REQUIRED_STUDIES` and never fail the gate. Promotion to gated is an
+  owner decision. Single-process runtime (2026-11-08, full configuration):
+  `spatial_regression_coverage` 5.2 min, `local_morans_size` 2.5 min, both
+  below the `--jobs 0` floor. Design: 12x12 rook lattice, tract-profile ACS
+  CVs. `spatial_regression_coverage`: lag and error DGPs at rho/lambda 0,
+  0.3, 0.6 with sampling error in the outcome, ML and GMM through the
+  default `spatial_regression` path (1000 reps per cell), plus reference
+  cells without sampling error and a noisy-covariate cell (500 reps), and
+  the LM tests' size at rho = 0 (2000 fits). `local_morans_size`: spatial
+  randomness with random or spatially patterned SEs, and a 4x4 hot spot
+  (+1.5 SD), at the default (999 permutations, BH, alpha 0.10) and the
+  two-sided / 9999-permutation readings (2000 reps; 9999 on 500).
+  Findings (caveats now in the tools' notes): ML lag rho intervals fail
+  under outcome sampling error (coverage 0.48 at rho 0.3, 0.003 at 0.6)
+  while GMM lag covers 0.89-0.90; lambda is attenuated by both estimators
+  (0.56-0.58, 0.16-0.19); beta intervals 0.84-0.91; LM tests' size
+  0.046-0.056 at 0.05. Local Moran's p_sim is folded (raw per-area rate
+  0.197 at 0.10); the BH default's family-wise rate is 0.058 under
+  randomness but 0.27 with spatially patterned SEs, and power for the hot
+  spot is 0.019. Results and caveat text: `census.spatial`.
 - Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
   process, and `--jobs N` (0 = one per CPU) runs studies in parallel
   processes with output identical to a serial run (except the `seconds`
