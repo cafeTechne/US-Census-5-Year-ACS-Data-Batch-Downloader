@@ -15,15 +15,17 @@ substantive results agree.
 > conclusion below is descriptive and is **an association, not a causal effect**: it is
 > not evidence that population size causes income. The manifest itself is an ordinary
 > real-data pre-registration; the synthetic label comes from **where the data actually come
-> from**: step 3 marks the isolated cache synthetic (`QueryCache.mark_synthetic`), so the
+> from**: step 3 (`cache import`) marks the isolated cache synthetic, so the
 > bundle's citation and `methods.md` say the data are synthetic and do not claim retrieval
 > from the Census Data API. Run against the real Census API (an unmarked cache), the same
 > manifest is labelled as real Census data. A manifest whose `data_source` declaration
 > contradicts the observed source records a blocking `data_source_mismatch` deviation.
 
-The acceptance test `tests/test_reference_workflow.py` executes every `bash` block
-in this file, in order, with network access refused. Run them from the repository
-root with the project environment active (`.venv/bin/python` here, written as `python`).
+Every step is a `python -m census` command; there are no Python scripts to run. The
+acceptance test `tests/test_reference_workflow.py` executes every `bash` block in this file,
+in order, with network access refused, twice in separate workspaces, and checks that the
+substantive results are identical. Run them from the repository root with the project
+environment active (`.venv/bin/python` here, written as `python`).
 
 ## Setup (once, not executed by the test)
 
@@ -49,7 +51,8 @@ frozen responses (step 3) are used instead of your normal cache or the Census AP
 | Item | Value |
 | :--- | :--- |
 | Manifest | `examples/manifests/income_population_tracts.json`, manifest SHA-256 (canonical JSON) `cfa2208fab380730a82ed4a2511236bb22d79a6de634b9f6c984b9415cd4b6c8` |
-| Frozen source | `tests/fixtures/reference_workflow/frozen_api_responses.json` (synthetic, see above), file SHA-256 `05292667b87e12c4d7745417cb54ce8c0fdbda16684c3b4fa3a618eb6b50249e` |
+| Frozen source | `tests/fixtures/reference_workflow/frozen_api_responses.json` (synthetic, see above), file SHA-256 `0f5725d460904f5c1ee6e74dfa5fda2f1ef3dd5a8d910515d1495dde6aa44a94` |
+| Replicates | `tests/fixtures/reference_workflow/synthetic_replicates.csv` (synthetic, step 5), replicate frame SHA-256 (`census.manifest.replicates_sha256`) `59d38ae0e29334dc03029621551168870185b859376dd7c4e91dbbdf0dd118f7`; `synthetic_replicates_missing_tract.csv` is the same without tract 36061000100 (step 9) |
 | Product / release | ACS 5-year, release 2019 (2015-2019), dataset `acs5`, as declared in the manifest |
 | Geography | Census tracts, state 36, county 061 (codes as declared; the 30 tract codes 000100-003000 are synthetic) |
 
@@ -81,38 +84,25 @@ are `100 * se / estimate`.
 - **Readiness screen:** `cv_screen` on `income`, threshold CV > 30%, action `flag` (kept and flagged).
 - **Missing data:** complete cases.
 
+
 ## 3. Freeze the source into the isolated cache
 
-There is no CLI command for this step; it is a short Python script. It writes the frozen
-responses under the exact request keys the extraction will use and marks the cache
-synthetic, which is what labels every later result as synthetic.
-
 ```bash
-python - <<'EOF'
-import hashlib, json, os
-from census.api import CensusAPIClient
-from census.cache import QueryCache
-
-path = "tests/fixtures/reference_workflow/frozen_api_responses.json"
-print("frozen source sha256:", hashlib.sha256(open(path, "rb").read()).hexdigest())
-frozen = json.load(open(path, encoding="utf-8"))
-cache = QueryCache(os.environ["CENSUS_CACHE_PATH"])
-client = CensusAPIClient(api_key="", cache=cache)
-for table, rows in frozen["requests"].items():
-    endpoint, params = client.build_request(year=2019, state_code="36", table_code=table,
-                                            geo_level="tract", county_code="061")
-    cache.set(endpoint, params, rows)
-cache.mark_synthetic(
-    description="30 synthetic tracts with ACS-shaped API responses "
-                "(tests/fixtures/reference_workflow/frozen_api_responses.json); not Census data and not about Manhattan",
-    generator="tests.test_manifest.synthetic_payload(seed=7): pop ~ Uniform(1000, 8000) rounded; "
-              "income = 30000 + 4*pop + Normal(0, 4000); MOE 12% of income, 8% of pop")
-print("cached tables:", sorted(frozen["requests"]), "| marked synthetic:", cache.synthetic_marker() is not None)
-EOF
+python -m census cache import tests/fixtures/reference_workflow --json
 ```
 
-Expected: `frozen source sha256: 05292667b87e12c4d7745417cb54ce8c0fdbda16684c3b4fa3a618eb6b50249e` (the value in step 1). A different value means
-different input bytes: stop.
+`cache import` reads every frozen response file in the directory (here only
+`frozen_api_responses.json`; the replicate CSVs are not response files) and writes each
+table's response under the exact request key the extraction will use (the file's `request`
+object: release 2019, `acs5`, tracts in state 36, county 061). The file declares itself
+`synthetic` (with a description and generator), so the command also marks the cache
+synthetic (`QueryCache.mark_synthetic`), which is what labels every later result as synthetic.
+A frozen file without a `synthetic` entry (for example, preserved real API responses) is
+imported without that marker.
+
+Expected: `"imported": 2`, `"synthetic": true`, and in `sources` the tables `B01003`,
+`B19013` with `"sha256": "0f5725d460904f5c1ee6e74dfa5fda2f1ef3dd5a8d910515d1495dde6aa44a94"`
+(the value in step 1). A different value means different input bytes: stop.
 
 ## 4. Planning (no download)
 
@@ -124,106 +114,45 @@ python -m census plan --table B01003 --geo tract --state 36 --codes 061 --years 
 Expected for each: `"success": true`, one call, `"cached_calls": 1`, one selected concept
 with concordance status `stable`. A blocking concordance issue stops here; it is never bypassed.
 
-## 5. Execute the manifest through the CLI adapter
+## 5. Confirmatory run with synthetic replicates
+
+The Census publishes 80 variance replicate estimates per detailed-table cell. None are
+frozen in this repository, so the run uses **synthetic** replicates,
+`tests/fixtures/reference_workflow/synthetic_replicates.csv` (analysis replicate long format:
+`GEOID`, `Year`, `variable`, `estimate`, `rep_1`..`rep_80`). They were generated from the
+frozen responses by `census.simulation.make_replicates` with seed 2019, so each replicate SE
+equals the published SE (`MOE / 1.645`) exactly; the acceptance test regenerates them and
+checks the file.
 
 ```bash
-python -m census tool run_manifest --arg manifest_path=examples/manifests/income_population_tracts.json --arg "output_dir=$RW/cli_run" --json
+python -m census tool run_manifest --arg manifest_path=examples/manifests/income_population_tracts.json --arg "output_dir=$RW/run1" --arg replicates_path=tests/fixtures/reference_workflow/synthetic_replicates.csv --json
 ```
 
 This runs extraction (both tables), the analysis frame (join on GEOID and Year),
 the readiness screen, m1 and r1, the Holm-adjusted hypotheses and the results bundle in
-`$RW/cli_run/bundle`. The same function is the MCP tool `run_manifest`. `--arg KEY=VALUE`
-passes one argument without JSON quoting, so Windows paths with backslashes work as is
-(a JSON object argument is also accepted).
+`$RW/run1/bundle`. The same function is the MCP tool `run_manifest` (same arguments,
+including `replicates_path`) and `census.manifest.run_manifest` in Python (which takes the
+frame, `replicates=census.manifest.read_replicates(path)`); all three give the same results
+and the same provenance hashes. `--arg KEY=VALUE` passes one argument without JSON quoting, so
+Windows paths with backslashes work as is (a JSON object argument is also accepted).
 
-This run supplies no replicates, so it has model standard errors only (its results say so
-in `notes`). The CLI/MCP adapter also accepts `replicates_path` (a CSV or Parquet file in the
-analysis replicate long format, e.g. `--arg "replicates_path=$RW/synthetic_replicates.csv"`);
-it returns `analysis_status`, `data_source` and `replicates`, and a run blocked by missing or
-incomplete replicates returns `success: false` with `analysis_status:
-confirmatory_incomplete` and the deviations. Step 7 uses the Python route.
-
-## 6. Validate the local inputs: one row per unit, join, units
-
-```bash
-python - <<'EOF'
-import os
-import pandas as pd
-
-rw = os.environ["RW"]
-panels = {}
-for table in ("B19013", "B01003"):
-    df = pd.read_csv(f"{rw}/cli_run/extraction/{table}/{table}_tract_panel_2019.csv", dtype={"geoid": str})
-    assert not df.duplicated(["geoid", "year"]).any(), f"{table}: more than one row per tract"
-    assert set(df["year"]) == {2019}, f"{table}: unexpected release"
-    est = [c for c in df.columns if c.endswith("_est")][0]
-    moe, se = est[:-4] + "_moe", est[:-4] + "_se"
-    assert (df[moe] >= 0).all() and ((df[se] - df[moe] / 1.645).abs() < 1e-9).all(), "SE != MOE/1.645"
-    panels[table] = df.set_index("geoid")
-    print(table, len(df), "tracts; estimate column", est)
-assert set(panels["B19013"].index) == set(panels["B01003"].index), "tables cover different tracts"
-print("join: one row per tract in each table; identical tract sets (", len(panels["B19013"]), ")")
-EOF
-```
-
-Expected: 30 tracts in each table, the same 30 GEOIDs, SE = MOE/1.645.
-
-## 7. Confirmatory run (Python shared workflow) with synthetic replicates
-
-The Census publishes 80 variance replicate estimates per detailed-table cell. None are
-frozen in this repository, so this step generates **synthetic** replicates whose
-replicate SE equals each published SE exactly (`census.simulation.make_replicates`,
-seed 2019) and saves them as an input file.
-
-```bash
-python - <<'EOF'
-import json, os
-import numpy as np
-import pandas as pd
-from census.manifest import read_replicates, run_manifest
-from census.results import interval_description
-from census.simulation import make_replicates, replicate_long
-
-rw = os.environ["RW"]
-frozen = json.load(open("tests/fixtures/reference_workflow/frozen_api_responses.json", encoding="utf-8"))
-
-def published(table, code):
-    header, *rows = frozen["requests"][table]
-    e, m = header.index(code + "E"), header.index(code + "M")
-    return {r[0][-11:]: (float(r[e]), float(r[m]) / 1.645) for r in rows}
-
-inc, pop = published("B19013", "B19013_001"), published("B01003", "B01003_001")
-geoids = sorted(inc)
-est = np.array([[inc[g][0], pop[g][0]] for g in geoids])
-se = np.array([[inc[g][1], pop[g][1]] for g in geoids])
-reps = replicate_long(geoids, ["income", "pop"], est, make_replicates(est, se, np.random.default_rng(2019)))
-reps["Year"] = 2019
-reps.to_csv(f"{rw}/synthetic_replicates.csv", index=False)
-# run from the saved file, read exactly as later steps and the CLI read it (read_replicates parses
-# floats round-trip exactly on pandas 2.x and 3.x, so values and hashes match everywhere)
-reps = read_replicates(f"{rw}/synthetic_replicates.csv")
-
-res = run_manifest("examples/manifests/income_population_tracts.json", f"{rw}/run1", replicates=reps)
-assert res["success"] and res["deviations"] == [], res["deviations"]
-h1 = res["hypotheses"].set_index("id").loc["H1"]
-info = interval_description(res["results"]["m1"])
-assert res["analysis_status"] == "confirmatory"
-print(f"H1 coefficient on pop: {h1['estimate']:.4f} dollars per resident, "
-      f"90% CI [{h1['ci_lower']:.4f}, {h1['ci_upper']:.4f}], SE basis {h1['se_basis']}, "
-      f"Holm p {h1['p_adjusted']:.3g}")
-print("Interval meaning:", info["text"])
-print(res["results"]["m1"].coefficients[["term", "estimate", "se_model", "se_sampling", "se_total"]])
-EOF
-```
+Expected in the JSON output: `"analysis_status": "confirmatory"`, `"deviations": []`,
+`data_source.synthetic` `true`, and `replicates` =
+`{"source": "caller_supplied", "synthetic": true, "rows": 60, "sha256": "59d38ae0e29334dc03029621551168870185b859376dd7c4e91dbbdf0dd118f7"}`.
+Without `replicates_path` the same manifest has model standard errors only (its results say
+"no replicates" in `notes`); a run blocked by missing or incomplete replicates returns
+`success: false` with `analysis_status: confirmatory_incomplete` (step 9).
 
 ### Result, with what the interval means
 
-Expected (synthetic data; N = 30 tracts, 0 flagged by the CV screen, 0 excluded):
+Expected (synthetic data; N = 30 tracts, 0 flagged by the CV screen, 0 excluded), from
+`$RW/run1/bundle/tables/regression.md` and `tables/hypotheses.md`:
 
 | Term | Estimate | se_model | se_sampling | se_total | 90% CI (from se_model) |
 | :--- | ---: | ---: | ---: | ---: | :--- |
 | pop | 4.2811 | 0.3299 | 0.3360 | 0.4709 | [3.7386, 4.8237] |
 
+H1: coefficient on `pop` 4.2811 dollars per resident, SE basis `se_model`, Holm-adjusted.
 H2: correlation r = 0.9260, 90% Fisher-z interval [0.8650, 0.9600].
 
 **What the interval means** (`census.results.interval_description`, also stored as
@@ -244,9 +173,17 @@ where population is larger, about 4.28 dollars per resident. That is a descripti
 association in generated data. It is not a causal effect, not a finding about Manhattan or
 any real place, and not evidence for the real ACS release.
 
-## 8. Table, figure, methods and provenance
+## 6. The local inputs: one row per unit, join, units
 
-All in `$RW/run1/bundle` (and `$RW/cli_run/bundle`):
+The extracted panels are `$RW/run1/extraction/B19013/B19013_tract_panel_2019.csv` and
+`$RW/run1/extraction/B01003/B01003_tract_panel_2019.csv`. Expected: 30 tracts in each table,
+one row per tract (`geoid`, `year`), only release 2019, the same 30 GEOIDs in both tables
+(so the join loses nothing), MOEs non-negative and `*_se` = `*_moe / 1.645`. The acceptance
+test checks each of these on both executions.
+
+## 7. Table, figure, methods and provenance
+
+All in `$RW/run1/bundle`:
 
 | Artifact | File |
 | :--- | :--- |
@@ -256,133 +193,65 @@ All in `$RW/run1/bundle` (and `$RW/cli_run/bundle`):
 | Methods and limitations | `methods.md` (data, SEs, screen, analyses, correction, deviations) |
 | Provenance | `bundle.json` (file SHA-256s, `provenance.manifest_hash`, `analysis_status`, deviation count, `data_source`, `replicates` with the replicate frame's SHA-256), `results/run.json` (exclusions, deviations, extraction plans, `n_units`), `../manifest.json`, `../extraction/*/*_extraction_metadata.json` |
 
-```bash
-python - <<'EOF'
-import json, os
-rw = os.environ["RW"]
-bundle = json.load(open(f"{rw}/run1/bundle/bundle.json", encoding="utf-8"))
-run = json.load(open(f"{rw}/run1/bundle/results/run.json", encoding="utf-8"))
-print("manifest hash:", bundle["provenance"]["manifest_hash"])
-print("status:", run["analysis_status"], "| units:", run["n_units"], "| deviations:", run["deviations"])
-print("exclusions:", run["exclusions"])
-print("data source synthetic:", bundle["provenance"]["data_source"]["synthetic"])
-print("replicates:", bundle["provenance"]["replicates"])
-methods = open(f"{rw}/run1/bundle/methods.md", encoding="utf-8").read()
-assert bundle["provenance"]["data_source"]["synthetic"] is True
-assert "SYNTHETIC" in bundle["citation"] and "Retrieved via the Census Data API" not in methods
-assert "synthetic caller-supplied replicate estimates" in methods
-assert bundle["provenance"]["replicates"]["source"] == "caller_supplied"
-print(open(f"{rw}/run1/bundle/tables/regression.md", encoding="utf-8").read())
-EOF
-```
-
 Provenance: because the data came from the cache marked synthetic in step 3, the citation (in
 `bundle.json`, tables and figure sidecars) and the Data paragraph of `methods.md` say the data
 are synthetic and name the generator; nothing claims "Retrieved via the Census Data API".
-The replicates were supplied by the caller (step 7), not fetched from Census variance
+The replicates were supplied by the caller (step 5), not fetched from Census variance
 replicate files, so `methods.md` describes them as "synthetic caller-supplied replicate
 estimates" and `bundle.json` records `provenance.replicates` = `{"source": "caller_supplied",
 "synthetic": true, "rows": ..., "sha256": ...}`, the SHA-256 of the replicate frame's
 canonical form (`census.manifest.replicates_sha256`: labels as strings, columns sorted, numbers
 as `repr(float)` so it does not depend on pandas/numpy versions or int-vs-float dtypes, rows
 sorted, UTF-8, LF). `provenance.data_source.description` (from the cache marker) says the
-tracts are not Manhattan. The fixture's own SHA-256 is checked in step 3 only.
+tracts are not Manhattan. The fixture's own file SHA-256 is reported in step 3 only.
 
-## 9. Extraction replay, re-execution, and agreement
+## 8. Extraction replay, re-execution, and agreement
 
 ```bash
-python -m census replay "$RW/cli_run/extraction/B19013/B19013_extraction_metadata.json" --out "$RW/replay_B19013" --json
+python -m census replay "$RW/run1/extraction/B19013/B19013_extraction_metadata.json" --out "$RW/replay_B19013" --json
 ```
 
 Expected: `"verified": true`, every output file `identical`, `"n_cells_changed": 0`.
 
-Now re-execute the analysis from the same frozen inputs into a second directory and
-compare it with the first run, and the CLI run with the Python run:
+Now re-execute the analysis from the same frozen inputs into a second directory:
 
 ```bash
-python - <<'EOF'
-import json, math, os
-import pandas as pd
-from census.manifest import read_replicates, run_manifest
-
-rw = os.environ["RW"]
-reps = read_replicates(f"{rw}/synthetic_replicates.csv")
-run_manifest("examples/manifests/income_population_tracts.json", f"{rw}/run2", replicates=reps)
-
-def load(run):
-    b = f"{rw}/{run}/bundle"
-    j = lambda p: json.load(open(f"{b}/{p}", encoding="utf-8"))
-    hyp = {r["id"]: r for r in j("results/hypotheses.json")["rows"]}
-    m1, r1, info = j("results/m1.json"), j("results/r1.json"), j("results/run.json")
-    return {"hash": j("bundle.json")["provenance"]["manifest_hash"], "hyp": hyp,
-            "coef": {c["term"]: c for c in m1["coefficients"]}, "interval": m1["interval"],
-            "warnings": sorted(m1["notes"]) + sorted(r1["notes"]),
-            "exclusions": info["exclusions"], "deviations": info["deviations"], "n": info["n_units"]}
-
-def close(a, b):
-    return (a is None and b is None) or math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-12)
-
-a, b, cli = load("run1"), load("run2"), load("cli_run")
-assert a["hash"] == b["hash"] == cli["hash"]
-for k in ("interval", "warnings", "exclusions", "deviations", "n"):
-    assert a[k] == b[k], k
-for hid in a["hyp"]:
-    for k in ("estimate", "se", "ci_lower", "ci_upper", "p_value", "p_adjusted"):
-        assert close(a["hyp"][hid][k], b["hyp"][hid][k]), (hid, k)
-        assert close(a["hyp"][hid][k], cli["hyp"][hid][k]), ("cli", hid, k)
-    assert a["hyp"][hid]["se_basis"] == b["hyp"][hid]["se_basis"] == cli["hyp"][hid]["se_basis"]
-for term in a["coef"]:
-    for k in ("estimate", "se_model", "se_sampling", "se_total"):
-        assert close(a["coef"][term][k], b["coef"][term][k]), (term, k)
-assert a["interval"]["basis_column"] == cli["interval"]["basis_column"] == "se_model"
-assert a["exclusions"] == cli["exclusions"] and a["n"] == cli["n"]
-print("rerun agrees: manifest hash, estimates, SEs, intervals, p-values, SE basis, exclusions, warnings, deviations")
-print("CLI and Python agree on estimates, interval SE (se_model) and exclusions; the CLI run has no replicate SEs")
-EOF
+python -m census tool run_manifest --arg manifest_path=examples/manifests/income_population_tracts.json --arg "output_dir=$RW/run2" --arg replicates_path=tests/fixtures/reference_workflow/synthetic_replicates.csv --json
 ```
+
+Expected: the same output as step 5 apart from `output_dir` and file paths. `run1` and `run2`
+agree on the manifest hash, the replicate SHA-256, every estimate, SE (`se_model`,
+`se_sampling`, `se_total`), interval, p-value and Holm-adjusted p-value (to 1e-9 relative),
+the SE basis, the interval description, exclusions, warnings, deviations, `n_units` and
+`analysis_status`. The acceptance test compares exactly these fields, from
+`results/m1.json`, `results/r1.json`, `results/hypotheses.json`, `results/run.json` and
+`bundle.json`, and also compares the whole document executed twice in separate workspaces.
 
 What the comparison deliberately ignores: absolute paths, timestamps in extraction
-metadata, and figure bytes (PNG/PDF/EPS bytes depend on the plotting library build), as
-well as the CLI run's `notes`, which correctly add "no replicates" and lack `se_sampling`.
+metadata, and figure bytes (PNG/PDF/EPS bytes depend on the plotting library build).
 
-## 10. Blocked case: required replicates incomplete
+## 9. Blocked case: required replicates incomplete
 
 Replicate analyses in a manifest always run with `replicate_policy="strict"` (PLAN_ROUND_11
-Q2/D7). Drop one tract's replicates and run again:
+Q2/D7). `tests/fixtures/reference_workflow/synthetic_replicates_missing_tract.csv` is the
+replicate file of step 5 without tract `36061000100`. Run again with it; the leading `!`
+marks a command that is expected to fail (nonzero exit status):
 
 ```bash
-python - <<'EOF'
-import json, os
-import pandas as pd
-from census.manifest import read_replicates, run_manifest
-
-rw = os.environ["RW"]
-reps = read_replicates(f"{rw}/synthetic_replicates.csv")
-partial = reps[reps["GEOID"] != "36061000100"]
-res = run_manifest("examples/manifests/income_population_tracts.json", f"{rw}/blocked", replicates=partial)
-kinds = [d["kind"] for d in res["deviations"]]
-print("success:", res["success"], "| deviations:", kinds)
-assert not res["success"] and "replicates_incomplete" in kinds
-assert res["analysis_status"] == "confirmatory_incomplete"
-assert set(res["hypotheses"]["status"]) == {"not_tested"}
-methods = open(f"{rw}/blocked/bundle/methods.md", encoding="utf-8").read()
-assert "replicates_incomplete" in methods and "results are not confirmatory" in methods
-bundle = json.load(open(f"{rw}/blocked/bundle/bundle.json", encoding="utf-8"))
-assert bundle["provenance"]["analysis_status"] == "confirmatory_incomplete"
-print("NOT a confirmatory result: H1 and H2 were not tested; the deviation is in methods.md and results/run.json")
-EOF
+! python -m census tool run_manifest --arg manifest_path=examples/manifests/income_population_tracts.json --arg "output_dir=$RW/blocked" --arg replicates_path=tests/fixtures/reference_workflow/synthetic_replicates_missing_tract.csv --json
 ```
 
-Expected: `success: False`; deviations `replicates_incomplete` (m1 and r1) and
-`hypothesis_not_tested` (H1, H2). No estimate is reported for either hypothesis, the
-bundle's `methods.md` lists the deviations, and `bundle.json` counts them. The run's
-`analysis_status` (in `results/run.json`, `bundle.json` and `methods.md`) is
-`confirmatory_incomplete`: the pre-registered analysis did not run as registered; results are
-not confirmatory. Only a run with no blocking deviation is labelled `confirmatory`. Report it as a
-failed pre-registered run, never as a clean confirmatory result. Switching to
+Expected: `"success": false`, `"analysis_status": "confirmatory_incomplete"`; deviations
+`replicates_incomplete` (m1 and r1) and `hypothesis_not_tested` (H1, H2). No estimate is
+reported for either hypothesis (`status: not_tested`), no `results/m1.json` is written, the
+bundle's `methods.md` lists the deviations and says "results are not confirmatory", and
+`bundle.json` counts them (4). The run's `analysis_status` (in `results/run.json`,
+`bundle.json` and `methods.md`) is `confirmatory_incomplete`: the pre-registered analysis did
+not run as registered. Only a run with no blocking deviation is labelled `confirmatory`.
+Report it as a failed pre-registered run, never as a clean confirmatory result. Switching to
 `replicate_policy="flag"` is exploratory work outside the manifest.
 
-## 11. Cleanup
+## 10. Cleanup
 
 ```sh
 rm -rf "$RW"
@@ -390,7 +259,7 @@ rm -rf "$RW"
 
 (Not executed by the acceptance test, which removes its own directories.)
 
-## 12. Three different reproducibility claims
+## 11. Three different reproducibility claims
 
 | Claim | Tool | What it checks | What it does not check |
 | :--- | :--- | :--- | :--- |
@@ -402,18 +271,19 @@ None of these guarantees that the Census API will return the same bytes later: t
 revises data and metadata. Only frozen inputs (as here) or a preserved cache make a
 re-execution byte-for-byte input-identical.
 
-## 13. Routes by interface
+## 12. Routes by interface
 
 | Step | Python | CLI | MCP |
 | :--- | :--- | :--- | :--- |
 | Validate manifest and hash | `census.manifest.create_manifest` | `tool create_manifest` | `create_manifest` |
+| Freeze source into cache | `census.cache.import_frozen` | `cache import <file or dir>` | not available (use the CLI) |
 | Plan | `census.pipeline.plan_extraction` | `plan` | `plan_extraction` |
-| Freeze source into cache | step 3 script | not available (use step 3) | not available |
-| Execute manifest | `census.manifest.run_manifest` (accepts `replicates`) | `tool run_manifest` (`replicates_path`) | `run_manifest` (`replicates_path`) |
+| Execute manifest | `census.manifest.run_manifest` (`replicates=read_replicates(path)`) | `tool run_manifest` (`replicates_path`) | `run_manifest` (`replicates_path`) |
 | Interval meaning | `census.results.interval_description` | `interval` in `results/m1.json` | same |
 | Extraction replay | `census.pipeline.replay_extraction` | `replay` | `replay_extraction` |
 
-Where an interface lacks a step, use the route in the Python column; no tool exists solely for symmetry.
+The whole workflow runs from the CLI. Where another interface lacks a step, use the CLI;
+no tool exists solely for symmetry.
 
 ## Status
 

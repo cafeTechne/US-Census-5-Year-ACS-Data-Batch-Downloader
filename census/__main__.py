@@ -29,6 +29,7 @@ Examples:
     python -m census validate --offline --json
     python -m census tool fit_model '{"input_path": "frame.parquet", "formula": "y ~ x"}' --json
     python -m census cache stats
+    python -m census cache import tests/fixtures/reference_workflow --json
 """
 
 import argparse
@@ -39,7 +40,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from census import errors
 from census import workflows
 from census.api import CensusAPIClient, infer_dataset
-from census.cache import get_default_cache
+from census.cache import get_default_cache, import_frozen
 from census.concordance import BLOCKING_KINDS, apply_overrides, build_concordance, validate_all_crosswalks
 from census.metadata import available_vintages, describe_variable
 from census.pipeline import (
@@ -381,9 +382,21 @@ def cmd_tool(args: argparse.Namespace) -> int:
 def cmd_cache(args: argparse.Namespace) -> int:
     cache = get_default_cache()
     if cache is None:
+        if args.action == "import":
+            return _emit(errors.error_result(errors.INVALID_INPUT, "The query cache is disabled "
+                                             "(CENSUS_CACHE_DISABLED); nothing to import into."), args.json)
         return _emit({"success": True, "cache": "disabled"}, args.json)
     if args.action == "clear":
         return _emit({"success": True, "cleared": cache.clear()}, args.json)
+    if args.action == "import":
+        if not args.source:
+            return _emit(errors.error_result(errors.INVALID_INPUT, "cache import needs a frozen file or directory"),
+                         args.json)
+        try:
+            result = import_frozen(cache, args.source)
+        except (OSError, ValueError) as exc:
+            return _emit(errors.error_result(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}"), args.json)
+        return _emit({"success": True, **result, **cache.stats()}, args.json)
     return _emit({"success": True, **cache.stats()}, args.json)
 
 
@@ -541,8 +554,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tool)
 
-    p = sub.add_parser("cache", help="query cache maintenance")
-    p.add_argument("action", choices=("stats", "clear"))
+    p = sub.add_parser("cache", help="query cache maintenance; import loads frozen API responses")
+    p.add_argument("action", choices=("stats", "clear", "import"))
+    p.add_argument("source", nargs="?", help="import: a frozen response JSON file or a directory of them; "
+                   "a synthetic source marks the cache synthetic")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_cache)
     return parser

@@ -12,7 +12,7 @@ import os
 import sqlite3
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Mapping, Optional
+from typing import Any, Dict, Iterator, List, Mapping, Optional
 
 from census.geo import get_resource_path
 
@@ -108,6 +108,66 @@ class QueryCache:
             count = conn.execute("SELECT COUNT(*) FROM responses").fetchone()[0]
         size = os.path.getsize(self.path) if os.path.exists(self.path) else 0
         return {"path": self.path, "entries": int(count), "size_bytes": size}
+
+
+def frozen_sources(path: str) -> List[str]:
+    """The frozen response files at ``path``: the file itself, or every ``*.json``
+    file in a directory that has a ``requests`` mapping (sorted by name)."""
+    if not os.path.isdir(path):
+        return [path]
+    found: List[str] = []
+    for name in sorted(os.listdir(path)):
+        full = os.path.join(path, name)
+        if name.endswith(".json") and os.path.isfile(full):
+            with open(full, encoding="utf-8") as f:
+                try:
+                    doc = json.load(f)
+                except json.JSONDecodeError:
+                    continue
+            if isinstance(doc, dict) and isinstance(doc.get("requests"), dict):
+                found.append(full)
+    if not found:
+        raise ValueError(f"No frozen response files (*.json with 'requests') in {path}")
+    return found
+
+
+def import_frozen(cache: QueryCache, path: str) -> Dict[str, Any]:
+    """Load frozen API responses into ``cache`` under the exact request keys an
+    extraction will use, so later runs read them instead of the Census API.
+
+    A frozen file is JSON: ``request`` (the arguments of
+    ``CensusAPIClient.build_request`` other than ``table_code``: year,
+    geo_level, state_code, county_code, dataset, ...), ``requests``
+    ({table_code: API response rows}) and, for generated data, ``synthetic``
+    ({description, generator}). Any synthetic source marks the whole cache
+    synthetic (:meth:`QueryCache.mark_synthetic`), so every result built from
+    it is labelled synthetic; a real-data import never removes a marker.
+    """
+    from census.api import CensusAPIClient
+
+    client = CensusAPIClient(api_key="", cache=cache)
+    sources = []
+    for source in frozen_sources(path):
+        with open(source, "rb") as f:
+            raw = f.read()
+        doc = json.loads(raw.decode("utf-8"))
+        request, responses = doc.get("request"), doc.get("requests")
+        if not isinstance(request, dict) or not isinstance(responses, dict) or not responses:
+            raise ValueError(f"{source}: a frozen file needs a 'request' object and a non-empty 'requests' mapping")
+        try:
+            keys = [(table, client.build_request(table_code=table, **request)) for table in responses]
+        except TypeError as exc:
+            raise ValueError(f"{source}: bad 'request' arguments: {exc}") from None
+        for table, (endpoint, params) in keys:
+            cache.set(endpoint, params, responses[table])
+        synthetic = doc.get("synthetic")
+        if synthetic:
+            marker = synthetic if isinstance(synthetic, dict) else {}
+            cache.mark_synthetic(description=marker.get("description"), generator=marker.get("generator"))
+        sources.append({"path": source, "sha256": hashlib.sha256(raw).hexdigest(),
+                        "tables": sorted(responses), "synthetic": bool(synthetic)})
+    return {"imported": sum(len(s["tables"]) for s in sources), "sources": sources,
+            "synthetic": cache.synthetic_marker() is not None}
 
 
 def default_cache_path() -> str:
