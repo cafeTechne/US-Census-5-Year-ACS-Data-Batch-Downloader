@@ -807,13 +807,16 @@ def tabulate(
         defined = _defined(sub, var, x)
         ids_ok = np.where(defined, ids, -1)
         est = np.full((G, REPLICATE_COUNT + 1), np.nan)
+        # One stable sort of the group ids; each group's rows are then a contiguous slice
+        # in original row order, gathered once (not G arrays of length N). Same rows in
+        # the same order as masking, so the medians are bit-identical.
+        order = np.argsort(ids_ok, kind="stable")
+        bounds = np.searchsorted(ids_ok[order], np.arange(G + 1), side="left")
         for g in range(G):
-            rows = ids_ok == g
-            if rows.any():
-                # Values outside the group set to NaN, which both medians drop, instead of
-                # copying W[rows] first (the medians gather the rows they use once).
-                xg = np.where(rows, x, np.nan)
-                est[g] = (binned_median(xg, W, bins) if bins is not None else weighted_median(xg, W))
+            rows = order[bounds[g]:bounds[g + 1]]
+            if len(rows):
+                xg, wg = x[rows], W[rows]
+                est[g] = (binned_median(xg, wg, bins) if bins is not None else weighted_median(xg, wg))
         n = _group_count(ids_ok, G)
         notes.append("median by Census bracket interpolation over bins" if bins is not None
                      else "weighted sample median (no interpolation); pass bins for the Census bracket method")

@@ -38,9 +38,8 @@ def format_dataframe(
         else get_variable_descriptions(table_code)
     )
     # The caller's frame is relabelled in place, as rename(..., inplace=True) did before
-    # pandas 3.1 deprecated that keyword (PDEP-8). Renaming a zero-row slice gives the same
-    # labels without copying the data (pandas 2 copies on rename).
-    df.columns = df.iloc[:0].rename(columns=descriptions).columns
+    # pandas 3.1 deprecated that keyword (PDEP-8); no data are copied.
+    df.columns = [descriptions.get(c, c) for c in df.columns]
     return df
 
 
