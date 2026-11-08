@@ -383,11 +383,9 @@ def place_adjust_frame(
     """
     from census import rpp
 
-    if areas not in _RPP_AREAS:
-        return _fail(errors.INVALID_INPUT, f"areas must be one of {_RPP_AREAS}.")
     if isinstance(variables, str):
         variables = [variables]
-    try:
+    try:  # place_adjust validates areas (ValueError, reported as invalid input below)
         reps = _read_replicates(replicates_path) if replicates_path else None
         res = place_adjust(_load_frame(input_path), variables, year, areas=areas, replicates=reps,
                            rpp_year=rpp_year)

@@ -165,7 +165,8 @@ class TestValidation(unittest.TestCase):
         def adj(**kw):
             return two_state_manifest(adjustments=[{"type": "rpp", "variables": ["income"], **kw}])
 
-        self.assertEqual(validate_manifest(adj(), resolve=False), [])  # rpp_year and areas defaulted
+        self.assertEqual(validate_manifest(adj(rpp_year=2023), resolve=False), [])  # areas defaulted
+        self.check(adj(), "rpp_year is required")  # create_manifest fills it in (test_review_fixes_r14)
         self.check(adj(type="cpi"), "type must be")
         self.check(two_state_manifest(adjustments=[{"type": "rpp", "variables": []}]), "non-empty list")
         self.check(two_state_manifest(adjustments=[{"type": "rpp", "variables": ["rent"]}]), "unknown variable")
@@ -232,16 +233,21 @@ class TestTwoStateRun(unittest.TestCase):
         self.assertIn("2023 RPP was applied to dollars of 2024", text)
         self.assertIn("no automatic state effects", text)
 
-    def test_default_rpp_year_recorded(self):
-        from census.manifest import latest_rpp_year
-
+    def test_omitted_rpp_year_is_invalid_at_run(self):
         m = two_state_manifest(adjustments=[{"type": "rpp", "variables": ["income"]}])
         res = self.run_m(m)
+        self.assertFalse(res["success"])
+        self.assertTrue(any("rpp_year is required" in e for e in res["errors"]), res["errors"])
+
+    def test_default_areas_recorded(self):
+        from census.manifest import latest_rpp_year
+
+        m = two_state_manifest(adjustments=[{"type": "rpp", "variables": ["income"], "rpp_year": latest_rpp_year()}])
+        with patched_membership():
+            res = self.run_m(m)
         adj = res["adjustments"][0]
-        self.assertEqual(adj["rpp_year"], latest_rpp_year())
-        self.assertEqual(adj["rpp_year_source"], "default_latest")
+        self.assertEqual(adj["rpp_year_source"], "manifest")
         self.assertEqual(adj["areas"], "county_metro")  # county default
-        self.assertTrue(adj["notes"][0].startswith("RPP YEAR DEFAULT"))
 
     def test_one_state_failing_is_blocking(self):
         res = self.run_m(two_state_manifest(), TwoStateClient(fail_states={"36"}))
