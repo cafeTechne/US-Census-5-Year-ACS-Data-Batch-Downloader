@@ -217,6 +217,13 @@ class TestRound15SpatialStudies(unittest.TestCase):
         self.assertTrue(reg["target"].str.startswith("size of the 0.05 test").any())
         self.assertEqual(set(lisa["scenario"]), {"null_random_se", "null_clustered_se", "hot_spot"})
         self.assertTrue(lisa["power"].notna().any())
+        # the tool-default rows are labelled: GMM lag, ML error; two-sided 9999-permutation LISA
+        dflt = reg[reg["tool_default"].fillna(False).astype(bool)]
+        self.assertEqual(set(zip(dflt["model"], dflt["estimator"])), {("lag", "gm"), ("error", "ml")})
+        self.assertTrue(dflt["method"].str.contains(r"\[tool default\]").all())
+        ld = lisa[lisa["reading"] == "default"]
+        self.assertTrue(ld["tool_default"].all() and (ld["permutations"] == 9999).all())
+        self.assertTrue(ld["method"].str.contains(r"\[tool default\] two-sided").all())
         # info rows never fail the gate, and never satisfy a required study
         both = pd.concat([reg, lisa]).assign(study="x")
         self.assertTrue(iv.gate(both, ())[0])

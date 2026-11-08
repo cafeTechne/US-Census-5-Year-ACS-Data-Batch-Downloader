@@ -71,25 +71,33 @@ Release studies:
   are in the spatial group, so they run in every full report (and with
   `--studies NAME`), but every row is `info`: they are not in
   `REQUIRED_STUDIES` and never fail the gate. Promotion to gated is an
-  owner decision. Single-process runtime (2026-11-08, full configuration):
-  `spatial_regression_coverage` 5.2 min, `local_morans_size` 2.5 min, both
-  below the `--jobs 0` floor. Design: 12x12 rook lattice, tract-profile ACS
-  CVs. `spatial_regression_coverage`: lag and error DGPs at rho/lambda 0,
-  0.3, 0.6 with sampling error in the outcome, ML and GMM through the
-  default `spatial_regression` path (1000 reps per cell), plus reference
-  cells without sampling error and a noisy-covariate cell (500 reps), and
-  the LM tests' size at rho = 0 (2000 fits). `local_morans_size`: spatial
+  owner decision. Single-process runtime (full configuration, 16 cores
+  shared): `spatial_regression_coverage` 5.2 min, `local_morans_size`
+  about 3.6 min (4.4 min under load), both below the `--jobs 0` floor.
+  Design: 12x12 rook lattice, tract-profile ACS CVs.
+  `spatial_regression_coverage`: lag and error DGPs at rho/lambda 0, 0.3,
+  0.6 with sampling error in the outcome, ML and GMM through
+  `spatial_regression` (1000 reps per cell; rows of the tool default are
+  marked `[tool default]`), plus reference cells without sampling error
+  and a noisy-covariate cell (500 reps), and the LM tests' size at rho = 0
+  (2000 fits). `local_morans_size` (1000 reps per scenario): spatial
   randomness with random or spatially patterned SEs, and a 4x4 hot spot
-  (+1.5 SD), at the default (999 permutations, BH, alpha 0.10) and the
-  two-sided / 9999-permutation readings (2000 reps; 9999 on 500).
-  Findings (caveats now in the tools' notes): ML lag rho intervals fail
-  under outcome sampling error (coverage 0.48 at rho 0.3, 0.003 at 0.6)
-  while GMM lag covers 0.89-0.90; lambda is attenuated by both estimators
-  (0.56-0.58, 0.16-0.19); beta intervals 0.84-0.91; LM tests' size
-  0.046-0.056 at 0.05. Local Moran's p_sim is folded (raw per-area rate
-  0.197 at 0.10); the BH default's family-wise rate is 0.058 under
-  randomness but 0.27 with spatially patterned SEs, and power for the hot
-  spot is 0.019. Results and caveat text: `census.spatial`.
+  (+1.5 SD); each map is analysed with the tool default and the previous
+  default, plus the two cross readings (folded at 9999, two-sided at 999).
+- Defaults changed after these studies (owner decision, Round 15):
+  `spatial_regression` uses GMM for the lag model (ML lag rho intervals
+  covered 0.48 at rho 0.3 and 0.003 at 0.6 under outcome sampling error;
+  GMM lag 0.899 and 0.889) and keeps ML for the error model (lambda is
+  attenuated by both estimators and GMM is not better: 0.558 vs 0.581 at
+  0.3, 0.162 vs 0.192 at 0.6; beta 0.88-0.91 for both). `local_morans`
+  uses two-sided p-values (min(1, 2 p_sim); esda's p_sim is folded) from
+  9999 permutations with BH at alpha 0.10: per-area rate 0.099 (previous
+  default 0.196) and family-wise rate 0.088 (MC SE 0.009) under
+  randomness; power for the hot spot 0.011; spatially patterned SEs still
+  give spurious clusters in 38% of maps (previous default 26%). The
+  previous behavior stays available (`method="ml"`;
+  `permutations=999, sided="folded"`). LM tests' size 0.046-0.056 at
+  0.05. Results and caveat text: `census.spatial`.
 - Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
   process, and `--jobs N` (0 = one per CPU) runs studies in parallel
   processes with output identical to a serial run (except the `seconds`
