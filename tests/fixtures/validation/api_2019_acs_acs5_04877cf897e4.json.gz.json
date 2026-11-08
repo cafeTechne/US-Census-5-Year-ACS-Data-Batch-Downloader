@@ -1,8 +1,8 @@
 {
   "kind": "census_api_response",
   "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
-  "retrieved": "2026-11-02",
-  "sha256": "79e3fd5fa3b239632f4f984d29f94d50fe00fe6fa2deafd5ca4e6842a1930121",
+  "retrieved": "2026-11-07",
+  "sha256": "98186f9902a01d500f6c2d288173c58146da6eb1ec664c391191e7f3758fbbe4",
   "size_bytes": 5540,
   "source_url": "https://api.census.gov/data/2019/acs/acs5?for=county%3A%2A&get=NAME%2Cgroup%28B01001%29&in=state%3A56",
   "uncompressed_sha256": "3bb8ab939382f1db1c760c52928ad6eec2fbb35d93076299d8e13ae1d7a16728"

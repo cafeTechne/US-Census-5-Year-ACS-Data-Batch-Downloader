@@ -1,6 +1,6 @@
 # Validation against Census-published values
 
-Generated: 2026-11-08T02:01:53+00:00  
+Generated: 2026-11-08T04:40:37+00:00  
 Mode: live  
 Command: `python scripts/validate_against_census.py --live`  
 
@@ -11,22 +11,22 @@ Each check recomputes a number the Census Bureau computed independently and comp
 | Check | Status | Compared | Failed | Max abs error | Max rel error | Tolerance |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | F1 | PASSED | 9800 | 0 | 0 | - | exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column |
-| F2 | PASSED | 5040 | 0 | 0.05 | 0.04712 | estimate: \|ours - DP\| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted |
-| F3 | PASSED | 29572 | 0 | 0.5 | - | replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row) |
-| F4 | PASSED | 1038 | 0 | 0.09838 | - | \|ours - DP\| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1) |
-| F5 | PASSED | 1983 | 0 | 1.623e+04 | 0.1985 | gross rent: every county within max($1, 0.1%) of B25064. Household income: median \|relative error\| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates) |
-| F6 | PASSED | 125 | 0 | 275.6 | 0.005741 | \|ours - CP\| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes) |
-| F7 | PASSED | 442 | 0 | - | - | agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding |
-| F8 | PASSED | 110 | 0 | 0 | - | estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted |
+| F2 | PASSED | 5880 | 0 | 0.05 | 0.04712 | estimate: \|ours - DP\| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted |
+| F3 | PASSED | 30496 | 0 | 0.5 | - | replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row) |
+| F4 | PASSED | 1212 | 0 | 0.09838 | - | \|ours - DP\| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1) |
+| F5 | PASSED | 2315 | 0 | 1.623e+04 | 0.1985 | gross rent: every county within max($1, 0.1%) of B25064. Household income: median \|relative error\| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates) |
+| F6 | PASSED | 150 | 0 | 275.6 | 0.005741 | \|ours - CP\| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes) |
+| F7 | PASSED | 522 | 0 | - | - | agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding |
+| F8 | PASSED | 132 | 0 | 0 | - | estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted |
 | F9 | PASSED | 48 | 0 | - | - | as Round 6: no concept flagged as both significantly (z-test, 90%) and implausibly (>25% relative or >10 points) different at the national level |
-| F10 | PASSED | 960 | 0 | 0 | - | exact (numeric equality of every estimate and MOE cell) |
+| F10 | PASSED | 1120 | 0 | 0 | - | exact (numeric equality of every estimate and MOE cell) |
 
 ### Known findings
 
 - **F5 (resolved 2026-11-02, census/medians.py):** when the cumulative count reaches exactly 50% at a bracket boundary and the following bracket(s) are empty, Census publishes the midpoint of the empty gap (B25063 2019: Sterling County TX 48431, $850; Stonewall County TX 48433, $600). The interpolation now returns that midpoint; failures matching the pattern are diagnosed as failures_explained_by_empty_bracket_gap_midpoint.
-- **F5 (methodological, criterion revised 2026-11-02):** household income: B19001's $10k-$50k-wide brackets are much coarser than the $2,500 distribution Census interpolates (Subject Definitions, 'Median Income'), so a per-county 2% band measures bracket coarseness, not calculation error (first live run, 2019-2023: 84.1% of counties within 2%, 99.8% within the published B19013 MOE). The check asserts median relative error < 1% and >= 98% of counties within the published MOE; the 2% share is still reported.
+- **F5 (methodological, criterion revised 2026-11-02):** household income: B19001's $10k-$50k-wide brackets are much coarser than the $2,500 distribution Census interpolates (Subject Definitions, 'Median Income'), so a per-county 2% band measures bracket coarseness, not calculation error (first live run, 2019-2023: 84.1% of counties within 2%, 99.8% within the published B19013 MOE; with Michigan added in Round 14: 85.9% and 99.7%). The check asserts median relative error < 1% and >= 98% of counties within the published MOE; the 2% share is still reported.
 - **F9 (informational, census/continuity.py):** the Round 6 continuity check flags real 2019->2023 change in stable concepts (B19001_015-017 top income brackets in nominal dollars, B17001_015, four B27010 cells), so `run_batch` blocks those extractions in the default concordance mode. Its thresholds are documented for adjacent, overlapping releases but are applied to any requested pair.
-- **F2 (methodological):** owner-occupied (DP04_0046) county MOEs from the Handbook proportion formula miss the band in 215 of 998 county-years (median ratio 0.88); for every one of them the exact replicate MOE reproduces the DP MOE within 0.1 point, so the gap is the covariance the approximation ignores. Age 65+ (12-cell sum) approximate MOEs are ~4x the DP MOE (near-controlled age totals).
+- **F2 (methodological):** owner-occupied (DP04_0046) county MOEs from the Handbook proportion formula miss the band in 279 of 1,164 county-years (median ratio 0.88); for every one of them the exact replicate MOE reproduces the DP MOE within 0.1 point, so the gap is the covariance the approximation ignores. Age 65+ (12-cell sum) approximate MOEs are ~4x the DP MOE (near-controlled age totals).
 - **F6:** Census's implied R-CPI-U-RS factor exceeds ours by 0.008% (2018->2023: 1.21729 = 449.3/369.1 vs ours 449.265/369.1) and 0.010% (2014->2019), consistent with Census using the index rounded to one decimal or an earlier vintage of the research series. 2019 CP medians are re-derived by Census, not scaled (see F6 notes).
 
 ## F1: PASSED
@@ -34,7 +34,7 @@ Each check recomputes a number the Census Bureau computed independently and comp
 Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing, except controlled MOEs -> 0 with <base>_CONTROLLED = True).
 
 - Tolerance: exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column
-- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 6.0 s
+- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 11.6 s
 - Responses pass through run_batch unchanged via a client whose _get_json is served by the same source as the comparison, so the check isolates parsing, sentinel cleaning, concordance renaming, panel stacking, slug renaming and file export.
 
 <details><summary>Details</summary>
@@ -82,10 +82,10 @@ Sources:
 
 ## F2: PASSED
 
-Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56 and all their counties, releases 2019, 2023.
+Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56,26 and all their counties, releases 2019, 2023.
 
 - Tolerance: estimate: |ours - DP| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted
-- Compared: 5040; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 6.85 s
+- Compared: 5880; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 8.49 s
 - Census computes Data Profile MOEs from replicate weights, which capture the covariance between numerator and denominator; the Handbook approximation ignores it, so it can over- or understate the MOE (ACS General Handbook 2020, ch. 8). Where the approximate MOE misses the band, the exact replicate MOE for the same geography is computed: if it reproduces the published MOE, the toolkit's formula is right and the gap is the documented approximation error.
 
 <details><summary>Details</summary>
@@ -292,17 +292,17 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
   },
   "per_construction": {
     "poverty_rate 2019 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
       "moe_band_misses_explained_by_replicates": 0,
       "moe_failures": 0,
-      "max_abs_error": 0.03651679214870818,
+      "max_abs_error": 0.04380614821259776,
       "skipped": 0
     },
     "uninsured_rate 2019 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -312,7 +312,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "owner_occupied 2019 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -322,7 +322,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "age_65_plus 2019 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -332,7 +332,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "bachelors_or_higher 2019 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -342,7 +342,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "poverty_rate 2019 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -352,27 +352,27 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "uninsured_rate 2019 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
       "moe_band_misses_explained_by_replicates": 0,
       "moe_failures": 0,
-      "max_abs_error": 0.04993646759847614,
+      "max_abs_error": 0.04996510816468991,
       "skipped": 0
     },
     "owner_occupied 2019 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
-      "moe_band_misses": 135,
-      "moe_band_misses_explained_by_replicates": 135,
+      "moe_band_misses": 172,
+      "moe_band_misses_explained_by_replicates": 172,
       "moe_failures": 0,
       "max_abs_error": 0.04996686547382012,
       "skipped": 0
     },
     "age_65_plus 2019 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -382,7 +382,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "bachelors_or_higher 2019 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -392,17 +392,17 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "poverty_rate 2023 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
       "moe_band_misses_explained_by_replicates": 0,
       "moe_failures": 0,
-      "max_abs_error": 0.03356974815006453,
+      "max_abs_error": 0.04944047403746765,
       "skipped": 0
     },
     "uninsured_rate 2023 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -412,7 +412,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "owner_occupied 2023 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -422,17 +422,17 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "age_65_plus 2023 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
       "moe_band_misses_explained_by_replicates": 0,
       "moe_failures": 0,
-      "max_abs_error": 0.040554153650933955,
+      "max_abs_error": 0.044602771997876545,
       "skipped": 0
     },
     "bachelors_or_higher 2023 state": {
-      "n": 5,
+      "n": 6,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -442,7 +442,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "poverty_rate 2023 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -452,7 +452,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "uninsured_rate 2023 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -462,17 +462,17 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "owner_occupied 2023 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
-      "moe_band_misses": 80,
-      "moe_band_misses_explained_by_replicates": 80,
+      "moe_band_misses": 107,
+      "moe_band_misses_explained_by_replicates": 107,
       "moe_failures": 0,
       "max_abs_error": 0.04999999999999716,
       "skipped": 0
     },
     "age_65_plus 2023 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -482,7 +482,7 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
       "skipped": 0
     },
     "bachelors_or_higher 2023 county": {
-      "n": 499,
+      "n": 582,
       "estimate_failures": 0,
       "formula_mismatches": 0,
       "moe_band_misses": 0,
@@ -494,59 +494,59 @@ Data Profile percentages and percent MOEs rebuilt from detailed-table counts wit
   },
   "moe_ratio_ours_over_published": {
     "poverty_rate": {
-      "n": 1008,
+      "n": 1176,
       "min": 0.7736313821643819,
-      "p5": 0.9534212538422614,
-      "p25": 0.9884370013231081,
-      "median": 1.0002856232316664,
-      "p75": 1.0140808197710969,
-      "p95": 1.0508986869945134,
-      "max": 1.492935767601951
+      "p5": 0.9554369497959188,
+      "p25": 0.9876097325820183,
+      "median": 1.0004333367260303,
+      "p75": 1.0146482058918944,
+      "p95": 1.0481317720389831,
+      "max": 1.4953084378391963
     },
     "uninsured_rate": {
-      "n": 1008,
+      "n": 1176,
       "min": 0.5245119880073353,
-      "p5": 0.7623261612371356,
-      "p25": 0.8382018345742577,
-      "median": 0.8947109410687769,
-      "p75": 0.959663952480057,
-      "p95": 1.0886752771469939,
+      "p5": 0.7602513283319245,
+      "p25": 0.8366644742921433,
+      "median": 0.8925526325526165,
+      "p75": 0.9589765222382747,
+      "p95": 1.0827144215893023,
       "max": 3.368149540320743
     },
     "owner_occupied": {
-      "n": 1008,
-      "min": 0.11740448706346762,
-      "p5": 0.5911391022180238,
-      "p25": 0.7804246992938717,
-      "median": 0.8847851481460042,
-      "p75": 0.9614225184624575,
-      "p95": 1.1256402470286904,
+      "n": 1176,
+      "min": 0.033101611186908554,
+      "p5": 0.5538309797594627,
+      "p25": 0.773165399793867,
+      "median": 0.8804264476946757,
+      "p75": 0.9602291433650332,
+      "p95": 1.1351535933009016,
       "max": 3.5880373603086078
     },
     "age_65_plus": {
-      "n": 972,
+      "n": 1135,
       "min": 0.32274979068910414,
-      "p5": 0.9133893879965173,
-      "p25": 2.806175898236696,
-      "median": 4.41323770953967,
-      "p75": 6.246878784493752,
-      "p95": 10.32043570564385,
+      "p5": 0.9745152132688413,
+      "p25": 3.0237311228219257,
+      "median": 4.64809113246433,
+      "p75": 6.543960270804267,
+      "p95": 10.371881329539105,
       "max": 24.355136826875203
     },
     "bachelors_or_higher": {
-      "n": 1008,
+      "n": 1176,
       "min": 0.6148187553996485,
-      "p5": 0.8995509215727955,
-      "p25": 0.970260790215502,
-      "median": 1.0213155010270547,
-      "p75": 1.0908896997218966,
-      "p95": 1.2085678597060883,
+      "p5": 0.9004757855672131,
+      "p25": 0.9692286593913597,
+      "median": 1.0205688957607086,
+      "p75": 1.0869595744621137,
+      "p95": 1.2101276755971069,
       "max": 3.9483660875278423
     }
   },
   "formula_mismatches": 0,
-  "proportion_ratio_fallbacks": 12,
-  "moe_band_misses_explained_by_replicates": 215,
+  "proportion_ratio_fallbacks": 22,
+  "moe_band_misses_explained_by_replicates": 279,
   "explained_sample": [
     {
       "construction": "owner_occupied",
@@ -687,7 +687,7 @@ Sources:
 MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe, variance.replicate_moe) vs the MOE published in the same VRE file; VRE estimates and MOEs vs API estimates and MOEs for the same cells. Tables B17001, B27010, B25003, B01001, B01003, B11001, B19001, B25063, state level, releases 2019, 2023, plus the committed county/state VRE fixtures.
 
 - Tolerance: replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row)
-- Compared: 29572; failed: 0; max abs error: 0.5; max rel error: -; time: 9.0 s
+- Compared: 30496; failed: 0; max abs error: 0.5; max rel error: -; time: 9.5 s
 - Controlled rows (CME '*****', published MOE 0) and model-based rows (all 80 replicates equal the estimate, published MOE from the VRE documentation's eqs. 3-5) cannot be reproduced from replicates and are counted separately, as the VRE documentation prescribes.
 
 <details><summary>Details</summary>
@@ -703,7 +703,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49988453556113654,
       "moe_mismatches": 0,
-      "api_cells_compared": 590,
+      "api_cells_compared": 708,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -715,7 +715,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 11,
       "max_abs_diff": 0.4998932918888386,
       "moe_mismatches": 0,
-      "api_cells_compared": 660,
+      "api_cells_compared": 792,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -727,7 +727,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49547866262082607,
       "moe_mismatches": 0,
-      "api_cells_compared": 30,
+      "api_cells_compared": 36,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -739,9 +739,9 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49996392293905956,
       "moe_mismatches": 0,
-      "api_cells_compared": 490,
+      "api_cells_compared": 588,
       "api_cell_mismatches": 0,
-      "controlled_moe_cells": 5
+      "controlled_moe_cells": 6
     },
     "B01003 2019": {
       "scope": "full national file (summary level 040)",
@@ -751,9 +751,9 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": null,
       "moe_mismatches": 0,
-      "api_cells_compared": 10,
+      "api_cells_compared": 12,
       "api_cell_mismatches": 0,
-      "controlled_moe_cells": 5
+      "controlled_moe_cells": 6
     },
     "B11001 2019": {
       "scope": "full national file (summary level 040)",
@@ -763,7 +763,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.4978310636047354,
       "moe_mismatches": 0,
-      "api_cells_compared": 90,
+      "api_cells_compared": 108,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -775,7 +775,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.4993840771894611,
       "moe_mismatches": 0,
-      "api_cells_compared": 170,
+      "api_cells_compared": 204,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -787,7 +787,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.499846723576411,
       "moe_mismatches": 0,
-      "api_cells_compared": 270,
+      "api_cells_compared": 324,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -799,7 +799,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49969577847059554,
       "moe_mismatches": 0,
-      "api_cells_compared": 590,
+      "api_cells_compared": 708,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -811,7 +811,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 8,
       "max_abs_diff": 0.4999403443362098,
       "moe_mismatches": 0,
-      "api_cells_compared": 660,
+      "api_cells_compared": 792,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -823,7 +823,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49928626996916137,
       "moe_mismatches": 0,
-      "api_cells_compared": 30,
+      "api_cells_compared": 36,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -835,9 +835,9 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.4997525480409877,
       "moe_mismatches": 0,
-      "api_cells_compared": 490,
+      "api_cells_compared": 588,
       "api_cell_mismatches": 0,
-      "controlled_moe_cells": 5
+      "controlled_moe_cells": 6
     },
     "B01003 2023": {
       "scope": "full national file (summary level 040)",
@@ -847,9 +847,9 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": null,
       "moe_mismatches": 0,
-      "api_cells_compared": 10,
+      "api_cells_compared": 12,
       "api_cell_mismatches": 0,
-      "controlled_moe_cells": 5
+      "controlled_moe_cells": 6
     },
     "B11001 2023": {
       "scope": "full national file (summary level 040)",
@@ -859,7 +859,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49874303933052033,
       "moe_mismatches": 0,
-      "api_cells_compared": 90,
+      "api_cells_compared": 108,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -871,7 +871,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.49951382657673093,
       "moe_mismatches": 0,
-      "api_cells_compared": 170,
+      "api_cells_compared": 204,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -883,7 +883,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
       "model_based_rows": 0,
       "max_abs_diff": 0.4994722210440443,
       "moe_mismatches": 0,
-      "api_cells_compared": 270,
+      "api_cells_compared": 324,
       "api_cell_mismatches": 0,
       "controlled_moe_cells": 0
     },
@@ -929,7 +929,7 @@ MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe,
     }
   },
   "replicate_rows_checked": 24952,
-  "api_cells_compared": 4620,
+  "api_cells_compared": 5544,
   "api_cell_mismatches": 0
 }
 ```
@@ -959,10 +959,10 @@ Sources:
 
 ## F4: PASSED
 
-Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.
+Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56,26 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.
 
 - Tolerance: |ours - DP| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1)
-- Compared: 1038; failed: 0; max abs error: 0.09838; max rel error: -; time: 0.61 s
+- Compared: 1212; failed: 0; max abs error: 0.09838; max rel error: -; time: 0.74 s
 - published_moe_at_display_floor counts rows where the DP shows a percent MOE of 0.1 while the exact replicate MOE is below 0.05 (it would round to 0.0). This occurs for the 65+ share at the state level, which is nearly controlled to the population estimates by age; Census does not display a 0.0 percent MOE for an uncontrolled item, so 0.1 acts as a floor. These rows pass only because the tolerance is 0.1; they are listed so the margin is visible.
 
 <details><summary>Details</summary>
@@ -971,72 +971,72 @@ Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Dat
 {
   "per_construction": {
     "poverty_rate 2019 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
-      "max_estimate_error": 0.03651679214870818,
-      "max_moe_error": 0.02393998589620068,
+      "max_estimate_error": 0.04380614821259776,
+      "max_moe_error": 0.04960234914349701,
       "skipped": 0
     },
     "uninsured_rate 2019 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
       "max_estimate_error": 0.04511322700916409,
       "max_moe_error": 0.04994497169954262,
       "skipped": 0
     },
     "owner_occupied 2019 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
       "max_estimate_error": 0.04846751821835227,
       "max_moe_error": 0.044011990628512215,
       "skipped": 0
     },
     "age_65_plus 2019 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
       "max_estimate_error": 0.04797550364362557,
       "max_moe_error": 0.09837759799016546,
       "skipped": 0,
-      "published_moe_at_display_floor": 5
+      "published_moe_at_display_floor": 6
     },
     "owner_occupied 2019 county": {
-      "n": 499,
+      "n": 582,
       "failures": 0,
       "max_estimate_error": 0.04996686547382012,
       "max_moe_error": 0.049866982472014154,
       "skipped": 0
     },
     "poverty_rate 2023 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
-      "max_estimate_error": 0.03356974815006453,
+      "max_estimate_error": 0.04944047403746765,
       "max_moe_error": 0.04916769747922606,
       "skipped": 0
     },
     "uninsured_rate 2023 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
       "max_estimate_error": 0.04768904734502666,
       "max_moe_error": 0.04056661497016503,
       "skipped": 0
     },
     "owner_occupied 2023 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
       "max_estimate_error": 0.03762119390653851,
       "max_moe_error": 0.035742822291887105,
       "skipped": 0
     },
     "age_65_plus 2023 state": {
-      "n": 5,
+      "n": 6,
       "failures": 0,
-      "max_estimate_error": 0.040554153650933955,
+      "max_estimate_error": 0.044602771997876545,
       "max_moe_error": 0.0983616748336616,
       "skipped": 0,
-      "published_moe_at_display_floor": 4
+      "published_moe_at_display_floor": 5
     },
     "owner_occupied 2023 county": {
-      "n": 499,
+      "n": 582,
       "failures": 0,
       "max_estimate_error": 0.04999999999999716,
       "max_moe_error": 0.049901415046242015,
@@ -1047,53 +1047,53 @@ Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Dat
   "max_moe_error": 0.09837759799016546,
   "approximate_over_replicate_moe": {
     "poverty_rate state": {
-      "n": 10,
+      "n": 12,
       "min": 0.9973932075777341,
-      "p5": 0.9978147743473517,
-      "p25": 0.9985586361462659,
+      "p5": 0.9979084558517111,
+      "p25": 0.9987204883086159,
       "median": 0.9998334381640055,
-      "p75": 1.0007156223347162,
-      "p95": 1.0025456931650314,
+      "p75": 1.000730282423888,
+      "p95": 1.0022675419291092,
       "max": 1.0037973737266812
     },
     "uninsured_rate state": {
-      "n": 10,
+      "n": 12,
       "min": 0.7051799348769849,
-      "p5": 0.7137375419872339,
-      "p25": 0.7422443567188695,
-      "median": 0.7818525206367402,
-      "p75": 0.7956330708010112,
-      "p95": 0.8572450778988274,
+      "p5": 0.7156392324561781,
+      "p25": 0.7637002335050819,
+      "median": 0.7869317488089953,
+      "p75": 0.8025014805570005,
+      "p95": 0.8725018072000658,
       "max": 0.8869444583511927
     },
     "owner_occupied state": {
-      "n": 10,
+      "n": 12,
       "min": 0.8923353915038464,
-      "p5": 0.9223629423972761,
-      "p25": 1.2369931785012964,
-      "median": 1.2790646370898342,
-      "p75": 1.2939296775402536,
-      "p95": 1.3561068296827248,
-      "max": 1.3640124510373062
+      "p5": 0.929035731484705,
+      "p25": 1.2457206843895248,
+      "median": 1.283935307811899,
+      "p75": 1.347947622211519,
+      "p95": 1.3936197167886188,
+      "max": 1.4298063749291121
     },
     "age_65_plus state": {
-      "n": 10,
+      "n": 12,
       "min": 4.773304094911635,
-      "p5": 5.432293303515204,
-      "p25": 7.89396453186003,
+      "p5": 5.578735349871553,
+      "p25": 8.070327705737789,
       "median": 12.356599715398112,
-      "p75": 17.595231361621554,
-      "p95": 21.988708609393594,
+      "p75": 15.668419542366417,
+      "p95": 21.607730735842374,
       "max": 23.703109040374095
     },
     "owner_occupied county": {
-      "n": 998,
-      "min": 0.11402469945309178,
-      "p5": 0.5819994095597515,
-      "p25": 0.7824720903505963,
-      "median": 0.8796293019122823,
-      "p75": 0.9636591439799281,
-      "p95": 1.0868608477420798,
+      "n": 1164,
+      "min": 0.03394176482653954,
+      "p5": 0.5554692609363415,
+      "p25": 0.7707697011792228,
+      "median": 0.8754906559828328,
+      "p75": 0.9609813239564091,
+      "p95": 1.0905260951161029,
       "max": 3.5535069687610403
     }
   },
@@ -1120,10 +1120,10 @@ Sources:
 
 ## F5: PASSED
 
-Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56, releases 2019, 2023.
+Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56,26, releases 2019, 2023.
 
 - Tolerance: gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates)
-- Compared: 1983; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 3.24 s
+- Compared: 2315; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 3.0 s
 - n_failed counts gross-rent counties outside the per-county bound plus household-income releases whose distribution criterion is not met (median relative error < 1% and >= 98% of counties within the published MOE; counties outside 2% are listed as counties_outside_2pct). Published medians at a top or bottom coding bound and medians we top/bottom-code are excluded.
 
 <details><summary>Details</summary>
@@ -1133,22 +1133,22 @@ Medians interpolated from published distribution tables (medians.median_for_rows
   "pairs": {
     "B25063->B25064_001 2019": {
       "definition": "Median gross rent (B25064) from the gross rent distribution (B25063, 24 cash-rent brackets; 'No cash rent' excluded). Census computes B25064 from the same brackets.",
-      "counties": 499,
-      "compared": 496,
+      "counties": 582,
+      "compared": 579,
       "excluded_top_or_bottom_coded_or_missing": 3,
       "max_abs_error": 0.5,
-      "median_abs_error": 0.23883986064225837,
+      "median_abs_error": 0.23744292237438458,
       "max_rel_error": 0.0009487666034155328,
-      "median_rel_error": 0.00030089067630395484,
+      "median_rel_error": 0.00029740145478872104,
       "share_within_2pct": 1.0,
       "approx_moe_over_published_moe": {
-        "n": 496,
+        "n": 579,
         "min": 0.6514412127358754,
-        "p5": 0.894596428650637,
-        "p25": 1.0424454239581795,
-        "median": 1.128010743474428,
-        "p75": 1.2131230539877658,
-        "p95": 1.401804095917858,
+        "p5": 0.9033103693911765,
+        "p25": 1.042242022506491,
+        "median": 1.125984816764382,
+        "p75": 1.2064967258369097,
+        "p95": 1.3940536662403271,
         "max": 3.282941519739477
       },
       "share_within_1_dollar": 1.0,
@@ -1157,48 +1157,48 @@ Medians interpolated from published distribution tables (medians.median_for_rows
     },
     "B19001->B19013_001 2019": {
       "definition": "Median household income (B19013) from household income brackets (B19001, 16 brackets). Census interpolates a finer internal distribution ($2,500 intervals below $250,000; Subject Definitions 2023, 'Median Income'), so exact agreement is not expected.",
-      "counties": 499,
-      "compared": 499,
+      "counties": 582,
+      "compared": 582,
       "excluded_top_or_bottom_coded_or_missing": 0,
       "max_abs_error": 5398.1666666666715,
-      "median_abs_error": 258.0281690140837,
+      "median_abs_error": 234.9357802822633,
       "max_rel_error": 0.06880502022364983,
-      "median_rel_error": 0.004856078477082083,
-      "share_within_2pct": 0.905811623246493,
+      "median_rel_error": 0.004526242972804987,
+      "share_within_2pct": 0.9192439862542955,
       "approx_moe_over_published_moe": {
-        "n": 499,
+        "n": 582,
         "min": 0.5721817734474332,
-        "p5": 0.826981323927377,
-        "p25": 0.9901451746977017,
-        "median": 1.1050403899416155,
-        "p75": 1.2539766360798126,
-        "p95": 1.517586881377449,
+        "p5": 0.8388430953154132,
+        "p25": 1.0022439172105853,
+        "median": 1.1036472172599594,
+        "p75": 1.2462187436889534,
+        "p95": 1.4825618386027943,
         "max": 2.7566364760267823
       },
       "counties_outside_2pct": 47,
       "criterion": "median relative error < 1% and >= 98% of counties within the published MOE (2% share reported, not asserted)",
       "criterion_met": true,
-      "share_within_published_moe": 0.9879759519038076,
+      "share_within_published_moe": 0.9896907216494846,
       "outside_2pct_but_within_published_moe": 46
     },
     "B25063->B25064_001 2023": {
       "definition": "Median gross rent (B25064) from the gross rent distribution (B25063, 24 cash-rent brackets; 'No cash rent' excluded). Census computes B25064 from the same brackets.",
-      "counties": 499,
-      "compared": 490,
+      "counties": 582,
+      "compared": 573,
       "excluded_top_or_bottom_coded_or_missing": 9,
       "max_abs_error": 0.5,
-      "median_abs_error": 0.22684391080616706,
+      "median_abs_error": 0.23076923076928324,
       "max_rel_error": 0.0009785677618069815,
-      "median_rel_error": 0.0002207326563185523,
+      "median_rel_error": 0.00022495755887916462,
       "share_within_2pct": 1.0,
       "approx_moe_over_published_moe": {
-        "n": 490,
+        "n": 573,
         "min": 0.5707367985396146,
-        "p5": 0.843171302726709,
-        "p25": 1.0281655600034902,
-        "median": 1.1168789341235161,
-        "p75": 1.226784865025155,
-        "p95": 1.4380230843865633,
+        "p5": 0.8450357070775417,
+        "p25": 1.030450913896718,
+        "median": 1.1167781135639878,
+        "p75": 1.2226920030193589,
+        "p95": 1.4173892910204984,
         "max": 7.554880616634601
       },
       "share_within_1_dollar": 1.0,
@@ -1207,29 +1207,29 @@ Medians interpolated from published distribution tables (medians.median_for_rows
     },
     "B19001->B19013_001 2023": {
       "definition": "Median household income (B19013) from household income brackets (B19001, 16 brackets). Census interpolates a finer internal distribution ($2,500 intervals below $250,000; Subject Definitions 2023, 'Median Income'), so exact agreement is not expected.",
-      "counties": 499,
-      "compared": 498,
+      "counties": 582,
+      "compared": 581,
       "excluded_top_or_bottom_coded_or_missing": 1,
       "max_abs_error": 16226.11627906977,
-      "median_abs_error": 446.5339830084995,
+      "median_abs_error": 435.19959278321767,
       "max_rel_error": 0.1985113138045458,
-      "median_rel_error": 0.006389973134895618,
-      "share_within_2pct": 0.8413654618473896,
+      "median_rel_error": 0.006355229464913636,
+      "share_within_2pct": 0.8588640275387264,
       "approx_moe_over_published_moe": {
-        "n": 498,
+        "n": 581,
         "min": 0.4454191627730805,
-        "p5": 0.7499554269308675,
-        "p25": 0.9314206768081066,
-        "median": 1.0550169294345477,
-        "p75": 1.194524298112461,
-        "p95": 1.506366979317927,
+        "p5": 0.7551186429582991,
+        "p25": 0.9449788203902701,
+        "median": 1.0699313688671936,
+        "p75": 1.2061307364797798,
+        "p95": 1.5063513752992483,
         "max": 55.87813186455595
       },
-      "counties_outside_2pct": 79,
+      "counties_outside_2pct": 82,
       "criterion": "median relative error < 1% and >= 98% of counties within the published MOE (2% share reported, not asserted)",
       "criterion_met": true,
-      "share_within_published_moe": 0.9979919678714859,
-      "outside_2pct_but_within_published_moe": 78
+      "share_within_published_moe": 0.9965576592082617,
+      "outside_2pct_but_within_published_moe": 80
     }
   }
 }
@@ -1259,10 +1259,10 @@ Sources:
 
 ## F6: PASSED
 
-Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).
+Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: |ours - CP| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes)
-- Compared: 125; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 6.02 s
+- Compared: 150; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 7.06 s
 - Asserted: means, aggregates and per-capita values, which Census converts with a single factor (implied factor constant to 5 digits across items and states). Median items are compared and reported but not asserted: in the 2019 Comparison Profile their implied factors scatter (1.0747-1.0838 against 1.08097 for means), showing that Census re-derived those medians from inflation-adjusted distributions rather than scaling the published median, which no deflator can reproduce from published data; in the 2023 CP medians scale with the same constant factor and all pass. Median misses are listed with asserted=false.
 - Round 6 acceptance criterion 6: the Census-implied factor (median over mean/aggregate/per-capita items) is compared with our R-CPI-U-RS factor in details.factors.*.implied_minus_ours_percent.
 
@@ -1279,33 +1279,33 @@ Comparison Profile (CP03) earlier-period dollar values, which Census publishes i
         "2019": 375.813
       },
       "census_implied_factor_all_items": {
-        "n": 50,
+        "n": 60,
         "min": 1.0746843377809618,
-        "p5": 1.076145198907045,
-        "p25": 1.0802195382581568,
-        "median": 1.0809600821614125,
-        "p75": 1.0809759547539666,
-        "p95": 1.0825238763942842,
+        "p5": 1.0773204081578227,
+        "p25": 1.0801767593654468,
+        "median": 1.0809592914613915,
+        "p75": 1.0809708958581514,
+        "p95": 1.0821819415103087,
         "max": 1.0838654177021603
       },
       "census_implied_factor_means_and_per_capita": {
-        "n": 20,
-        "min": 1.0809414249613398,
-        "p5": 1.0809530432938104,
+        "n": 24,
+        "min": 1.0809394484183146,
+        "p5": 1.0809432594348878,
         "p25": 1.0809600994303399,
         "median": 1.0809657866727096,
         "p75": 1.0809701408143002,
-        "p95": 1.080979121965741,
+        "p95": 1.0809787389980172,
         "max": 1.0809820447050202
       },
       "census_implied_factor_medians": {
-        "n": 30,
+        "n": 36,
         "min": 1.0746843377809618,
-        "p5": 1.0748980061926594,
-        "p25": 1.0800400819240237,
-        "median": 1.0805843994280213,
-        "p75": 1.0813419154779242,
-        "p95": 1.0833594072049817,
+        "p5": 1.0750013722228515,
+        "p25": 1.0799983347410265,
+        "median": 1.0803961190783977,
+        "p75": 1.0810451289198495,
+        "p95": 1.0830715220694618,
         "max": 1.0838654177021603
       },
       "implied_minus_ours_percent": 0.010325354924156649,
@@ -1320,36 +1320,36 @@ Comparison Profile (CP03) earlier-period dollar values, which Census publishes i
         "2023": 449.265
       },
       "census_implied_factor_all_items": {
-        "n": 75,
+        "n": 90,
         "min": 1.217095075874884,
-        "p5": 1.2172690671665287,
-        "p25": 1.2172780351481864,
-        "median": 1.2172863599013968,
-        "p75": 1.2172909991247587,
-        "p95": 1.2173506918729535,
+        "p5": 1.2172687528930333,
+        "p25": 1.2172782423061743,
+        "median": 1.2172863894784407,
+        "p75": 1.2172920057657355,
+        "p95": 1.2173483380353065,
         "max": 1.217607973421927
       },
       "census_implied_factor_means_and_per_capita": {
-        "n": 45,
+        "n": 54,
         "min": 1.217095075874884,
-        "p5": 1.2172694830791926,
-        "p25": 1.2172809028390055,
-        "median": 1.2172863599013968,
-        "p75": 1.2172931097568669,
-        "p95": 1.217359317116744,
+        "p5": 1.2172695703442484,
+        "p25": 1.217280932305722,
+        "median": 1.2172865448520538,
+        "p75": 1.2172940141155042,
+        "p95": 1.217355827531763,
         "max": 1.217607973421927
       },
       "census_implied_factor_medians": {
-        "n": 30,
+        "n": 36,
         "min": 1.2172652955167795,
-        "p5": 1.2172679035298999,
-        "p25": 1.2172738730731925,
-        "median": 1.217286132082998,
-        "p75": 1.2172880890236044,
-        "p95": 1.2172967018420697,
+        "p5": 1.2172671882402522,
+        "p25": 1.2172740281502468,
+        "median": 1.2172856268138728,
+        "p75": 1.2172877617920628,
+        "p95": 1.2172956567015745,
         "max": 1.2173020424055785
       },
-      "implied_minus_ours_percent": 0.007878521497461932,
+      "implied_minus_ours_percent": 0.007893716379658855,
       "current_period_cp_ne_dp": 0,
       "unmatched_cp_items": 28
     }
@@ -1376,10 +1376,10 @@ Sources:
 
 ## F7: PASSED
 
-Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).
+Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding
-- Compared: 442; failed: 0; max abs error: -; max rel error: -; time: 1.07 s
+- Compared: 522; failed: 0; max abs error: -; max rel error: -; time: 2.99 s
 - The API's cprofile endpoint publishes estimates (E), annotations (EA) and significance (SS) only, no MOEs; MOEs come from each release's Data Profile (PM for percent items, M for others). For dollar items the earlier MOE is scaled by the same R-CPI-U-RS factor as the estimate.
 - Census tests unrounded estimates and standard errors; we test the published (rounded) values, so disagreements are expected only for z close to the 1.645 critical value.
 - A test is 'decidable' when every combination of unrounded values consistent with the published rounding (estimates and MOEs +/- half a unit; a published percent MOE of 0.1 may be any value in (0, 0.15)) gives z on the same side of 1.645. Only decidable tests can disagree with Census because of a calculation error; agreement is asserted on them and reported for all tests. Failures list decidable disagreements first, then undecidable ones.
@@ -1394,39 +1394,39 @@ Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two pe
   "per_release": {
     "2019 vs 2014": {
       "items": 83,
-      "tests": 236,
-      "agree": 211,
-      "agreement_rate": 0.8940677966101694,
+      "tests": 283,
+      "agree": 255,
+      "agreement_rate": 0.901060070671378,
       "overlap_years": 0,
       "skipped": {
-        "estimate or MOE not published": 80,
-        "income-bracket share re-tabulated by Census after inflation adjustment": 99
+        "estimate or MOE not published": 96,
+        "income-bracket share re-tabulated by Census after inflation adjustment": 119
       },
       "unmatched_cp_items": 54,
-      "decidable_tests": 159,
-      "decidable_agree": 159
+      "decidable_tests": 187,
+      "decidable_agree": 187
     },
     "2023 vs 2018": {
       "items": 109,
-      "tests": 380,
-      "agree": 360,
-      "agreement_rate": 0.9473684210526315,
+      "tests": 456,
+      "agree": 430,
+      "agreement_rate": 0.9429824561403509,
       "overlap_years": 0,
       "skipped": {
-        "estimate or MOE not published": 65,
-        "income-bracket share re-tabulated by Census after inflation adjustment": 100
+        "estimate or MOE not published": 78,
+        "income-bracket share re-tabulated by Census after inflation adjustment": 120
       },
       "unmatched_cp_items": 28,
-      "decidable_tests": 283,
-      "decidable_agree": 283
+      "decidable_tests": 335,
+      "decidable_agree": 335
     }
   },
-  "tests_total": 616,
-  "decidable_tests": 442,
-  "undecidable_tests": 174,
+  "tests_total": 739,
+  "decidable_tests": 522,
+  "undecidable_tests": 217,
   "agreement_rate_decidable": 1.0,
-  "agreement_rate_all_tests": 0.926948051948052,
-  "agreement_rate_undecidable": 0.7413793103448276,
+  "agreement_rate_all_tests": 0.9269282814614344,
+  "agreement_rate_undecidable": 0.7511520737327189,
   "disagreements_abs_z_minus_1645": {
     "n": 0
   },
@@ -1448,12 +1448,15 @@ Failures / disagreements (first 25):
 | 2019 | 48 | CP03_2019_006 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.4 | 0.1 | 0.5 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2019 | 06 | CP03_2019_007 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!Not in labor force | 36.3 | 0.1 | 36.2 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2019 | 06 | CP03_2019_021 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Public transportation (excluding taxicab) | 5.1 | 0.1 | 5.2 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 26 | CP03_2019_021 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Public transportation (excluding taxicab) | 1.3 | 0.1 | 1.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2019 | 06 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 2.6 | 0.1 | 2.7 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 17 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 3 | 0.1 | 3.1 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 48 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 1.5 | 0.1 | 1.6 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 06 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2.6 | 0.1 | 2.5 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 36 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2 | 0.1 | 1.9 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 26 | CP03_2019_033 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Agriculture, forestry, fishing and hunting, and mining | 1.2 | 0.1 | 1.3 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 36 | CP03_2019_034 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction | 5.7 | 0.1 | 5.6 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 26 | CP03_2019_036 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 2.4 | 0.1 | 2.5 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 48 | CP03_2019_036 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 2.9 | 0.1 | 3 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 48 | CP03_2019_039 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Information | 1.7 | 0.1 | 1.8 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 36 | CP03_2019_040 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Finance and insurance, and real estate and rental and leasing | 8 | 0.1 | 8.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
@@ -1462,9 +1465,6 @@ Failures / disagreements (first 25):
 | 2019 | 17 | CP03_2019_050 | 2010-2014 Estimates!!CLASS OF WORKER!!Civilian employed population 16 years and over!!Unpaid family workers | 0.2 | 0.1 | 0.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2023 | 06 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 4.1 | 0.1 | 4.2 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2023 | 36 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 3.9 | 0.1 | 3.8 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
-| 2023 | 06 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.5 | 0.1 | 0.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2023 | 36 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.2 | 0.1 | 0.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2023 | 48 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.5 | 0.1 | 0.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 
 Sources:
 
@@ -1474,10 +1474,10 @@ Sources:
 
 ## F8: PASSED
 
-Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56, releases 2019, 2023.
+Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56,26, releases 2019, 2023.
 
 - Tolerance: estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted
-- Compared: 110; failed: 0; max abs error: 0; max rel error: -; time: 2.28 s
+- Compared: 132; failed: 0; max abs error: 0; max rel error: -; time: 2.51 s
 - B01003_001 is controlled (published MOE '*****') at county and state level, so no MOE ratio is formed for it. The approximate sum MOE ignores covariance between counties (Handbook 2020 ch. 8), so the ratio scatters around 1; it is reported, not asserted, as the plan specifies.
 
 <details><summary>Details</summary>
@@ -1486,103 +1486,103 @@ Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the pu
 {
   "moe_ratio_sum_approx_over_state_published": {
     "B25001_001": {
-      "n": 10,
-      "min": 0.9200765829347392,
-      "p5": 0.9702394078119005,
-      "p25": 1.376113237503102,
+      "n": 12,
+      "min": 0.8221877095170256,
+      "p5": 0.8760265898967681,
+      "p25": 1.2676735772392067,
       "median": 2.0520658986589773,
-      "p75": 2.497099099175031,
-      "p95": 3.2782897272583877,
+      "p75": 2.517283311110397,
+      "p95": 3.2695165690838586,
       "max": 3.3177689390437686
     },
     "B11001_001": {
-      "n": 10,
+      "n": 12,
       "min": 0.4904288084347447,
-      "p5": 0.49170432173210277,
-      "p25": 0.5180181980138052,
+      "p5": 0.49198776913151565,
+      "p25": 0.5206201731224245,
       "median": 0.5839980208520118,
-      "p75": 0.6883133246348668,
-      "p95": 1.0711316438856664,
+      "p75": 0.6275524245060846,
+      "p95": 1.0567856764168537,
       "max": 1.1356884974953243
     },
     "B11001_002": {
-      "n": 10,
+      "n": 12,
       "min": 0.533780401313172,
-      "p5": 0.5721635686135307,
-      "p25": 0.6292462134947351,
+      "p5": 0.5806931613469438,
+      "p25": 0.6294049227653183,
       "median": 0.7032767886762725,
-      "p75": 0.9109901178233026,
-      "p95": 1.0501421401593645,
+      "p75": 0.8641937561250256,
+      "p95": 1.0430654234605417,
       "max": 1.0819873653040675
     },
     "B11001_003": {
-      "n": 10,
+      "n": 12,
       "min": 0.46528240950424143,
-      "p5": 0.48385216156572847,
-      "p25": 0.5314522014696266,
+      "p5": 0.48797877313494786,
+      "p25": 0.5534631693048354,
       "median": 0.6217339720149735,
-      "p75": 0.7938373754606243,
-      "p95": 1.0150855579716258,
+      "p75": 0.7414718507922212,
+      "p95": 1.0107738701548448,
       "max": 1.0344881531471406
     },
     "B11001_004": {
-      "n": 10,
+      "n": 12,
       "min": 0.8596575885724728,
-      "p5": 0.8749576459107514,
-      "p25": 0.905182754190873,
-      "median": 0.9273229249160981,
-      "p75": 0.9628670519610404,
-      "p95": 1.0222514778347334,
+      "p5": 0.8783576586525912,
+      "p25": 0.8997092650435321,
+      "median": 0.9252882830790294,
+      "p75": 0.9576767116631979,
+      "p95": 1.0158690350395374,
       "max": 1.050972470413115
     },
     "B11001_005": {
-      "n": 10,
+      "n": 12,
       "min": 0.8105428352930195,
-      "p5": 0.8728236338560468,
-      "p25": 0.9714868053551331,
-      "median": 1.001570136611617,
-      "p75": 1.0432243849624605,
-      "p95": 1.0946760150295458,
+      "p5": 0.8614994918107594,
+      "p25": 0.9648362532205813,
+      "median": 0.9906652131583422,
+      "p75": 1.0421326463241056,
+      "p95": 1.0856472021508765,
       "max": 1.1353056729835578
     },
     "B11001_006": {
-      "n": 10,
+      "n": 12,
       "min": 0.8997271046769949,
-      "p5": 0.9005037475606822,
-      "p25": 0.9305906371650302,
+      "p5": 0.9006763348681682,
+      "p25": 0.9365119096497926,
       "median": 0.9542296283215247,
-      "p75": 0.9797943499486612,
-      "p95": 1.0295970755556445,
+      "p75": 0.9804248178274029,
+      "p95": 1.0252041252463,
       "max": 1.0493653519476953
     },
     "B11001_007": {
-      "n": 10,
+      "n": 12,
       "min": 0.8036290107590621,
-      "p5": 0.8734460689673557,
-      "p25": 0.966270164453756,
-      "median": 1.0152523560486246,
-      "p75": 1.0817042990472965,
-      "p95": 1.1055862828350502,
+      "p5": 0.866743298945988,
+      "p25": 0.9635052362954257,
+      "median": 0.9989317189619551,
+      "p75": 1.075198054771135,
+      "p95": 1.1045422107777148,
       "max": 1.11028460709306
     },
     "B11001_008": {
-      "n": 10,
-      "min": 0.894953290664733,
-      "p5": 0.9341284324260899,
-      "p25": 0.9912930176720269,
-      "median": 1.0352289844645162,
-      "p75": 1.0724867215601919,
-      "p95": 1.1475252611230733,
+      "n": 12,
+      "min": 0.8165772484883481,
+      "p5": 0.8596840716853598,
+      "p25": 0.9712384920561632,
+      "median": 1.0219268811229107,
+      "p75": 1.0544642643338071,
+      "p95": 1.1398033264210572,
       "max": 1.182273967282146
     },
     "B11001_009": {
-      "n": 10,
-      "min": 0.9022493372059337,
-      "p5": 0.9195040596699223,
-      "p25": 0.9615270005344628,
-      "median": 1.0165662850562542,
-      "p75": 1.0331031707050693,
-      "p95": 1.07798386716504,
+      "n": 12,
+      "min": 0.8566024005642212,
+      "p5": 0.8817082157171631,
+      "p25": 0.9505326361537468,
+      "median": 1.007390193064066,
+      "p75": 1.0282877042562046,
+      "p95": 1.0764420369011085,
       "max": 1.0849221033527314
     }
   }
@@ -1600,7 +1600,7 @@ Sources:
 Round 6 national continuity check (census.continuity) for every multi-vintage concept of the F1 extraction (B01001, 2019, 2023).
 
 - Tolerance: as Round 6: no concept flagged as both significantly (z-test, 90%) and implausibly (>25% relative or >10 points) different at the national level
-- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 3.03 s
+- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 2.44 s
 - A pass shows no national value jumps implausibly between vintages; it does not prove the codes measure the same thing (census/continuity.py docstring).
 - Informational (not asserted): the Round 6 check flags concepts of  for 2019-2023 although every concept keeps its code and label. The flagged series show real change over four years (income brackets in nominal dollars, poverty and insurance by age as the population ages). census/continuity.py's thresholds (25% relative, 10 points) are documented for adjacent, overlapping releases but are applied to any requested pair, so such extractions block in the default concordance mode. A false positive of the Round 6 check, reported for the module owner; it is not a calculation error.
 
@@ -1649,10 +1649,10 @@ Sources:
 
 ## F10: PASSED
 
-ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56.
+ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56,26.
 
 - Tolerance: exact (numeric equality of every estimate and MOE cell)
-- Compared: 960; failed: 0; max abs error: 0; max rel error: -; time: 9.12 s
+- Compared: 1120; failed: 0; max abs error: 0; max rel error: -; time: 9.25 s
 - Only the first bytes of each national per-table file are requested (HTTP Range); its rows are sorted by GEO_ID, so the nation and state rows precede the county, tract and block-group rows. The table-based Summary File exists from the 2021 releases on (summary_file/2021/table-based-SF/); summary_file/2019/ holds only data/ (the sequence-based files, one archive per state holding every table), documentation/ and prototype/ (checked 2026-11-02), so 2019 is not compared here.
 
 <details><summary>Details</summary>
@@ -1661,27 +1661,27 @@ ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) 
 {
   "tables": {
     "B01003": {
-      "cells": 12,
+      "cells": 14,
       "mismatches": 0,
-      "rows": 6,
+      "rows": 7,
       "byte_range": "bytes=0-262143 of 18311997"
     },
     "B25003": {
-      "cells": 36,
+      "cells": 42,
       "mismatches": 0,
-      "rows": 6,
+      "rows": 7,
       "byte_range": "bytes=0-262143 of 26878591"
     },
     "B17001": {
-      "cells": 708,
+      "cells": 826,
       "mismatches": 0,
-      "rows": 6,
+      "rows": 7,
       "byte_range": "bytes=0-262143 of 118402375"
     },
     "B19001": {
-      "cells": 204,
+      "cells": 238,
       "mismatches": 0,
-      "rows": 6,
+      "rows": 7,
       "byte_range": "bytes=0-262143 of 68859942"
     }
   }

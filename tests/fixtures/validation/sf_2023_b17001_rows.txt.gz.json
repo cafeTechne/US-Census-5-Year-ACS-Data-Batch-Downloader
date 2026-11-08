@@ -2,10 +2,10 @@
   "byte_range": "bytes=0-262143 of 118402375",
   "fetched_prefix_sha256": "a64ba9e2c8c8cfe91411fd7d662167fe3fa9fac99f1d640bfd5b42d6e38d3edf",
   "kind": "summary_file_rows",
-  "retrieved": "2026-11-02",
-  "selection": "header line and the rows whose GEO_ID is one of 0100000US,0400000US06,0400000US36,0400000US48,0400000US17,0400000US56",
-  "sha256": "46ed0e0239c5348bb49d905281096e5b9cec91a672652d50775c7242ff770464",
-  "size_bytes": 2508,
+  "retrieved": "2026-11-07",
+  "selection": "header line and the rows whose GEO_ID is one of 0100000US,0400000US06,0400000US36,0400000US48,0400000US17,0400000US56,0400000US26",
+  "sha256": "1431a555124cc777bd51acafbc54473f22da450c37321d3aa0bdc24de6b22de8",
+  "size_bytes": 2839,
   "source_url": "https://www2.census.gov/programs-surveys/acs/summary_file/2023/table-based-SF/data/5YRData/acsdt5y2023-b17001.dat",
   "transformation": "lines copied verbatim from the fetched prefix; gzip mtime=0"
 }

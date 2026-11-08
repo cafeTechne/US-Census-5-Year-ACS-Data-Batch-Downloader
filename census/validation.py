@@ -105,7 +105,7 @@ CONTROLLED_MOE = -555555555.0
 class Battery:
     """What the battery covers (PLAN_ROUND_7.md section 8, F3 "default battery")."""
 
-    states: Tuple[str, ...] = ("06", "36", "48", "17", "56")
+    states: Tuple[str, ...] = ("06", "36", "48", "17", "56", "26")
     releases: Tuple[int, ...] = (2019, 2023)
     # Comparison Profile release -> the earlier, non-overlapping release it compares.
     cp_releases: Tuple[Tuple[int, int], ...] = ((2019, 2014), (2023, 2018))
@@ -2168,7 +2168,8 @@ KNOWN_FINDINGS: Tuple[str, ...] = (
     "**F5 (methodological, criterion revised 2026-11-02):** household income: B19001's $10k-$50k-wide "
     "brackets are much coarser than the $2,500 distribution Census interpolates (Subject Definitions, "
     "'Median Income'), so a per-county 2% band measures bracket coarseness, not calculation error (first "
-    "live run, 2019-2023: 84.1% of counties within 2%, 99.8% within the published B19013 MOE). The check "
+    "live run, 2019-2023: 84.1% of counties within 2%, 99.8% within the published B19013 MOE; with Michigan "
+    "added in Round 14: 85.9% and 99.7%). The check "
     "asserts median relative error < 1% and >= 98% of counties within the published MOE; the 2% share is "
     "still reported.",
     "**F9 (informational, census/continuity.py):** the Round 6 continuity check flags real 2019->2023 change "
@@ -2176,7 +2177,7 @@ KNOWN_FINDINGS: Tuple[str, ...] = (
     "cells), so `run_batch` blocks those extractions in the default concordance mode. Its thresholds are "
     "documented for adjacent, overlapping releases but are applied to any requested pair.",
     "**F2 (methodological):** owner-occupied (DP04_0046) county MOEs from the Handbook proportion formula "
-    "miss the band in 215 of 998 county-years (median ratio 0.88); for every one of them the exact replicate "
+    "miss the band in 279 of 1,164 county-years (median ratio 0.88); for every one of them the exact replicate "
     "MOE reproduces the DP MOE within 0.1 point, so the gap is the covariance the approximation ignores. "
     "Age 65+ (12-cell sum) approximate MOEs are ~4x the DP MOE (near-controlled age totals).",
     "**F6:** Census's implied R-CPI-U-RS factor exceeds ours by 0.008% (2018->2023: 1.21729 = 449.3/369.1 "
