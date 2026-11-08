@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-08T02:01:53+00:00",
+  "generated_at": "2026-11-08T04:40:37+00:00",
   "mode": "live",
   "command": "python scripts/validate_against_census.py --live",
   "summary": {
@@ -83,12 +83,12 @@
         ]
       },
       "mode": "live",
-      "seconds": 6.0
+      "seconds": 11.6
     },
     {
       "check_id": "F2",
-      "description": "Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56 and all their counties, releases 2019, 2023.",
-      "n_compared": 5040,
+      "description": "Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56,26 and all their counties, releases 2019, 2023.",
+      "n_compared": 5880,
       "n_failed": 0,
       "max_abs_error": 0.04999999999999716,
       "max_rel_error": 0.04712041884816753,
@@ -307,17 +307,17 @@
         },
         "per_construction": {
           "poverty_rate 2019 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
             "moe_band_misses_explained_by_replicates": 0,
             "moe_failures": 0,
-            "max_abs_error": 0.03651679214870818,
+            "max_abs_error": 0.04380614821259776,
             "skipped": 0
           },
           "uninsured_rate 2019 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -327,7 +327,7 @@
             "skipped": 0
           },
           "owner_occupied 2019 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -337,7 +337,7 @@
             "skipped": 0
           },
           "age_65_plus 2019 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -347,7 +347,7 @@
             "skipped": 0
           },
           "bachelors_or_higher 2019 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -357,7 +357,7 @@
             "skipped": 0
           },
           "poverty_rate 2019 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -367,27 +367,27 @@
             "skipped": 0
           },
           "uninsured_rate 2019 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
             "moe_band_misses_explained_by_replicates": 0,
             "moe_failures": 0,
-            "max_abs_error": 0.04993646759847614,
+            "max_abs_error": 0.04996510816468991,
             "skipped": 0
           },
           "owner_occupied 2019 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
-            "moe_band_misses": 135,
-            "moe_band_misses_explained_by_replicates": 135,
+            "moe_band_misses": 172,
+            "moe_band_misses_explained_by_replicates": 172,
             "moe_failures": 0,
             "max_abs_error": 0.04996686547382012,
             "skipped": 0
           },
           "age_65_plus 2019 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -397,7 +397,7 @@
             "skipped": 0
           },
           "bachelors_or_higher 2019 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -407,17 +407,17 @@
             "skipped": 0
           },
           "poverty_rate 2023 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
             "moe_band_misses_explained_by_replicates": 0,
             "moe_failures": 0,
-            "max_abs_error": 0.03356974815006453,
+            "max_abs_error": 0.04944047403746765,
             "skipped": 0
           },
           "uninsured_rate 2023 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -427,7 +427,7 @@
             "skipped": 0
           },
           "owner_occupied 2023 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -437,17 +437,17 @@
             "skipped": 0
           },
           "age_65_plus 2023 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
             "moe_band_misses_explained_by_replicates": 0,
             "moe_failures": 0,
-            "max_abs_error": 0.040554153650933955,
+            "max_abs_error": 0.044602771997876545,
             "skipped": 0
           },
           "bachelors_or_higher 2023 state": {
-            "n": 5,
+            "n": 6,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -457,7 +457,7 @@
             "skipped": 0
           },
           "poverty_rate 2023 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -467,7 +467,7 @@
             "skipped": 0
           },
           "uninsured_rate 2023 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -477,17 +477,17 @@
             "skipped": 0
           },
           "owner_occupied 2023 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
-            "moe_band_misses": 80,
-            "moe_band_misses_explained_by_replicates": 80,
+            "moe_band_misses": 107,
+            "moe_band_misses_explained_by_replicates": 107,
             "moe_failures": 0,
             "max_abs_error": 0.04999999999999716,
             "skipped": 0
           },
           "age_65_plus 2023 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -497,7 +497,7 @@
             "skipped": 0
           },
           "bachelors_or_higher 2023 county": {
-            "n": 499,
+            "n": 582,
             "estimate_failures": 0,
             "formula_mismatches": 0,
             "moe_band_misses": 0,
@@ -509,59 +509,59 @@
         },
         "moe_ratio_ours_over_published": {
           "poverty_rate": {
-            "n": 1008,
+            "n": 1176,
             "min": 0.7736313821643819,
-            "p5": 0.9534212538422614,
-            "p25": 0.9884370013231081,
-            "median": 1.0002856232316664,
-            "p75": 1.0140808197710969,
-            "p95": 1.0508986869945134,
-            "max": 1.492935767601951
+            "p5": 0.9554369497959188,
+            "p25": 0.9876097325820183,
+            "median": 1.0004333367260303,
+            "p75": 1.0146482058918944,
+            "p95": 1.0481317720389831,
+            "max": 1.4953084378391963
           },
           "uninsured_rate": {
-            "n": 1008,
+            "n": 1176,
             "min": 0.5245119880073353,
-            "p5": 0.7623261612371356,
-            "p25": 0.8382018345742577,
-            "median": 0.8947109410687769,
-            "p75": 0.959663952480057,
-            "p95": 1.0886752771469939,
+            "p5": 0.7602513283319245,
+            "p25": 0.8366644742921433,
+            "median": 0.8925526325526165,
+            "p75": 0.9589765222382747,
+            "p95": 1.0827144215893023,
             "max": 3.368149540320743
           },
           "owner_occupied": {
-            "n": 1008,
-            "min": 0.11740448706346762,
-            "p5": 0.5911391022180238,
-            "p25": 0.7804246992938717,
-            "median": 0.8847851481460042,
-            "p75": 0.9614225184624575,
-            "p95": 1.1256402470286904,
+            "n": 1176,
+            "min": 0.033101611186908554,
+            "p5": 0.5538309797594627,
+            "p25": 0.773165399793867,
+            "median": 0.8804264476946757,
+            "p75": 0.9602291433650332,
+            "p95": 1.1351535933009016,
             "max": 3.5880373603086078
           },
           "age_65_plus": {
-            "n": 972,
+            "n": 1135,
             "min": 0.32274979068910414,
-            "p5": 0.9133893879965173,
-            "p25": 2.806175898236696,
-            "median": 4.41323770953967,
-            "p75": 6.246878784493752,
-            "p95": 10.32043570564385,
+            "p5": 0.9745152132688413,
+            "p25": 3.0237311228219257,
+            "median": 4.64809113246433,
+            "p75": 6.543960270804267,
+            "p95": 10.371881329539105,
             "max": 24.355136826875203
           },
           "bachelors_or_higher": {
-            "n": 1008,
+            "n": 1176,
             "min": 0.6148187553996485,
-            "p5": 0.8995509215727955,
-            "p25": 0.970260790215502,
-            "median": 1.0213155010270547,
-            "p75": 1.0908896997218966,
-            "p95": 1.2085678597060883,
+            "p5": 0.9004757855672131,
+            "p25": 0.9692286593913597,
+            "median": 1.0205688957607086,
+            "p75": 1.0869595744621137,
+            "p95": 1.2101276755971069,
             "max": 3.9483660875278423
           }
         },
         "formula_mismatches": 0,
-        "proportion_ratio_fallbacks": 12,
-        "moe_band_misses_explained_by_replicates": 215,
+        "proportion_ratio_fallbacks": 22,
+        "moe_band_misses_explained_by_replicates": 279,
         "explained_sample": [
           {
             "construction": "owner_occupied",
@@ -686,12 +686,12 @@
         ]
       },
       "mode": "live",
-      "seconds": 6.85
+      "seconds": 8.49
     },
     {
       "check_id": "F3",
       "description": "MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe, variance.replicate_moe) vs the MOE published in the same VRE file; VRE estimates and MOEs vs API estimates and MOEs for the same cells. Tables B17001, B27010, B25003, B01001, B01003, B11001, B19001, B25063, state level, releases 2019, 2023, plus the committed county/state VRE fixtures.",
-      "n_compared": 29572,
+      "n_compared": 30496,
       "n_failed": 0,
       "max_abs_error": 0.4999709722534291,
       "max_rel_error": null,
@@ -732,7 +732,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49988453556113654,
             "moe_mismatches": 0,
-            "api_cells_compared": 590,
+            "api_cells_compared": 708,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -744,7 +744,7 @@
             "model_based_rows": 11,
             "max_abs_diff": 0.4998932918888386,
             "moe_mismatches": 0,
-            "api_cells_compared": 660,
+            "api_cells_compared": 792,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -756,7 +756,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49547866262082607,
             "moe_mismatches": 0,
-            "api_cells_compared": 30,
+            "api_cells_compared": 36,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -768,9 +768,9 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49996392293905956,
             "moe_mismatches": 0,
-            "api_cells_compared": 490,
+            "api_cells_compared": 588,
             "api_cell_mismatches": 0,
-            "controlled_moe_cells": 5
+            "controlled_moe_cells": 6
           },
           "B01003 2019": {
             "scope": "full national file (summary level 040)",
@@ -780,9 +780,9 @@
             "model_based_rows": 0,
             "max_abs_diff": null,
             "moe_mismatches": 0,
-            "api_cells_compared": 10,
+            "api_cells_compared": 12,
             "api_cell_mismatches": 0,
-            "controlled_moe_cells": 5
+            "controlled_moe_cells": 6
           },
           "B11001 2019": {
             "scope": "full national file (summary level 040)",
@@ -792,7 +792,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.4978310636047354,
             "moe_mismatches": 0,
-            "api_cells_compared": 90,
+            "api_cells_compared": 108,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -804,7 +804,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.4993840771894611,
             "moe_mismatches": 0,
-            "api_cells_compared": 170,
+            "api_cells_compared": 204,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -816,7 +816,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.499846723576411,
             "moe_mismatches": 0,
-            "api_cells_compared": 270,
+            "api_cells_compared": 324,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -828,7 +828,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49969577847059554,
             "moe_mismatches": 0,
-            "api_cells_compared": 590,
+            "api_cells_compared": 708,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -840,7 +840,7 @@
             "model_based_rows": 8,
             "max_abs_diff": 0.4999403443362098,
             "moe_mismatches": 0,
-            "api_cells_compared": 660,
+            "api_cells_compared": 792,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -852,7 +852,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49928626996916137,
             "moe_mismatches": 0,
-            "api_cells_compared": 30,
+            "api_cells_compared": 36,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -864,9 +864,9 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.4997525480409877,
             "moe_mismatches": 0,
-            "api_cells_compared": 490,
+            "api_cells_compared": 588,
             "api_cell_mismatches": 0,
-            "controlled_moe_cells": 5
+            "controlled_moe_cells": 6
           },
           "B01003 2023": {
             "scope": "full national file (summary level 040)",
@@ -876,9 +876,9 @@
             "model_based_rows": 0,
             "max_abs_diff": null,
             "moe_mismatches": 0,
-            "api_cells_compared": 10,
+            "api_cells_compared": 12,
             "api_cell_mismatches": 0,
-            "controlled_moe_cells": 5
+            "controlled_moe_cells": 6
           },
           "B11001 2023": {
             "scope": "full national file (summary level 040)",
@@ -888,7 +888,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49874303933052033,
             "moe_mismatches": 0,
-            "api_cells_compared": 90,
+            "api_cells_compared": 108,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -900,7 +900,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.49951382657673093,
             "moe_mismatches": 0,
-            "api_cells_compared": 170,
+            "api_cells_compared": 204,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -912,7 +912,7 @@
             "model_based_rows": 0,
             "max_abs_diff": 0.4994722210440443,
             "moe_mismatches": 0,
-            "api_cells_compared": 270,
+            "api_cells_compared": 324,
             "api_cell_mismatches": 0,
             "controlled_moe_cells": 0
           },
@@ -958,16 +958,16 @@
           }
         },
         "replicate_rows_checked": 24952,
-        "api_cells_compared": 4620,
+        "api_cells_compared": 5544,
         "api_cell_mismatches": 0
       },
       "mode": "live",
-      "seconds": 9.0
+      "seconds": 9.5
     },
     {
       "check_id": "F4",
-      "description": "Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.",
-      "n_compared": 1038,
+      "description": "Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56,26 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.",
+      "n_compared": 1212,
       "n_failed": 0,
       "max_abs_error": 0.09837759799016546,
       "max_rel_error": null,
@@ -995,72 +995,72 @@
       "details": {
         "per_construction": {
           "poverty_rate 2019 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
-            "max_estimate_error": 0.03651679214870818,
-            "max_moe_error": 0.02393998589620068,
+            "max_estimate_error": 0.04380614821259776,
+            "max_moe_error": 0.04960234914349701,
             "skipped": 0
           },
           "uninsured_rate 2019 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
             "max_estimate_error": 0.04511322700916409,
             "max_moe_error": 0.04994497169954262,
             "skipped": 0
           },
           "owner_occupied 2019 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
             "max_estimate_error": 0.04846751821835227,
             "max_moe_error": 0.044011990628512215,
             "skipped": 0
           },
           "age_65_plus 2019 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
             "max_estimate_error": 0.04797550364362557,
             "max_moe_error": 0.09837759799016546,
             "skipped": 0,
-            "published_moe_at_display_floor": 5
+            "published_moe_at_display_floor": 6
           },
           "owner_occupied 2019 county": {
-            "n": 499,
+            "n": 582,
             "failures": 0,
             "max_estimate_error": 0.04996686547382012,
             "max_moe_error": 0.049866982472014154,
             "skipped": 0
           },
           "poverty_rate 2023 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
-            "max_estimate_error": 0.03356974815006453,
+            "max_estimate_error": 0.04944047403746765,
             "max_moe_error": 0.04916769747922606,
             "skipped": 0
           },
           "uninsured_rate 2023 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
             "max_estimate_error": 0.04768904734502666,
             "max_moe_error": 0.04056661497016503,
             "skipped": 0
           },
           "owner_occupied 2023 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
             "max_estimate_error": 0.03762119390653851,
             "max_moe_error": 0.035742822291887105,
             "skipped": 0
           },
           "age_65_plus 2023 state": {
-            "n": 5,
+            "n": 6,
             "failures": 0,
-            "max_estimate_error": 0.040554153650933955,
+            "max_estimate_error": 0.044602771997876545,
             "max_moe_error": 0.0983616748336616,
             "skipped": 0,
-            "published_moe_at_display_floor": 4
+            "published_moe_at_display_floor": 5
           },
           "owner_occupied 2023 county": {
-            "n": 499,
+            "n": 582,
             "failures": 0,
             "max_estimate_error": 0.04999999999999716,
             "max_moe_error": 0.049901415046242015,
@@ -1071,65 +1071,65 @@
         "max_moe_error": 0.09837759799016546,
         "approximate_over_replicate_moe": {
           "poverty_rate state": {
-            "n": 10,
+            "n": 12,
             "min": 0.9973932075777341,
-            "p5": 0.9978147743473517,
-            "p25": 0.9985586361462659,
+            "p5": 0.9979084558517111,
+            "p25": 0.9987204883086159,
             "median": 0.9998334381640055,
-            "p75": 1.0007156223347162,
-            "p95": 1.0025456931650314,
+            "p75": 1.000730282423888,
+            "p95": 1.0022675419291092,
             "max": 1.0037973737266812
           },
           "uninsured_rate state": {
-            "n": 10,
+            "n": 12,
             "min": 0.7051799348769849,
-            "p5": 0.7137375419872339,
-            "p25": 0.7422443567188695,
-            "median": 0.7818525206367402,
-            "p75": 0.7956330708010112,
-            "p95": 0.8572450778988274,
+            "p5": 0.7156392324561781,
+            "p25": 0.7637002335050819,
+            "median": 0.7869317488089953,
+            "p75": 0.8025014805570005,
+            "p95": 0.8725018072000658,
             "max": 0.8869444583511927
           },
           "owner_occupied state": {
-            "n": 10,
+            "n": 12,
             "min": 0.8923353915038464,
-            "p5": 0.9223629423972761,
-            "p25": 1.2369931785012964,
-            "median": 1.2790646370898342,
-            "p75": 1.2939296775402536,
-            "p95": 1.3561068296827248,
-            "max": 1.3640124510373062
+            "p5": 0.929035731484705,
+            "p25": 1.2457206843895248,
+            "median": 1.283935307811899,
+            "p75": 1.347947622211519,
+            "p95": 1.3936197167886188,
+            "max": 1.4298063749291121
           },
           "age_65_plus state": {
-            "n": 10,
+            "n": 12,
             "min": 4.773304094911635,
-            "p5": 5.432293303515204,
-            "p25": 7.89396453186003,
+            "p5": 5.578735349871553,
+            "p25": 8.070327705737789,
             "median": 12.356599715398112,
-            "p75": 17.595231361621554,
-            "p95": 21.988708609393594,
+            "p75": 15.668419542366417,
+            "p95": 21.607730735842374,
             "max": 23.703109040374095
           },
           "owner_occupied county": {
-            "n": 998,
-            "min": 0.11402469945309178,
-            "p5": 0.5819994095597515,
-            "p25": 0.7824720903505963,
-            "median": 0.8796293019122823,
-            "p75": 0.9636591439799281,
-            "p95": 1.0868608477420798,
+            "n": 1164,
+            "min": 0.03394176482653954,
+            "p5": 0.5554692609363415,
+            "p25": 0.7707697011792228,
+            "median": 0.8754906559828328,
+            "p75": 0.9609813239564091,
+            "p95": 1.0905260951161029,
             "max": 3.5535069687610403
           }
         },
         "pairings": "same constructions and Census definitions as F2 (bachelors_or_higher excluded: B15003 has no VRE file)"
       },
       "mode": "live",
-      "seconds": 0.61
+      "seconds": 0.74
     },
     {
       "check_id": "F5",
-      "description": "Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56, releases 2019, 2023.",
-      "n_compared": 1983,
+      "description": "Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56,26, releases 2019, 2023.",
+      "n_compared": 2315,
       "n_failed": 0,
       "max_abs_error": 16226.11627906977,
       "max_rel_error": 0.1985113138045458,
@@ -1239,22 +1239,22 @@
         "pairs": {
           "B25063->B25064_001 2019": {
             "definition": "Median gross rent (B25064) from the gross rent distribution (B25063, 24 cash-rent brackets; 'No cash rent' excluded). Census computes B25064 from the same brackets.",
-            "counties": 499,
-            "compared": 496,
+            "counties": 582,
+            "compared": 579,
             "excluded_top_or_bottom_coded_or_missing": 3,
             "max_abs_error": 0.5,
-            "median_abs_error": 0.23883986064225837,
+            "median_abs_error": 0.23744292237438458,
             "max_rel_error": 0.0009487666034155328,
-            "median_rel_error": 0.00030089067630395484,
+            "median_rel_error": 0.00029740145478872104,
             "share_within_2pct": 1.0,
             "approx_moe_over_published_moe": {
-              "n": 496,
+              "n": 579,
               "min": 0.6514412127358754,
-              "p5": 0.894596428650637,
-              "p25": 1.0424454239581795,
-              "median": 1.128010743474428,
-              "p75": 1.2131230539877658,
-              "p95": 1.401804095917858,
+              "p5": 0.9033103693911765,
+              "p25": 1.042242022506491,
+              "median": 1.125984816764382,
+              "p75": 1.2064967258369097,
+              "p95": 1.3940536662403271,
               "max": 3.282941519739477
             },
             "share_within_1_dollar": 1.0,
@@ -1263,48 +1263,48 @@
           },
           "B19001->B19013_001 2019": {
             "definition": "Median household income (B19013) from household income brackets (B19001, 16 brackets). Census interpolates a finer internal distribution ($2,500 intervals below $250,000; Subject Definitions 2023, 'Median Income'), so exact agreement is not expected.",
-            "counties": 499,
-            "compared": 499,
+            "counties": 582,
+            "compared": 582,
             "excluded_top_or_bottom_coded_or_missing": 0,
             "max_abs_error": 5398.1666666666715,
-            "median_abs_error": 258.0281690140837,
+            "median_abs_error": 234.9357802822633,
             "max_rel_error": 0.06880502022364983,
-            "median_rel_error": 0.004856078477082083,
-            "share_within_2pct": 0.905811623246493,
+            "median_rel_error": 0.004526242972804987,
+            "share_within_2pct": 0.9192439862542955,
             "approx_moe_over_published_moe": {
-              "n": 499,
+              "n": 582,
               "min": 0.5721817734474332,
-              "p5": 0.826981323927377,
-              "p25": 0.9901451746977017,
-              "median": 1.1050403899416155,
-              "p75": 1.2539766360798126,
-              "p95": 1.517586881377449,
+              "p5": 0.8388430953154132,
+              "p25": 1.0022439172105853,
+              "median": 1.1036472172599594,
+              "p75": 1.2462187436889534,
+              "p95": 1.4825618386027943,
               "max": 2.7566364760267823
             },
             "counties_outside_2pct": 47,
             "criterion": "median relative error < 1% and >= 98% of counties within the published MOE (2% share reported, not asserted)",
             "criterion_met": true,
-            "share_within_published_moe": 0.9879759519038076,
+            "share_within_published_moe": 0.9896907216494846,
             "outside_2pct_but_within_published_moe": 46
           },
           "B25063->B25064_001 2023": {
             "definition": "Median gross rent (B25064) from the gross rent distribution (B25063, 24 cash-rent brackets; 'No cash rent' excluded). Census computes B25064 from the same brackets.",
-            "counties": 499,
-            "compared": 490,
+            "counties": 582,
+            "compared": 573,
             "excluded_top_or_bottom_coded_or_missing": 9,
             "max_abs_error": 0.5,
-            "median_abs_error": 0.22684391080616706,
+            "median_abs_error": 0.23076923076928324,
             "max_rel_error": 0.0009785677618069815,
-            "median_rel_error": 0.0002207326563185523,
+            "median_rel_error": 0.00022495755887916462,
             "share_within_2pct": 1.0,
             "approx_moe_over_published_moe": {
-              "n": 490,
+              "n": 573,
               "min": 0.5707367985396146,
-              "p5": 0.843171302726709,
-              "p25": 1.0281655600034902,
-              "median": 1.1168789341235161,
-              "p75": 1.226784865025155,
-              "p95": 1.4380230843865633,
+              "p5": 0.8450357070775417,
+              "p25": 1.030450913896718,
+              "median": 1.1167781135639878,
+              "p75": 1.2226920030193589,
+              "p95": 1.4173892910204984,
               "max": 7.554880616634601
             },
             "share_within_1_dollar": 1.0,
@@ -1313,39 +1313,39 @@
           },
           "B19001->B19013_001 2023": {
             "definition": "Median household income (B19013) from household income brackets (B19001, 16 brackets). Census interpolates a finer internal distribution ($2,500 intervals below $250,000; Subject Definitions 2023, 'Median Income'), so exact agreement is not expected.",
-            "counties": 499,
-            "compared": 498,
+            "counties": 582,
+            "compared": 581,
             "excluded_top_or_bottom_coded_or_missing": 1,
             "max_abs_error": 16226.11627906977,
-            "median_abs_error": 446.5339830084995,
+            "median_abs_error": 435.19959278321767,
             "max_rel_error": 0.1985113138045458,
-            "median_rel_error": 0.006389973134895618,
-            "share_within_2pct": 0.8413654618473896,
+            "median_rel_error": 0.006355229464913636,
+            "share_within_2pct": 0.8588640275387264,
             "approx_moe_over_published_moe": {
-              "n": 498,
+              "n": 581,
               "min": 0.4454191627730805,
-              "p5": 0.7499554269308675,
-              "p25": 0.9314206768081066,
-              "median": 1.0550169294345477,
-              "p75": 1.194524298112461,
-              "p95": 1.506366979317927,
+              "p5": 0.7551186429582991,
+              "p25": 0.9449788203902701,
+              "median": 1.0699313688671936,
+              "p75": 1.2061307364797798,
+              "p95": 1.5063513752992483,
               "max": 55.87813186455595
             },
-            "counties_outside_2pct": 79,
+            "counties_outside_2pct": 82,
             "criterion": "median relative error < 1% and >= 98% of counties within the published MOE (2% share reported, not asserted)",
             "criterion_met": true,
-            "share_within_published_moe": 0.9979919678714859,
-            "outside_2pct_but_within_published_moe": 78
+            "share_within_published_moe": 0.9965576592082617,
+            "outside_2pct_but_within_published_moe": 80
           }
         }
       },
       "mode": "live",
-      "seconds": 3.24
+      "seconds": 3.0
     },
     {
       "check_id": "F6",
-      "description": "Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).",
-      "n_compared": 125,
+      "description": "Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).",
+      "n_compared": 150,
       "n_failed": 0,
       "max_abs_error": 275.5947195858462,
       "max_rel_error": 0.005741078234852225,
@@ -1406,33 +1406,33 @@
               "2019": 375.813
             },
             "census_implied_factor_all_items": {
-              "n": 50,
+              "n": 60,
               "min": 1.0746843377809618,
-              "p5": 1.076145198907045,
-              "p25": 1.0802195382581568,
-              "median": 1.0809600821614125,
-              "p75": 1.0809759547539666,
-              "p95": 1.0825238763942842,
+              "p5": 1.0773204081578227,
+              "p25": 1.0801767593654468,
+              "median": 1.0809592914613915,
+              "p75": 1.0809708958581514,
+              "p95": 1.0821819415103087,
               "max": 1.0838654177021603
             },
             "census_implied_factor_means_and_per_capita": {
-              "n": 20,
-              "min": 1.0809414249613398,
-              "p5": 1.0809530432938104,
+              "n": 24,
+              "min": 1.0809394484183146,
+              "p5": 1.0809432594348878,
               "p25": 1.0809600994303399,
               "median": 1.0809657866727096,
               "p75": 1.0809701408143002,
-              "p95": 1.080979121965741,
+              "p95": 1.0809787389980172,
               "max": 1.0809820447050202
             },
             "census_implied_factor_medians": {
-              "n": 30,
+              "n": 36,
               "min": 1.0746843377809618,
-              "p5": 1.0748980061926594,
-              "p25": 1.0800400819240237,
-              "median": 1.0805843994280213,
-              "p75": 1.0813419154779242,
-              "p95": 1.0833594072049817,
+              "p5": 1.0750013722228515,
+              "p25": 1.0799983347410265,
+              "median": 1.0803961190783977,
+              "p75": 1.0810451289198495,
+              "p95": 1.0830715220694618,
               "max": 1.0838654177021603
             },
             "implied_minus_ours_percent": 0.010325354924156649,
@@ -1447,36 +1447,36 @@
               "2023": 449.265
             },
             "census_implied_factor_all_items": {
-              "n": 75,
+              "n": 90,
               "min": 1.217095075874884,
-              "p5": 1.2172690671665287,
-              "p25": 1.2172780351481864,
-              "median": 1.2172863599013968,
-              "p75": 1.2172909991247587,
-              "p95": 1.2173506918729535,
+              "p5": 1.2172687528930333,
+              "p25": 1.2172782423061743,
+              "median": 1.2172863894784407,
+              "p75": 1.2172920057657355,
+              "p95": 1.2173483380353065,
               "max": 1.217607973421927
             },
             "census_implied_factor_means_and_per_capita": {
-              "n": 45,
+              "n": 54,
               "min": 1.217095075874884,
-              "p5": 1.2172694830791926,
-              "p25": 1.2172809028390055,
-              "median": 1.2172863599013968,
-              "p75": 1.2172931097568669,
-              "p95": 1.217359317116744,
+              "p5": 1.2172695703442484,
+              "p25": 1.217280932305722,
+              "median": 1.2172865448520538,
+              "p75": 1.2172940141155042,
+              "p95": 1.217355827531763,
               "max": 1.217607973421927
             },
             "census_implied_factor_medians": {
-              "n": 30,
+              "n": 36,
               "min": 1.2172652955167795,
-              "p5": 1.2172679035298999,
-              "p25": 1.2172738730731925,
-              "median": 1.217286132082998,
-              "p75": 1.2172880890236044,
-              "p95": 1.2172967018420697,
+              "p5": 1.2172671882402522,
+              "p25": 1.2172740281502468,
+              "median": 1.2172856268138728,
+              "p75": 1.2172877617920628,
+              "p95": 1.2172956567015745,
               "max": 1.2173020424055785
             },
-            "implied_minus_ours_percent": 0.007878521497461932,
+            "implied_minus_ours_percent": 0.007893716379658855,
             "current_period_cp_ne_dp": 0,
             "unmatched_cp_items": 28
           }
@@ -1484,12 +1484,12 @@
         "median_items_outside_tolerance_not_asserted": 3
       },
       "mode": "live",
-      "seconds": 6.02
+      "seconds": 7.06
     },
     {
       "check_id": "F7",
-      "description": "Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).",
-      "n_compared": 442,
+      "description": "Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).",
+      "n_compared": 522,
       "n_failed": 0,
       "max_abs_error": null,
       "max_rel_error": null,
@@ -1649,6 +1649,25 @@
         },
         {
           "cp_release": 2019,
+          "GEOID": "26",
+          "item": "CP03_2019_021",
+          "label": "2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Public transportation (excluding taxicab)",
+          "estimate_late": 1.3,
+          "moe_late": 0.1,
+          "estimate_early": 1.4,
+          "moe_early": 0.1,
+          "z": 1.1632,
+          "ours_significant": false,
+          "census_significant": true,
+          "agree": false,
+          "z_range_under_rounding": [
+            0.0,
+            null
+          ],
+          "decidable": false
+        },
+        {
+          "cp_release": 2019,
           "GEOID": "06",
           "item": "CP03_2019_022",
           "label": "2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked",
@@ -1744,12 +1763,50 @@
         },
         {
           "cp_release": 2019,
+          "GEOID": "26",
+          "item": "CP03_2019_033",
+          "label": "2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Agriculture, forestry, fishing and hunting, and mining",
+          "estimate_late": 1.2,
+          "moe_late": 0.1,
+          "estimate_early": 1.3,
+          "moe_early": 0.1,
+          "z": 1.1632,
+          "ours_significant": false,
+          "census_significant": true,
+          "agree": false,
+          "z_range_under_rounding": [
+            0.0,
+            null
+          ],
+          "decidable": false
+        },
+        {
+          "cp_release": 2019,
           "GEOID": "36",
           "item": "CP03_2019_034",
           "label": "2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction",
           "estimate_late": 5.7,
           "moe_late": 0.1,
           "estimate_early": 5.6,
+          "moe_early": 0.1,
+          "z": 1.1632,
+          "ours_significant": false,
+          "census_significant": true,
+          "agree": false,
+          "z_range_under_rounding": [
+            0.0,
+            null
+          ],
+          "decidable": false
+        },
+        {
+          "cp_release": 2019,
+          "GEOID": "26",
+          "item": "CP03_2019_036",
+          "label": "2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade",
+          "estimate_late": 2.4,
+          "moe_late": 0.1,
+          "estimate_early": 2.5,
           "moe_early": 0.1,
           "z": 1.1632,
           "ours_significant": false,
@@ -1912,63 +1969,6 @@
             null
           ],
           "decidable": false
-        },
-        {
-          "cp_release": 2023,
-          "GEOID": "06",
-          "item": "CP03_2023_006",
-          "label": "2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces",
-          "estimate_late": 0.5,
-          "moe_late": 0.1,
-          "estimate_early": 0.4,
-          "moe_early": 0.1,
-          "z": 1.1632,
-          "ours_significant": false,
-          "census_significant": true,
-          "agree": false,
-          "z_range_under_rounding": [
-            0.0,
-            null
-          ],
-          "decidable": false
-        },
-        {
-          "cp_release": 2023,
-          "GEOID": "36",
-          "item": "CP03_2023_006",
-          "label": "2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces",
-          "estimate_late": 0.2,
-          "moe_late": 0.1,
-          "estimate_early": 0.1,
-          "moe_early": 0.1,
-          "z": 1.1632,
-          "ours_significant": false,
-          "census_significant": true,
-          "agree": false,
-          "z_range_under_rounding": [
-            0.0,
-            null
-          ],
-          "decidable": false
-        },
-        {
-          "cp_release": 2023,
-          "GEOID": "48",
-          "item": "CP03_2023_006",
-          "label": "2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces",
-          "estimate_late": 0.5,
-          "moe_late": 0.1,
-          "estimate_early": 0.4,
-          "moe_early": 0.1,
-          "z": 1.1632,
-          "ours_significant": false,
-          "census_significant": true,
-          "agree": false,
-          "z_range_under_rounding": [
-            0.0,
-            null
-          ],
-          "decidable": false
         }
       ],
       "census_source": [
@@ -1990,51 +1990,51 @@
         "per_release": {
           "2019 vs 2014": {
             "items": 83,
-            "tests": 236,
-            "agree": 211,
-            "agreement_rate": 0.8940677966101694,
+            "tests": 283,
+            "agree": 255,
+            "agreement_rate": 0.901060070671378,
             "overlap_years": 0,
             "skipped": {
-              "estimate or MOE not published": 80,
-              "income-bracket share re-tabulated by Census after inflation adjustment": 99
+              "estimate or MOE not published": 96,
+              "income-bracket share re-tabulated by Census after inflation adjustment": 119
             },
             "unmatched_cp_items": 54,
-            "decidable_tests": 159,
-            "decidable_agree": 159
+            "decidable_tests": 187,
+            "decidable_agree": 187
           },
           "2023 vs 2018": {
             "items": 109,
-            "tests": 380,
-            "agree": 360,
-            "agreement_rate": 0.9473684210526315,
+            "tests": 456,
+            "agree": 430,
+            "agreement_rate": 0.9429824561403509,
             "overlap_years": 0,
             "skipped": {
-              "estimate or MOE not published": 65,
-              "income-bracket share re-tabulated by Census after inflation adjustment": 100
+              "estimate or MOE not published": 78,
+              "income-bracket share re-tabulated by Census after inflation adjustment": 120
             },
             "unmatched_cp_items": 28,
-            "decidable_tests": 283,
-            "decidable_agree": 283
+            "decidable_tests": 335,
+            "decidable_agree": 335
           }
         },
-        "tests_total": 616,
-        "decidable_tests": 442,
-        "undecidable_tests": 174,
+        "tests_total": 739,
+        "decidable_tests": 522,
+        "undecidable_tests": 217,
         "agreement_rate_decidable": 1.0,
-        "agreement_rate_all_tests": 0.926948051948052,
-        "agreement_rate_undecidable": 0.7413793103448276,
+        "agreement_rate_all_tests": 0.9269282814614344,
+        "agreement_rate_undecidable": 0.7511520737327189,
         "disagreements_abs_z_minus_1645": {
           "n": 0
         },
         "census_flag_encoding": "'*' = statistically significant at 90%; null/empty = not significant (variable label 'Statistical Significance!!...', predicateType string)"
       },
       "mode": "live",
-      "seconds": 1.07
+      "seconds": 2.99
     },
     {
       "check_id": "F8",
-      "description": "Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56, releases 2019, 2023.",
-      "n_compared": 110,
+      "description": "Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56,26, releases 2019, 2023.",
+      "n_compared": 132,
       "n_failed": 0,
       "max_abs_error": 0.0,
       "max_rel_error": null,
@@ -2051,109 +2051,109 @@
       "details": {
         "moe_ratio_sum_approx_over_state_published": {
           "B25001_001": {
-            "n": 10,
-            "min": 0.9200765829347392,
-            "p5": 0.9702394078119005,
-            "p25": 1.376113237503102,
+            "n": 12,
+            "min": 0.8221877095170256,
+            "p5": 0.8760265898967681,
+            "p25": 1.2676735772392067,
             "median": 2.0520658986589773,
-            "p75": 2.497099099175031,
-            "p95": 3.2782897272583877,
+            "p75": 2.517283311110397,
+            "p95": 3.2695165690838586,
             "max": 3.3177689390437686
           },
           "B11001_001": {
-            "n": 10,
+            "n": 12,
             "min": 0.4904288084347447,
-            "p5": 0.49170432173210277,
-            "p25": 0.5180181980138052,
+            "p5": 0.49198776913151565,
+            "p25": 0.5206201731224245,
             "median": 0.5839980208520118,
-            "p75": 0.6883133246348668,
-            "p95": 1.0711316438856664,
+            "p75": 0.6275524245060846,
+            "p95": 1.0567856764168537,
             "max": 1.1356884974953243
           },
           "B11001_002": {
-            "n": 10,
+            "n": 12,
             "min": 0.533780401313172,
-            "p5": 0.5721635686135307,
-            "p25": 0.6292462134947351,
+            "p5": 0.5806931613469438,
+            "p25": 0.6294049227653183,
             "median": 0.7032767886762725,
-            "p75": 0.9109901178233026,
-            "p95": 1.0501421401593645,
+            "p75": 0.8641937561250256,
+            "p95": 1.0430654234605417,
             "max": 1.0819873653040675
           },
           "B11001_003": {
-            "n": 10,
+            "n": 12,
             "min": 0.46528240950424143,
-            "p5": 0.48385216156572847,
-            "p25": 0.5314522014696266,
+            "p5": 0.48797877313494786,
+            "p25": 0.5534631693048354,
             "median": 0.6217339720149735,
-            "p75": 0.7938373754606243,
-            "p95": 1.0150855579716258,
+            "p75": 0.7414718507922212,
+            "p95": 1.0107738701548448,
             "max": 1.0344881531471406
           },
           "B11001_004": {
-            "n": 10,
+            "n": 12,
             "min": 0.8596575885724728,
-            "p5": 0.8749576459107514,
-            "p25": 0.905182754190873,
-            "median": 0.9273229249160981,
-            "p75": 0.9628670519610404,
-            "p95": 1.0222514778347334,
+            "p5": 0.8783576586525912,
+            "p25": 0.8997092650435321,
+            "median": 0.9252882830790294,
+            "p75": 0.9576767116631979,
+            "p95": 1.0158690350395374,
             "max": 1.050972470413115
           },
           "B11001_005": {
-            "n": 10,
+            "n": 12,
             "min": 0.8105428352930195,
-            "p5": 0.8728236338560468,
-            "p25": 0.9714868053551331,
-            "median": 1.001570136611617,
-            "p75": 1.0432243849624605,
-            "p95": 1.0946760150295458,
+            "p5": 0.8614994918107594,
+            "p25": 0.9648362532205813,
+            "median": 0.9906652131583422,
+            "p75": 1.0421326463241056,
+            "p95": 1.0856472021508765,
             "max": 1.1353056729835578
           },
           "B11001_006": {
-            "n": 10,
+            "n": 12,
             "min": 0.8997271046769949,
-            "p5": 0.9005037475606822,
-            "p25": 0.9305906371650302,
+            "p5": 0.9006763348681682,
+            "p25": 0.9365119096497926,
             "median": 0.9542296283215247,
-            "p75": 0.9797943499486612,
-            "p95": 1.0295970755556445,
+            "p75": 0.9804248178274029,
+            "p95": 1.0252041252463,
             "max": 1.0493653519476953
           },
           "B11001_007": {
-            "n": 10,
+            "n": 12,
             "min": 0.8036290107590621,
-            "p5": 0.8734460689673557,
-            "p25": 0.966270164453756,
-            "median": 1.0152523560486246,
-            "p75": 1.0817042990472965,
-            "p95": 1.1055862828350502,
+            "p5": 0.866743298945988,
+            "p25": 0.9635052362954257,
+            "median": 0.9989317189619551,
+            "p75": 1.075198054771135,
+            "p95": 1.1045422107777148,
             "max": 1.11028460709306
           },
           "B11001_008": {
-            "n": 10,
-            "min": 0.894953290664733,
-            "p5": 0.9341284324260899,
-            "p25": 0.9912930176720269,
-            "median": 1.0352289844645162,
-            "p75": 1.0724867215601919,
-            "p95": 1.1475252611230733,
+            "n": 12,
+            "min": 0.8165772484883481,
+            "p5": 0.8596840716853598,
+            "p25": 0.9712384920561632,
+            "median": 1.0219268811229107,
+            "p75": 1.0544642643338071,
+            "p95": 1.1398033264210572,
             "max": 1.182273967282146
           },
           "B11001_009": {
-            "n": 10,
-            "min": 0.9022493372059337,
-            "p5": 0.9195040596699223,
-            "p25": 0.9615270005344628,
-            "median": 1.0165662850562542,
-            "p75": 1.0331031707050693,
-            "p95": 1.07798386716504,
+            "n": 12,
+            "min": 0.8566024005642212,
+            "p5": 0.8817082157171631,
+            "p25": 0.9505326361537468,
+            "median": 1.007390193064066,
+            "p75": 1.0282877042562046,
+            "p95": 1.0764420369011085,
             "max": 1.0849221033527314
           }
         }
       },
       "mode": "live",
-      "seconds": 2.28
+      "seconds": 2.51
     },
     {
       "check_id": "F9",
@@ -2206,12 +2206,12 @@
         }
       },
       "mode": "live",
-      "seconds": 3.03
+      "seconds": 2.44
     },
     {
       "check_id": "F10",
-      "description": "ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56.",
-      "n_compared": 960,
+      "description": "ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56,26.",
+      "n_compared": 1120,
       "n_failed": 0,
       "max_abs_error": 0.0,
       "max_rel_error": null,
@@ -2232,33 +2232,33 @@
       "details": {
         "tables": {
           "B01003": {
-            "cells": 12,
+            "cells": 14,
             "mismatches": 0,
-            "rows": 6,
+            "rows": 7,
             "byte_range": "bytes=0-262143 of 18311997"
           },
           "B25003": {
-            "cells": 36,
+            "cells": 42,
             "mismatches": 0,
-            "rows": 6,
+            "rows": 7,
             "byte_range": "bytes=0-262143 of 26878591"
           },
           "B17001": {
-            "cells": 708,
+            "cells": 826,
             "mismatches": 0,
-            "rows": 6,
+            "rows": 7,
             "byte_range": "bytes=0-262143 of 118402375"
           },
           "B19001": {
-            "cells": 204,
+            "cells": 238,
             "mismatches": 0,
-            "rows": 6,
+            "rows": 7,
             "byte_range": "bytes=0-262143 of 68859942"
           }
         }
       },
       "mode": "live",
-      "seconds": 9.12
+      "seconds": 9.25
     }
   ]
 }
