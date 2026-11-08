@@ -430,11 +430,21 @@ def lattice_weights(side: int, ids: Optional[Sequence[str]] = None):
     return w
 
 
-def sar_field(W: np.ndarray, rho: float, sd: float, rng: np.random.Generator, size: Optional[int] = None) -> np.ndarray:
-    """Draws of u = (I - rho W)^-1 eps, eps ~ N(0, sd^2 I); shape (m,) or (size, m)."""
+def sar_inverse(W: np.ndarray, rho: float) -> np.ndarray:
+    """(I - rho W)^-1, the SAR(1) filter; compute once per lattice and pass to sar_field."""
     from scipy import linalg as sla
 
-    Binv = sla.inv(np.eye(W.shape[0]) - rho * W)
+    return sla.inv(np.eye(W.shape[0]) - rho * W)
+
+
+def sar_field(W: np.ndarray, rho: float, sd: float, rng: np.random.Generator, size: Optional[int] = None,
+              Binv: Optional[np.ndarray] = None) -> np.ndarray:
+    """Draws of u = (I - rho W)^-1 eps, eps ~ N(0, sd^2 I); shape (m,) or (size, m).
+
+    ``Binv``: precomputed sar_inverse(W, rho) (same values; avoids an inversion per draw).
+    """
+    if Binv is None:
+        Binv = sar_inverse(W, rho)
     out = (sd * rng.standard_normal((size or 1, W.shape[0]))) @ Binv.T
     return out[0] if size is None else out
 
@@ -454,8 +464,9 @@ def study_spatial_fay_herriot(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]
     covered = np.zeros((reps, m), bool)
     fh_cov = np.zeros((reps, m), bool)
     sq, est_mse, fh_sq, rhos = np.zeros((reps, m)), np.zeros((reps, m)), np.zeros((reps, m)), []
+    Binv = sar_inverse(W, SAR_RHO)  # fixed lattice: invert once, not per replication
     for r in range(reps):
-        theta = beta0 + beta1 * x + sar_field(W, SAR_RHO, math.sqrt(A), rng)
+        theta = beta0 + beta1 * x + sar_field(W, SAR_RHO, math.sqrt(A), rng, Binv=Binv)
         y = theta + np.sqrt(D) * rng.standard_normal(m)
         frame = pd.DataFrame({"GEOID": g, "y": y, "y_se": np.sqrt(D), "x": x})
         res = spatial_fay_herriot("y ~ x", frame, "y_se", W, confidence_level=NOMINAL)
@@ -550,9 +561,11 @@ def spatial_config(fast: bool = True, **overrides: Any) -> SimConfig:
 # unchanged); run with run_study(designs_config(fast=...), studies=list(DESIGN_STUDIES)).
 
 DESIGN_REPS_FULL = {"multilevel_known_variance": 1000, "multilevel_random_slope": 500,
-                    "multilevel_replicate": 1000, "did_two_group": 1000, "did_event": 1000, "did_replicate": 1000}
+                    "multilevel_replicate": 1000, "did_two_group": 1000, "did_event": 1000, "did_replicate": 1000,
+                    "did_ar1_sensitivity": 1000}
 DESIGN_REPS_FAST = {"multilevel_known_variance": 40, "multilevel_random_slope": 20,
-                    "multilevel_replicate": 40, "did_two_group": 60, "did_event": 40, "did_replicate": 40}
+                    "multilevel_replicate": 40, "did_two_group": 60, "did_event": 40, "did_replicate": 40,
+                    "did_ar1_sensitivity": 20}
 ML_GROUP_SIZE = (2, 9)        # tracts per county (uniform integer range)
 ML_SIGMA_B = 4.0              # county random-intercept SD
 ML_SIGMA_SLOPE = 0.15         # county random-slope SD (random-slope study)
@@ -744,6 +757,67 @@ def study_did_replicate(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
                              "delta for these areas' true values (these_areas)", cov)]
 
 
+# PLAN_ROUND_13 C2 (F4; owner decision D13-3: report only, never gated).
+AR1_RHOS = (0.0, 0.3, 0.6, 0.9)
+
+
+def _did_truth_ar1(T, alpha, years, rho, rng) -> Dict[int, np.ndarray]:
+    """_did_truth with AR(1) area-by-period errors u_it = rho u_i,t-1 + sqrt(1 - rho^2) e_it (stationary SD DID_SIGMA_U)."""
+    u = DID_SIGMA_U * rng.standard_normal(len(T))
+    out = {}
+    for k, yr in enumerate(years):
+        if k:
+            u = rho * u + math.sqrt(1 - rho ** 2) * DID_SIGMA_U * rng.standard_normal(len(T))
+        out[yr] = alpha + 1.5 * k + DID_DELTA * T * (yr >= DID_TREAT_YEAR) + u
+    return out
+
+
+def study_did_ar1_sensitivity(cfg: SimConfig, reps: int, rhos: Sequence[float] = AR1_RHOS) -> List[Dict[str, Any]]:
+    """Default DiD intervals under AR(1) area-by-period errors (info only, never gated).
+
+    The did_two_group (4 periods) and did_event (5 periods) designs, panel
+    and population target of the Round 10 studies, with the independent
+    model errors replaced by a stationary AR(1) process at each rho in
+    ``rhos``; sampling errors stay independent across periods (known SEs).
+    Reported: coverage of delta (two_group), pooled coverage of leads (0)
+    and lags (delta) with MC SE from per-repetition coverage (event), and the
+    parallel-trends test's non-rejection rate (event). Each (design, rho)
+    cell has its own seed, so cells do not depend on run order.
+    """
+    from .did import difference_in_differences
+    rows: List[Dict[str, Any]] = []
+    for di, (design, years) in enumerate((("two_group", DID_YEARS_TWO), ("event", DID_YEARS_EVENT))):
+        for ri, rho in enumerate(rhos):
+            rng = np.random.default_rng(cfg.seed + 300 + 10 * di + ri)
+            T, alpha, se = _did_panel(cfg, rng, years)
+            cov, reject = [], []
+            for _ in range(reps):
+                th = _did_truth_ar1(T, alpha, years, rho, rng)
+                y = {yr: th[yr] + se[yr] * rng.standard_normal(len(T)) for yr in years}
+                res = difference_in_differences(_did_frame(T, years, y, se), "y", "treated", DID_TREAT_YEAR,
+                                                design=design)
+                tab = res.coefficients[res.coefficients["role"] == "effect"]
+                truth = np.where(tab["term"].str.startswith("lead"), 0.0, DID_DELTA)
+                cov.append((tab["ci_lower"].to_numpy() <= truth) & (truth <= tab["ci_upper"].to_numpy()))
+                if design == "event":
+                    reject.append(res.diagnostics["parallel_trends"]["p_value"] < 1 - NOMINAL)
+            C = np.vstack(cov)
+            extra = {"design": design, "rho": rho, "n_periods": len(years), "n_terms": int(C.shape[1])}
+            target = ("superpopulation delta (population)" if design == "two_group"
+                      else "leads (0) and lags (delta), pooled (population)")
+            row = coverage_summary(f"difference_in_differences {design} (REML), {cfg.n_areas} areas x {len(years)} "
+                                   f"periods, AR(1) rho={rho}", target, C.ravel(), extra, gated=False)
+            row["reps"] = int(C.shape[0])
+            if C.shape[1] > 1 and C.shape[0] > 1:
+                row["mc_se"] = float(C.mean(axis=1).std(ddof=1) / math.sqrt(C.shape[0]))
+            rows.append(row)
+            if design == "event":
+                rows.append(coverage_summary(f"parallel-trends Wald test (3 pre-periods), AR(1) rho={rho}",
+                                             "non-rejection rate at 10% (1 - size)", ~np.asarray(reject, bool),
+                                             {"design": design, "rho": rho, "n_periods": len(years)}, gated=False))
+    return rows
+
+
 DESIGN_STUDIES: Dict[str, Callable[[SimConfig, int], List[Dict[str, Any]]]] = {
     "multilevel_known_variance": study_multilevel_known_variance,
     "multilevel_random_slope": study_multilevel_random_slope,
@@ -751,6 +825,7 @@ DESIGN_STUDIES: Dict[str, Callable[[SimConfig, int], List[Dict[str, Any]]]] = {
     "did_two_group": study_did_two_group,
     "did_event": study_did_event,
     "did_replicate": study_did_replicate,
+    "did_ar1_sensitivity": study_did_ar1_sensitivity,  # info only; run on demand (--studies)
 }
 STUDIES.update(DESIGN_STUDIES)
 
@@ -761,6 +836,29 @@ def designs_config(fast: bool = True, **overrides: Any) -> SimConfig:
     reps = {k: 0 for k in base.reps}
     reps.update(DESIGN_REPS_FAST if fast else DESIGN_REPS_FULL)
     return replace(base, reps=reps, **overrides)
+
+
+def group_config(group: str, fast: bool) -> SimConfig:
+    """Configuration of a study group: "main" (FULL/FAST), "spatial" or "designs"."""
+    if group == "spatial":
+        return spatial_config(fast=fast)
+    if group == "designs":
+        return designs_config(fast=fast)
+    if group != "main":
+        raise ValueError(f"unknown study group {group!r}")
+    return FAST if fast else FULL
+
+
+def run_study_job(job) -> tuple:
+    """Process-pool worker: job = (group, study, fast) -> (frame, log lines).
+
+    One study in its group's configuration. Each study seeds its own
+    generator from cfg.seed, so the rows do not depend on the process or the
+    order in which studies run.
+    """
+    group, name, fast = job
+    lines: List[str] = []
+    return run_study(group_config(group, fast), studies=[name], log=lines.append), lines
 
 
 # ---------------------------------------------------------------------------
