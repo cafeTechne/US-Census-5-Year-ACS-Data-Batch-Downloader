@@ -18,6 +18,8 @@ All commands use `.venv/bin/python` from the repository root.
 | Correlation, Fisher z (`census.correlation`) | `-m pytest -q tests/test_correlation.py` | `correlation` (gated observed-value row; true-value row info) |
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
+| Spatial lag / error regression, LM diagnostics (`census.spatial.spatial_regression`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `spatial_regression_coverage` (info, D15-1) |
+| Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1) |
 | Multilevel, known variance (`census.multilevel`) | `-m pytest -q tests/test_multilevel.py` (includes the dense fixed-variance reference `TestKnownVarianceDenseReference`) | `multilevel_known_variance`, `multilevel_random_slope`, `multilevel_replicate` |
 | Difference-in-differences (`census.did`) | `-m pytest -q tests/test_did.py` (includes the hand-built differenced reference `TestTwoGroupDenseReference`) | `did_two_group`, `did_event`, `did_replicate`; serial correlation (info only): `did_ar1_sensitivity`, `did_serial` |
 | Release gate itself (`scripts/inference_validation.py`) | `-m pytest -q tests/test_validation_gate.py` | n/a |
@@ -64,6 +66,38 @@ Release studies:
   found coverage 0.882-0.914 at every rho for both designs, so no
   degradation was observed in these short (4-5 period) panels. Results and
   scope note: `census.did` docstring.
+- Spatial regression and local Moran's I (PLAN_ROUND_15 workstream B,
+  decision D15-1): `spatial_regression_coverage` and `local_morans_size`
+  are in the spatial group, so they run in every full report (and with
+  `--studies NAME`), but every row is `info`: they are not in
+  `REQUIRED_STUDIES` and never fail the gate. Promotion to gated is an
+  owner decision. Single-process runtime (full configuration, 16 cores
+  shared): `spatial_regression_coverage` 5.2 min, `local_morans_size`
+  about 3.6 min (4.4 min under load), both below the `--jobs 0` floor.
+  Design: 12x12 rook lattice, tract-profile ACS CVs.
+  `spatial_regression_coverage`: lag and error DGPs at rho/lambda 0, 0.3,
+  0.6 with sampling error in the outcome, ML and GMM through
+  `spatial_regression` (1000 reps per cell; rows of the tool default are
+  marked `[tool default]`), plus reference cells without sampling error
+  and a noisy-covariate cell (500 reps), and the LM tests' size at rho = 0
+  (2000 fits). `local_morans_size` (1000 reps per scenario): spatial
+  randomness with random or spatially patterned SEs, and a 4x4 hot spot
+  (+1.5 SD); each map is analysed with the tool default and the previous
+  default, plus the two cross readings (folded at 9999, two-sided at 999).
+- Defaults changed after these studies (owner decision, Round 15):
+  `spatial_regression` uses GMM for the lag model (ML lag rho intervals
+  covered 0.48 at rho 0.3 and 0.003 at 0.6 under outcome sampling error;
+  GMM lag 0.899 and 0.889) and keeps ML for the error model (lambda is
+  attenuated by both estimators and GMM is not better: 0.558 vs 0.581 at
+  0.3, 0.162 vs 0.192 at 0.6; beta 0.88-0.91 for both). `local_morans`
+  uses two-sided p-values (min(1, 2 p_sim); esda's p_sim is folded) from
+  9999 permutations with BH at alpha 0.10: per-area rate 0.099 (previous
+  default 0.196) and family-wise rate 0.088 (MC SE 0.009) under
+  randomness; power for the hot spot 0.011; spatially patterned SEs still
+  give spurious clusters in 38% of maps (previous default 26%). The
+  previous behavior stays available (`method="ml"`;
+  `permutations=999, sided="folded"`). LM tests' size 0.046-0.056 at
+  0.05. Results and caveat text: `census.spatial`.
 - Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
   process, and `--jobs N` (0 = one per CPU) runs studies in parallel
   processes with output identical to a serial run (except the `seconds`

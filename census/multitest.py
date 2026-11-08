@@ -172,6 +172,7 @@ def batch_z_test(
             suggested for exploratory screening) or ``by``.
         product: ``'5-year'`` (default) or ``'1-year'``. 1-year releases do not
             share sample (no overlap adjustment); same release = independent.
+            A decennial product raises ValueError (census counts are not sample-based).
 
     Returns:
         DataFrame indexed like ``df`` (``GEOID``/``NAME`` carried when

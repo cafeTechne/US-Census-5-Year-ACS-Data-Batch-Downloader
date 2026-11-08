@@ -1,0 +1,9 @@
+{
+  "kind": "census_api_response",
+  "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
+  "retrieved": "2026-11-08",
+  "sha256": "9852433338dedeaad358a475f1730cd1ad8d28d73882ecaa163fa82d0f982a6c",
+  "size_bytes": 173,
+  "source_url": "https://api.census.gov/data/2020/dec/dhc?for=state%3A26%2C36%2C56&get=NAME%2CH1_001N%2CH3_001N%2CH3_002N%2CH3_003N%2CP1_001N",
+  "uncompressed_sha256": "28c1abffd0aa2e87063b655ebb7014c59d0cba0d6ee0e5ff2ce5e600010c7774"
+}

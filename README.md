@@ -134,6 +134,7 @@ Each multi-year run writes `<table>_concordance.csv` (every output column traced
 | `place` | 160 | `SSPPPPP` | place FIPS (required) |
 | `zcta` | 860 | `ZZZZZ` | ZCTAs; default all ZIPs in the state (`zip2fips.json`); requested in chunks of 50 |
 | `msa` | 310 | `MMMMM` | CBSA codes; default all metro and micro areas |
+| `block` | 100 | `SSCCCTTTTTTBBBB` | 2020 Census only (`dec/pl`, or DHC `H1`): county FIPS; one request per county, default one per state |
 
 ### Datasets
 
@@ -143,8 +144,10 @@ Each multi-year run writes `<table>_concordance.csv` (every output column traced
 | `profile` | `/acs/acs5/profile` | `DP02`–`DP05` | adds `PE`/`PM` percentages |
 | `subject` | `/acs/acs5/subject` | `S…` | `E`, `M` per column (`_C01_`, …) |
 | `cprofile` | `/acs/acs5/cprofile` | `CP02`–`CP05` | codes embed the period; `SS` significance flags |
+| `dec/pl` | `/2020/dec/pl` | 2020 Census P.L. 94-171 redistricting data: `P1`–`P5`, `H1` | `N` (count), `NA` annotation; no MOE |
+| `dec/dhc` | `/2020/dec/dhc` | 2020 Census Demographic and Housing Characteristics: e.g. `P1`, `P12`, `H1`, `H3` | `N` (count), `NA` annotation; no MOE |
 
-The dataset is inferred from the table code.
+The ACS dataset is inferred from the table code. The 2020 Census datasets are selected with `dataset="dec/pl"` / `"dec/dhc"` or `product="decennial"` (DHC); see [2020 Decennial Census](#2020-decennial-census).
 
 ### Outputs
 
@@ -167,6 +170,7 @@ Every run also writes `<table>_extraction_metadata.json`. It records the request
 | `<base>__<first>_<last>` | Concept segment when a code was reused for different measures |
 | `<base>_SE`, `_CV`, `_RELIABILITY` | Derived standard error, CV (%), and reliability flag |
 | `*_est`, `*_moe`, `*_pct`, `*_pct_moe`, `*_se`, `*_cv`, `*_rel`, `*_sig` | Panel slugs; `slug_style="code"` gives Stata-safe names |
+| `<base>N`, `*_count` | 2020 Census count (and its panel slug); no MOE, SE or CV columns exist |
 
 ## Methodology
 
@@ -204,6 +208,7 @@ Every derived result records its `method` (for example `proportion`, `proportion
 | F6 | Prior-period dollars adjusted with R-CPI-U-RS | Comparison Profile values in current dollars |
 | F7 | Z-tests between periods | Comparison Profile significance flags |
 | F8 | Sums of counties | State estimates |
+| F11 | 2020 Census state population; block housing units summed to tracts and counties; DHC vs P.L. 94-171 | Apportionment-release state totals; published tract and county totals (invariants and hierarchy) |
 
 ## Inference
 
@@ -232,8 +237,8 @@ Built on GeoPandas, Shapely (GEOS), pyogrio (GDAL), pyproj, and PySAL. Outputs a
 | :--- | :--- | :--- |
 | Census boundaries matched to each ACS release | `census.boundaries.get_boundaries` / `get_boundaries` | Cartographic (1:500k) for maps, TIGER/Line for areal work; vintage mismatches are errors |
 | Journal maps that show uncertainty | `census.maps.choropleth` / `make_map` | Quantile classes by default; legend reports class separability (Sun and Wong 2010); low-reliability areas hatched; uncertainty and significance maps |
-| Spatial autocorrelation | `census.spatial.morans_i`, `local_morans` / `spatial_autocorrelation` | Reproduces PySAL references; replicate SE of Moran's I is conservative (coverage 0.987) |
-| Spatial regression | `census.spatial.spatial_regression` | Lag and error models with LM diagnostics (spreg) |
+| Spatial autocorrelation | `census.spatial.morans_i`, `local_morans` / `spatial_autocorrelation` | Reproduces PySAL references; replicate SE of Moran's I is conservative (coverage 0.987); local clusters use two-sided permutation p-values (9999 permutations, BH): false-positive rates at nominal under randomness |
+| Spatial regression | `census.spatial.spatial_regression` | Lag (GMM default) and error (ML default) models with LM diagnostics (spreg); simulated coverage under ACS outcome error: rho 0.89-0.90 (GMM lag), lambda attenuated |
 | Spatial Fay–Herriot | `census.sae_spatial.spatial_fay_herriot` / `spatial_small_area_estimates` | Reproduces the R `sae` grapes example; coverage 0.891 |
 | Population-weighted tract crosswalks | `census.block_weights`, `harmonize_panel(weight="auto")` | Decennial block weights; Delaware test: mean error 444 vs 624 people with land-area weights |
 | Block groups and custom polygons | `geo_level="block group"`, `census.custom_areas` / `custom_area_mapping` | Area or block-population allocation |
@@ -251,12 +256,32 @@ Built on GeoPandas, Shapely (GEOS), pyogrio (GDAL), pyproj, and PySAL. Outputs a
 | Cost of living between places | `census.rpp.adjust_for_place` / `adjust_for_place` | BEA Regional Price Parities; reproduces BEA real personal income for all states (2008); never applied by default |
 | Interactive maps | `census.web_maps.web_choropleth` / `make_web_map` | Self-contained HTML, no external requests |
 
+## 2020 Decennial Census
+
+The 2020 Census P.L. 94-171 redistricting data (`dec/pl`) and the Demographic and Housing Characteristics File (`dec/dhc`) use the same client, cache, extraction pipeline, output formats, codebook and replay as the ACS: pass `dataset="dec/dhc"` (or `"dec/pl"`), or `product="decennial"`, to `plan_extraction`, `batch_download`, `download_table`, `run_batch` or `python -m census extract --product decennial`, with `years=[2020]`. Geography levels are nation, state, county, tract, block group, place and block (block only for P.L. 94-171 and the invariant DHC `H1` housing-unit count). Variable metadata for both files is archived in `metadata/dec/`.
+
+```python
+from census import ResearchOptions, build_entities, run_batch
+
+run_batch("P12", build_entities("county", "26"), [2020], "out", "panel",
+          ResearchOptions(include_codebook=True), dataset="dec/dhc")
+```
+
+**Uncertainty.** Census counts are not sample-based, so they have no sampling margin of error; they are also not error-free. Outputs never carry an MOE or CV of 0: no MOE, SE, CV or reliability columns are written (`compute_reliability` adds none), the codebook's `Uncertainty` column reads "not sample-based (MOE undefined)", and the extraction metadata has `moe_confidence_level: null` and an `uncertainty` record. Every decennial plan carries a disclosure-avoidance advisory:
+
+- the counts carry coverage error (measured by the [Post-Enumeration Survey](https://www.census.gov/newsroom/blogs/random-samplings/2021/12/post-enumeration-measuring-coverage-error.html)), processing error, and noise added by the TopDown differential-privacy algorithm;
+- only three counts are invariant (published without noise): state total population, total housing units per block, and the number of occupied group-quarters facilities by type per block ([Census DAS update, 2020-11-25](https://www.census.gov/programs-surveys/decennial-census/decade/2020/planning-management/process/disclosure-avoidance/2020-das-updates/2020-11-25.html));
+- small geographies and detailed cells are noisier, and block-level characteristics should be aggregated before use ([fact sheet](https://www.census.gov/content/dam/Census/library/factsheets/2021/protecting-the-confidentiality-of-the-2020-census-redistricting-data.pdf)).
+
+**Statistics.** `z_test`, `calculate_significance`, `batch_significance`, `calculate_cv` and `acs_overlap_years` refuse decennial-only inputs (`product="decennial"`), since a sampling test says nothing about disclosure-avoidance noise. An ACS estimate can be tested against a census count with `product1="5-year", product2="decennial"`: the count is a fixed reference, and the result's `comparison` and `notes` say that only ACS sampling error is measured. `derive_estimate(..., product="decennial")` returns the point estimate with MOE, SE and CV undefined. `build_analysis_frame` gives census counts NaN `_se`/`_cv`, method `not_sample_based`, release `dec_2020` (`acs5_<year>+dec_2020` with a note when mixed with ACS variables). No new estimators are provided for decennial data; validation check F11 compares the files with the Census Bureau's invariants and hierarchy.
+
 ## Advisories and known limitations
 
 - **Boundary vintages.** Requests spanning 2019 to 2020 at tract, ZCTA, place, county, or CBSA level produce an advisory. Tract panels can be harmonized with `harmonize_tracts_to=2010|2020` (land-area weights from the Census relationship file, or NHGIS-style population weights you supply); apportioned MOEs assume independent components and exact weights, and boundary slivers produce tiny weights. Other levels are not harmonized.
 - **Medians from coarse brackets.** Household-income medians rebuilt from B19001 are usually within 1% of the published B19013, but can differ by more than 2% because Census interpolates a finer internal distribution.
 - **Home values.** Before the 2022 releases, home values were not on the period end-year dollar basis (ACS user note 2023-07), so deflating them is approximate. Plans include an advisory.
 - **Subject tables.** Their 2013 and 2017 redesigns changed thousands of labels. Multi-year subject pulls usually need `variables=` and reviewed overrides.
+- **2020 Census counts.** No margins of error exist; disclosure-avoidance noise dominates blocks and detailed cells. Aggregate before use; see [2020 Decennial Census](#2020-decennial-census). Cross-release concordance and continuity checks do not apply (one census year), and the 2010 Census is not offered.
 - **ZIP codes vs. ZCTAs.** `zip2fips.json` maps each ZIP to one primary county; PO-box-only ZIPs have no ZCTA.
 
 ## Repository layout

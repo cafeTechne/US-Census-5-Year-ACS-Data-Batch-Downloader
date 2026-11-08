@@ -52,9 +52,22 @@ class TestGeoWorkflows(unittest.TestCase):
     def test_spatial(self):
         from census import workflows_geo as g
 
-        self.guided(g.spatial_autocorrelation(self.path, "rate", "tract", 2023, local=True,
-                                              output_path=os.path.join(self.dir, "lisa.csv")))
-        self.guided(g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error"))
+        res = g.spatial_autocorrelation(self.path, "rate", "tract", 2023, local=True,
+                                        output_path=os.path.join(self.dir, "lisa.csv"))
+        self.guided(res)
+        # PLAN_ROUND_15 B3: measured caveats reach the tool output
+        self.assertIn("local_morans_size", " ".join(res["local_notes"]))
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error")
+        self.guided(res)
+        self.assertIn("understates the true lambda", " ".join(res["notes"]))
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023)  # lag default: GMM
+        self.guided(res)
+        self.assertIn("GMM", res["method"])
+        self.assertIn("the default for the lag model", " ".join(res["notes"]))
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ml")
+        self.guided(res)
+        self.assertIn("ML lag intervals for rho covered 0.48", " ".join(res["notes"]))
+        self.assertFalse(g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ols")["success"])
         self.guided(g.spatial_small_area_estimates(self.path, "rate ~ x", "rate_se", "tract", 2023,
                                                    output_path=os.path.join(self.dir, "sfh.csv")))
         self.assertFalse(g.spatial_regression(self.path, "rate ~ nope", "tract", 2023)["success"])

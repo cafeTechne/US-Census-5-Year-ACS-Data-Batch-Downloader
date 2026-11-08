@@ -10,6 +10,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from census.cache import QueryCache
+from census.decennial import (
+    DECENNIAL_DATASETS,
+    DECENNIAL_DHC,
+    PRODUCT_DECENNIAL,
+    SAMPLING_REFUSAL,
+    is_decennial,
+)
 
 load_dotenv()
 
@@ -28,9 +35,15 @@ DATASETS: Dict[str, str] = {
     "acs1/profile": "acs/acs1/profile",
     "acs1/subject": "acs/acs1/subject",
     "acs1/cprofile": "acs/acs1/cprofile",
+    # 2020 Decennial Census (census.decennial): P.L. 94-171 redistricting data
+    # and the Demographic and Housing Characteristics File. Not sample-based.
+    "dec/pl": "dec/pl",
+    "dec/dhc": "dec/dhc",
 }
 
-# ACS products. Every dataset key belongs to exactly one product.
+# ACS products. Every ACS dataset key belongs to exactly one product. The
+# decennial datasets form the separate product PRODUCT_DECENNIAL, which is not
+# in PRODUCTS: ACS-only tools (overlap, replicates, PUMS) never accept it.
 PRODUCT_5YR = "5-year"
 PRODUCT_1YR = "1-year"
 PRODUCTS: Tuple[str, ...] = (PRODUCT_5YR, PRODUCT_1YR)
@@ -75,6 +88,8 @@ GEO_LEVELS: Dict[str, Tuple[str, str]] = {
     "place": ("place", "160"),
     "msa": ("metropolitan statistical area/micropolitan statistical area", "310"),
     "zcta": ("zip code tabulation area", "860"),
+    # Decennial datasets only (census.decennial): GEOIDs are 15 digits.
+    "block": ("block", "100"),
 }
 
 # ZCTAs were nested within states (summary level 871) through the 2019 ACS
@@ -120,12 +135,21 @@ def normalize_product(product: Optional[str]) -> str:
 
 
 def infer_dataset(table_code: str, product: str = PRODUCT_5YR) -> str:
-    """Pick the endpoint for a table code prefix within a product (5-year by default)."""
+    """Pick the endpoint for a table code prefix within a product (5-year by default).
+
+    ``product='decennial'`` selects the 2020 DHC ('dec/dhc'); pass
+    ``dataset='dec/pl'`` explicitly for P.L. 94-171 tables (table IDs are
+    product-specific: P.L. 94-171 P1 is Race, DHC P1 is Total Population).
+    """
+    if is_decennial(product):
+        return product if product in DECENNIAL_DATASETS else DECENNIAL_DHC
     return PRODUCT_DATASETS[normalize_product(product)][_table_type(table_code)]
 
 
 def dataset_product(dataset: str) -> str:
-    """'5-year' or '1-year' for a dataset key (ValueError when unknown)."""
+    """'5-year', '1-year' or 'decennial' for a dataset key (ValueError when unknown)."""
+    if dataset in DECENNIAL_DATASETS:
+        return PRODUCT_DECENNIAL
     try:
         return _DATASET_TABLE_TYPE[dataset][0]
     except KeyError:
@@ -141,8 +165,12 @@ def dataset_for_product(dataset: str, product: str) -> str:
 def require_same_product(*products_or_datasets: str) -> str:
     """Return the shared product; raise ValueError (Census guidance) when 1-year and 5-year mix.
 
-    Accepts product names or dataset keys.
+    Accepts product names or dataset keys. A decennial product or dataset
+    raises ValueError (census.decennial.SAMPLING_REFUSAL): callers are ACS
+    sampling tools, which do not apply to census counts.
     """
+    if any(is_decennial(p) for p in products_or_datasets):
+        raise ValueError(SAMPLING_REFUSAL)
     found = set()
     for p in products_or_datasets:
         if p is None:
@@ -173,6 +201,15 @@ def build_geo_params(
     """
     params: Dict[str, str] = {}
     geo_level = normalize_geo_level(geo_level)
+    if geo_level == "block":
+        if not state_code or "*" in state_code or "," in state_code:
+            raise ValueError("Block queries need exactly one state; request one state at a time.")
+        params["for"] = "block:*"
+        inn = f"state:{state_code} county:{county_code or '*'}"
+        if tract_code:
+            inn += f" tract:{tract_code}"
+        params["in"] = inn
+        return params
     if geo_level == BLOCK_GROUP:
         if not state_code or "*" in state_code or "," in state_code:
             raise ValueError("Block-group queries need exactly one state; request one state at a time.")
@@ -353,8 +390,9 @@ class CensusAPIClient:
         Geography levels: 'us', 'state', 'county', 'tract', 'block group'
         (one county per request; 2013+ releases, acs5 only), 'place', 'zcta', 'msa'.
         Dataset ('acs5', 'profile', 'subject', 'cprofile'; 1-year: 'acs1',
-        'acs1/profile', 'acs1/subject', 'acs1/cprofile') is inferred from the
-        table code (5-year) when not given.
+        'acs1/profile', 'acs1/subject', 'acs1/cprofile'; 2020 Census: 'dec/pl',
+        'dec/dhc', which also accept 'block') is inferred from the table code
+        (5-year) when not given.
         """
         endpoint, params = self.build_request(
             year=year,

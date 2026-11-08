@@ -14,10 +14,12 @@ RECIPES: Dict[str, str] = {
     "regression_sampling_error": "Regression whose SEs include ACS sampling error",
     "small_area": "Small-area (Fay-Herriot) estimates for noisy tracts or counties",
     "preregistered": "Pre-registered (manifest) confirmatory analysis",
+    "decennial_counts": "Use 2020 Census counts (P.L. 94-171, DHC) without inventing margins of error",
 }
 
 RecipeName = Literal[
-    "compare_counties", "tract_trend", "regression_sampling_error", "small_area", "preregistered"
+    "compare_counties", "tract_trend", "regression_sampling_error", "small_area", "preregistered",
+    "decennial_counts",
 ]
 
 
@@ -26,7 +28,7 @@ def get_recipe(name: Optional[RecipeName] = None) -> Dict[str, Any]:
 
     Args:
         name: compare_counties, tract_trend, regression_sampling_error,
-            small_area, or preregistered.
+            small_area, preregistered, or decennial_counts.
 
     Example: get_recipe(name="compare_counties")
     """

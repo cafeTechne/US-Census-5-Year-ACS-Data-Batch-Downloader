@@ -20,6 +20,9 @@ pulled. Schema (``schema_version`` 1)::
       "derivations": [{"name": "rate", "op": "proportion", "num": "a", "den": "b"}],
       "adjustments": [{"type": "rpp", "variables": ["income"],   # optional; after exclusions
                        "rpp_year": 2019, "areas": "county_metro" | "state"}],
+                   # several releases: {"type": "rpp", "variables": [...], "dollar_year": 2024,
+                   #   "price_index": "r-cpi-u-rs", "rpp_years": {"2019": 2019, "2024": 2024}}
+      "replicates": {"source": "census_vre"},               # optional; run_manifest fetches VRE files
       "exclusions": [{"rule": "cv_screen", "threshold": 30, "variables": ["income"],
                       "action": "flag" | "exclude"},
                      {"rule": "geoid_exclude", "geoids": ["..."]}],
@@ -27,7 +30,8 @@ pulled. Schema (``schema_version`` 1)::
       "confidence_level": 0.90,
       "correction": {"method": "holm", "family": "all" | "by_family"},
       "analyses": [{"id": "m1", "method": "fit_replicate", "formula": "income ~ pop",
-                    "args": {"model": "ols"}}],
+                    "args": {"model": "ols"},
+                    "replicate_scope": "all" | "covariates_only"}],   # optional, default "all"
       "hypotheses": [{"id": "H1", "statement": "...", "analysis": "m1",
                       "statistic": "coefficient", "term": "pop",
                       "direction": "two-sided" | "greater" | "less", "family": "primary"}],
@@ -54,7 +58,46 @@ manifest hash fixes the price year (:func:`create_manifest` fills in the latest
 year in the RPP table when it is omitted, before hashing); the year used, every
 RPP area and the RPP table's SHA-256 (bundled checksum, or the custom table's path and hash) are
 recorded in ``run.json`` and ``bundle.json`` (``adjustments``). An RPP year
-other than the release end year is a note, not a deviation. One release only.
+other than the release end year is a note, not a deviation.
+
+Several releases (PLAN_ROUND_15 A1, decision D15-2): an RPP adjustment then also
+requires ``dollar_year``, ``price_index`` (one of census.inflation.PRICE_INDEXES;
+``"r-cpi-u-rs"``, the index the Census Bureau uses for ACS dollars, is the default
+create_manifest fills in) and ``rpp_years`` (``{"<release>": RPP year}`` for every
+release, instead of ``rpp_year``; filled with each release's own year). Each
+release's dollars are first converted to ``dollar_year`` dollars with the price
+index (CPI(dollar_year) / CPI(release)), then divided by the RPP of the release's
+``rpp_years`` entry; estimates, SEs and replicates of that release alike. With one
+release a ``dollar_year`` (plus ``price_index``) is optional. Not combinable with
+``aggregation``. The run records the CPI values and factors, the price-index
+table's SHA-256 and every release's RPP areas.
+
+``replicates`` (optional, PLAN_ROUND_15 A2): ``{"source": "census_vre"}`` makes
+run_manifest fetch the Census VRE files for the manifest's tables, geography and
+releases (:func:`census.replicate.fetch_vre` and its cache), as the replicate
+frame of every replicate analysis; ``run.json`` and ``bundle.json`` record each
+file's URL and SHA-256, and ``replicates.unavailable`` lists variables without
+published replicates (e.g. B19013 medians). Under the strict confirmatory policy a
+replicate analysis that uses such a variable blocks (``replicates_incomplete``)
+unless the analysis declares ``"replicate_scope": "covariates_only"``
+(fit_replicate only; target ``population`` or ``conservative``): its outcome is
+then held at its estimate in every refit, and the declaration is in the hash and
+the methods text. The declaration is allowed whenever it is well-formed: an
+outcome the VRE registry lists can still lack replicates for the analysed units,
+so create_manifest only notes such an outcome, and a run that finds replicates
+for it still holds it fixed as declared (the hashed declaration governs) and
+records that (``replicates.covariates_only_outcome_had_replicates``). Census VRE
+files of tract and block-group geographies are per state, so those levels need
+``geography.state`` or ``states``. Caller-supplied ``replicates`` are an error
+with census_vre.
+
+Releases whose ACS 5-year periods overlap (shared sample years) are never
+combined through replicates (the trend module's overlap rule: published
+replicates do not carry the covariance of overlapping periods): validation
+refuses census_vre or an analysis declaring ``"replicates": "required"`` with
+overlapping releases, and caller-supplied replicates spanning overlapping
+releases stop every replicate analysis with a blocking
+``replicates_overlapping_releases`` deviation.
 
 When replicates are supplied and the manifest has derivations, each
 derivation absent from the replicate frame is evaluated on the replicates of
@@ -124,7 +167,8 @@ INCOMPLETE_STATUS_TEXT = "pre-registered analysis did not run as registered; res
 BLOCKING_DEVIATIONS = ("blocked_variable", "extraction_failed", "variable_missing_from_extraction",
                        "aggregation_failed", "analysis_frame_failed", "analysis_not_run",
                        "replicates_unavailable", "analysis_failed", "replicates_incomplete",
-                       "hypothesis_not_tested", "failed_calls", "data_source_mismatch", "adjustment_failed")
+                       "hypothesis_not_tested", "failed_calls", "data_source_mismatch", "adjustment_failed",
+                       "replicates_overlapping_releases")
 DATA_SOURCE_KEYS = ("synthetic", "description", "generator")
 STATUS_EXPLORATORY = "exploratory"
 
@@ -142,7 +186,12 @@ ANALYSIS_METHODS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
 STATISTICS = ("coefficient", "correlation", "trend_slope", "z_difference")
 EXCLUSION_RULES = ("cv_screen", "geoid_exclude")
 ADJUSTMENT_TYPES = ("rpp",)
-RPP_ADJUSTMENT_KEYS = ("type", "variables", "rpp_year", "areas")
+RPP_ADJUSTMENT_KEYS = ("type", "variables", "rpp_year", "areas", "rpp_years", "dollar_year", "price_index")
+REPLICATE_SOURCES = ("census_vre",)
+REPLICATES_KEYS = ("source",)
+REPLICATE_SCOPES = ("all", "covariates_only")
+# frame identifier columns a formula may name (C(Year) for a change across releases, C(GEOID...) terms)
+FORMULA_ID_COLUMNS = ("GEOID", "Year")
 # geography levels whose GEOIDs start with the state FIPS (state RPP areas; usable with
 # geography.states). ZCTA GEOIDs are not state-prefixed and ZCTAs can cross state lines.
 _STATE_PREFIXED_LEVELS = ("state", "county", "tract", "block group", "place")
@@ -309,8 +358,7 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
         level = normalize_geo_level(geo.get("level", ""))
     except Exception:  # noqa: BLE001 - geography errors are reported by _check_geography
         level = geo.get("level")
-    if adjustments and len(manifest.get("releases") or []) != 1:
-        errors.append("adjustments: an RPP adjustment needs exactly one release (dollars of one end year)")
+    releases = manifest_releases(manifest)
     if adjustments and manifest.get("aggregation") is not None:
         errors.append("adjustments cannot be combined with aggregation (RPP areas are assigned per GEOID)")
     adjusted: List[str] = []
@@ -341,7 +389,6 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
         elif areas == "state" and level not in _STATE_PREFIXED_LEVELS:
             errors.append(f"adjustments[{i}]: areas 'state' needs a state-based geography level "
                           f"{_STATE_PREFIXED_LEVELS}")
-        year = adj.get("rpp_year")
         try:
             from . import rpp
             years = rpp._years()
@@ -350,13 +397,186 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
             continue
         if not years:
             errors.append(f"adjustments[{i}]: no RPP data available")
-        elif year is None:
+            continue
+        _check_dollar_year(adj, i, releases, errors)
+        if len(releases) > 1 or "rpp_years" in adj:
+            _check_rpp_years(adj, i, releases, years, errors)
+            continue
+        year = adj.get("rpp_year")
+        if year is None:
             errors.append(f"adjustments[{i}]: rpp_year is required (it fixes the price level in the "
                           f"pre-registration); the latest year in the RPP table is {years[-1]}. "
                           "create_manifest fills it in when omitted")
-        elif not isinstance(year, int) or isinstance(year, bool) or year not in years:
+        elif not _is_int(year) or year not in years:
             errors.append(f"adjustments[{i}]: rpp_year must be an integer year in the RPP table "
                           f"({years[0]}-{years[-1]})")
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def manifest_releases(manifest: Mapping[str, Any]) -> List[int]:
+    """The manifest's integer releases, in order (anything else is reported by validate_manifest)."""
+    releases = manifest.get("releases")
+    return [r for r in releases if _is_int(r)] if isinstance(releases, list) else []
+
+
+def release_overlap_message(releases: List[int], subject: str) -> Optional[str]:
+    """None when the ACS 5-year periods of ``releases`` share no sample years, else why replicate
+    SEs across them are refused (the trend module's overlap rule, census.trends.overlap_design_check)."""
+    if len(set(releases)) < 2:
+        return None
+    from .trends import overlap_design_check
+    design = overlap_design_check(releases)
+    if not design["overlapping"]:
+        return None
+    return (f"{subject} with overlapping 5-year periods: releases "
+            f"{[(p['year1'], p['year2']) for p in design['overlapping_pairs']]} share sample years, and their "
+            "replicates do not carry that covariance, so replicate SEs of analyses that combine or contrast them "
+            f"would be wrong; use non-overlapping releases {design['suggested_nonoverlapping']}")
+
+
+def _check_rpp_years(adj: Mapping[str, Any], i: int, releases: List[int], years: List[int],
+                     errors: List[str]) -> None:
+    """``rpp_years`` ({release: RPP year}, one entry per release) replaces ``rpp_year`` when a
+    manifest has several releases (each release's dollars get their own year's RPP, D15-2)."""
+    if "rpp_year" in adj:
+        errors.append(f"adjustments[{i}]: give rpp_years (one RPP year per release), not rpp_year, "
+                      "when the manifest has several releases" if len(releases) > 1
+                      else f"adjustments[{i}]: give either rpp_year or rpp_years, not both")
+        return
+    ry = adj.get("rpp_years")
+    if ry is None:
+        errors.append(f"adjustments[{i}]: rpp_years is required with several releases, e.g. "
+                      + json.dumps({str(r): r for r in releases})
+                      + " (each release's own year, D15-2; it fixes the price levels in the pre-registration). "
+                      "create_manifest fills it in when omitted")
+        return
+    if not isinstance(ry, Mapping) or sorted(str(k) for k in ry) != sorted(str(r) for r in releases):
+        errors.append(f"adjustments[{i}]: rpp_years must map every release (as a string key) to an RPP year, "
+                      "e.g. " + json.dumps({str(r): r for r in releases}))
+        return
+    for k, v in ry.items():
+        if not _is_int(v) or v not in years:
+            errors.append(f"adjustments[{i}]: rpp_years[{k!r}] must be an integer year in the RPP table "
+                          f"({years[0]}-{years[-1]})")
+
+
+def _check_dollar_year(adj: Mapping[str, Any], i: int, releases: List[int], errors: List[str]) -> None:
+    """``dollar_year`` + ``price_index``: every release's dollars are converted to the dollar year
+    with the price index (CPI first, then the RPP; D15-2). Required with several releases."""
+    from .inflation import PRICE_INDEXES, load_price_index
+    dy, index = adj.get("dollar_year"), adj.get("price_index")
+    if dy is None:
+        if len(releases) > 1:
+            errors.append(f"adjustments[{i}]: dollar_year is required with several releases (dollars of "
+                          f"different years are converted to one year with the price index before the RPP); "
+                          "create_manifest fills in the latest release")
+        if index is not None:
+            errors.append(f"adjustments[{i}]: price_index needs dollar_year")
+        return
+    if not _is_int(dy):
+        errors.append(f"adjustments[{i}]: dollar_year must be an integer year")
+        return
+    if index is None:
+        errors.append(f"adjustments[{i}]: price_index is required with dollar_year (one of {PRICE_INDEXES}; "
+                      "create_manifest fills in the default r-cpi-u-rs)")
+        return
+    if index not in PRICE_INDEXES:
+        errors.append(f"adjustments[{i}]: price_index must be one of {PRICE_INDEXES}")
+        return
+    try:
+        table = load_price_index(index)
+    except Exception as exc:  # noqa: BLE001 - e.g. a bundled-data integrity failure
+        errors.append(f"adjustments[{i}]: price index table unreadable ({type(exc).__name__}: {exc})")
+        return
+    missing = sorted({int(dy), *releases} - set(table))
+    if missing:
+        errors.append(f"adjustments[{i}]: no complete {index} value for {missing} (available "
+                      f"{min(table) if table else '-'}-{max(table) if table else '-'})")
+
+
+def _vre_level(level: Any) -> str:
+    """A manifest geography level as census.replicate names it (``block group`` -> ``block_group``)."""
+    from .pipeline import normalize_geo_level
+    return normalize_geo_level(str(level)).replace(" ", "_")
+
+
+def census_vre_source(manifest: Mapping[str, Any]) -> bool:
+    """True when the manifest declares ``"replicates": {"source": "census_vre"}``."""
+    reps = manifest.get("replicates")
+    return isinstance(reps, Mapping) and reps.get("source") == "census_vre"
+
+
+def _check_replicates(manifest: Mapping[str, Any], errors: List[str]) -> None:
+    """``replicates`` (optional): ``{"source": "census_vre"}`` makes run_manifest fetch the Census
+    VRE files for the manifest's tables, geography and releases (census.replicate and its cache)."""
+    reps = manifest.get("replicates")
+    if reps is None:
+        return
+    if not isinstance(reps, Mapping):
+        errors.append("replicates must be an object, e.g. {\"source\": \"census_vre\"}")
+        return
+    for k in sorted(set(reps) - set(REPLICATES_KEYS)):
+        errors.append(f"replicates: unknown key {k!r}; allowed {REPLICATES_KEYS}")
+    if reps.get("source") not in REPLICATE_SOURCES:
+        errors.append(f"replicates.source must be one of {REPLICATE_SOURCES}")
+        return
+    from . import replicate as vre
+    geo = manifest.get("geography") if isinstance(manifest.get("geography"), Mapping) else {}
+    try:
+        sumlev = vre.sumlev_for(_vre_level(geo.get("level", "")))
+    except Exception as exc:  # noqa: BLE001 - unsupported level for VRE files
+        errors.append(f"replicates.source census_vre: {exc}")
+        sumlev = None
+    if sumlev in vre.PER_STATE_SUMLEVS and not geo.get("state") and not geo.get("states"):
+        errors.append(f"replicates.source census_vre at level {geo.get('level')!r}: Census VRE files of summary "
+                      f"level {sumlev} are published per state; give geography.state or geography.states")
+    releases = manifest_releases(manifest)
+    bad = [r for r in releases if r not in vre.VRE_LAYOUTS]
+    if bad:
+        errors.append(f"replicates.source census_vre: no Census VRE release for {bad} (5-year releases "
+                      f"{vre.FIRST_VRE_YEAR}-{vre.LAST_KNOWN_VRE_YEAR})")
+    if manifest.get("aggregation") is not None:
+        errors.append("replicates.source census_vre cannot be combined with aggregation (VRE replicates are "
+                      "per GEOID and are not aggregated by run_manifest)")
+    overlap = release_overlap_message(releases, "replicates.source census_vre")
+    if overlap:
+        errors.append(overlap)
+
+
+def _variable_tables(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
+    """Manifest variable or derivation name -> the tables it is built from."""
+    out: Dict[str, List[str]] = {}
+    variables = manifest.get("variables")
+    for v in variables if isinstance(variables, list) else []:
+        if isinstance(v, Mapping) and v.get("name") is not None and _table_of(v):  # invalid entries: reported
+            out[str(v["name"])] = [str(_table_of(v))]
+    derivations = manifest.get("derivations")
+    for d in derivations if isinstance(derivations, list) else []:
+        if not isinstance(d, Mapping):  # reported by validate_manifest
+            continue
+        refs = [r for part in ("num", "den")
+                for r in (d.get(part) if isinstance(d.get(part), list) else [d.get(part)]) if r is not None]
+        out[str(d.get("name"))] = sorted({t for r in refs for t in out.get(str(r), [])})
+    return out
+
+
+def vre_unavailable(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Variables and derivations without published Census VRE replicates for some release
+    (offline, from the census.replicate registry): [{"variable", "table", "release", "reason"}]."""
+    from . import replicate as vre
+    level = _vre_level((manifest.get("geography") or {}).get("level", ""))
+    out = []
+    releases = manifest_releases(manifest)
+    for name, tables in _variable_tables(manifest).items():
+        for table in tables:
+            for year in releases:
+                info = vre.vre_availability(table, year, level)
+                if not info["available"]:
+                    out.append({"variable": name, "table": table, "release": year, "reason": info["reason"]})
+    return out
 
 
 def tables_and_refs(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
@@ -398,11 +618,13 @@ def _duplicate_spec_keys(a: Mapping[str, Any]) -> List[str]:
 
 
 def _formula_names(formula: str) -> List[str]:
-    """Identifiers in a patsy formula that are not function calls."""
+    """Identifiers in a patsy formula that are not function calls or frame identifiers
+    (GEOID, Year: e.g. ``C(Year)`` for a change between releases)."""
     names = []
     for m in re.finditer(r"[A-Za-z_][A-Za-z0-9_.]*", str(formula)):
         tail = str(formula)[m.end():].lstrip()
-        if tail.startswith("(") or m.group(0) in FORMULA_FUNCTIONS or "." in m.group(0):
+        if tail.startswith("(") or m.group(0) in FORMULA_FUNCTIONS or "." in m.group(0) \
+                or m.group(0) in FORMULA_ID_COLUMNS:
             continue
         names.append(m.group(0))
     return names
@@ -414,6 +636,9 @@ def _check_variables(manifest: Mapping[str, Any], errors: List[str], resolve: bo
     variables = manifest.get("variables") or []
     if not variables:
         errors.append("variables: at least one variable is required")
+        return
+    if not isinstance(variables, list):
+        errors.append("variables must be a list of {name, ref} objects")
         return
     by_table: Dict[str, List[str]] = {}
     for i, v in enumerate(variables):
@@ -484,7 +709,7 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     except ValueError:
         errors.append("created must be an ISO 8601 timestamp")
     releases = manifest.get("releases") or []
-    if not releases or not all(isinstance(r, int) for r in releases):
+    if not isinstance(releases, list) or not releases or not all(_is_int(r) for r in releases):
         errors.append("releases must be a non-empty list of ACS 5-year end years (integers)")
     _check_geography(manifest.get("geography") or {}, errors)
     level = manifest.get("confidence_level", 0.90)
@@ -514,8 +739,13 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         errors.append("missing: only 'complete_case' is supported")
 
     _check_variables(manifest, errors, resolve, client)
-    names = [str(v.get("name")) for v in manifest.get("variables", []) if isinstance(v, Mapping)]
-    for d in manifest.get("derivations") or []:
+    variables = manifest.get("variables")
+    names = [str(v.get("name")) for v in (variables if isinstance(variables, list) else []) if isinstance(v, Mapping)]
+    derivations = manifest.get("derivations") or []
+    for i, d in enumerate(derivations if isinstance(derivations, list) else [derivations]):
+        if not isinstance(d, Mapping):
+            errors.append(f"derivations[{i}] must be an object {{name, op, num, den}}")
+            continue
         names.append(str(d.get("name")))
         for part in ("num", "den"):
             refs = d.get(part)
@@ -531,6 +761,7 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     if agg is not None and not isinstance(agg.get("mapping"), Mapping):
         errors.append("aggregation.mapping must be an object GEOID -> group id")
     _check_adjustments(manifest, names, errors)
+    _check_replicates(manifest, errors)
 
     for i, ex in enumerate(manifest.get("exclusions") or []):
         if ex.get("rule") not in EXCLUSION_RULES:
@@ -545,6 +776,7 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     if not analyses:
         errors.append("analyses: at least one analysis is required")
     ids = {}
+    needs_replicates: List[str] = []  # replicate analyses declaring "replicates": "required"
     for i, a in enumerate(analyses):
         for k in _duplicate_spec_keys(a):
             errors.append(f"analyses[{i}]: {k!r} given both at the top level and in args; give it once")
@@ -556,6 +788,8 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         if a.get("id") in ids or not a.get("id"):
             errors.append(f"analyses[{i}]: id must be present and unique")
         ids[a.get("id")] = method
+        if method in REPLICATE_METHODS and a.get("replicates") == "required":
+            needs_replicates.append(str(a.get("id")))
         for req in ANALYSIS_METHODS[method][0]:
             if req not in a:
                 errors.append(f"analyses[{i}] ({method}): {req!r} is required")
@@ -568,6 +802,29 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         for u in used:
             if u not in names:
                 errors.append(f"analyses[{i}] ({a.get('id')}): {u!r} is not a manifest variable")
+        scope = a.get("replicate_scope", "all")
+        if scope not in REPLICATE_SCOPES:
+            errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope must be one of {REPLICATE_SCOPES}")
+        elif scope == "covariates_only":
+            outcome = _formula_names(a["formula"].split("~")[0]) if "~" in str(a.get("formula", "")) else []
+            if method != "fit_replicate":
+                errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope 'covariates_only' applies to "
+                              "fit_replicate only")
+            elif (a.get("args") or {}).get("target", "population") == "these_areas":
+                errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope 'covariates_only' cannot use "
+                              "target 'these_areas' (its interval would rest on a sampling SE without the "
+                              "outcome's sampling error); use 'population' or 'conservative'")
+            elif len(outcome) != 1:
+                errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope 'covariates_only' needs a formula "
+                              "whose outcome is one manifest variable")
+            # An outcome the VRE registry lists may still lack replicates for the analysed units (a line
+            # missing from the file), so the declaration is allowed; create_manifest notes it and the run
+            # records whether the outcome had replicates (it is held fixed either way: the hash governs).
+    if needs_replicates and not census_vre_source(manifest):  # census_vre: _check_replicates
+        overlap = release_overlap_message(manifest_releases(manifest),
+                                          f"analyses {needs_replicates} require replicates")
+        if overlap:
+            errors.append(overlap)
     hyps = manifest.get("hypotheses") or []
     if not hyps:
         errors.append("hypotheses: at least one pre-registered hypothesis is required")
@@ -593,6 +850,66 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     return errors
 
 
+def _declared_covariates_only(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
+    """{analysis id: outcome names} of analyses declaring ``replicate_scope: "covariates_only"``."""
+    out: Dict[str, List[str]] = {}
+    for a in manifest.get("analyses") or []:
+        if not isinstance(a, Mapping):
+            continue
+        a = _normalize_analysis(a)
+        if a.get("replicate_scope") == "covariates_only" and "~" in str(a.get("formula", "")):
+            out[str(a.get("id"))] = _formula_names(str(a["formula"]).split("~")[0])
+    return out
+
+
+_FILL_REASONS = {
+    "rpp_year": "the latest year in the RPP table",
+    "dollar_year": "the latest release",
+    "price_index": "the default index (R-CPI-U-RS, the index the Census Bureau uses for ACS dollars)",
+    "rpp_years": "each release's own year (D15-2)",
+}
+
+
+def _fill_adjustment_defaults(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Fill omitted required adjustment fields (in place) so the hash fixes them; returns
+    one ``{"adjustment": i, <field>: value}`` entry per filled field.
+
+    One release: ``rpp_year`` (the latest RPP year; Round 14). Several releases (or a declared
+    ``dollar_year``): ``dollar_year`` (the latest release), ``price_index`` (R-CPI-U-RS) and
+    ``rpp_years`` (each release's own year, when the RPP table has it; otherwise left out and
+    validation asks for it)."""
+    filled: List[Dict[str, Any]] = []
+    adjustments = manifest.get("adjustments")
+    if not isinstance(adjustments, list):
+        return filled
+    releases = manifest_releases(manifest)
+    multi = len(releases) > 1
+    try:
+        from . import rpp
+        rpp_years, latest = rpp._years(), latest_rpp_year()
+    except Exception:  # noqa: BLE001 - an unreadable RPP table is reported by validation
+        rpp_years = latest = None
+    for i, adj in enumerate(adjustments):
+        if not (isinstance(adj, dict) and adj.get("type") == "rpp"):
+            continue
+        if multi and adj.get("dollar_year") is None and releases:
+            adj["dollar_year"] = max(releases)
+            filled.append({"adjustment": i, "dollar_year": max(releases)})
+        if adj.get("dollar_year") is not None and adj.get("price_index") is None:
+            from .inflation import DEFAULT_PRICE_INDEX
+            adj["price_index"] = DEFAULT_PRICE_INDEX
+            filled.append({"adjustment": i, "price_index": DEFAULT_PRICE_INDEX})
+        if multi or "rpp_years" in adj:
+            if adj.get("rpp_years") is None and "rpp_year" not in adj and rpp_years \
+                    and all(r in rpp_years for r in releases):
+                adj["rpp_years"] = {str(r): int(r) for r in releases}
+                filled.append({"adjustment": i, "rpp_years": dict(adj["rpp_years"])})
+        elif adj.get("rpp_year") is None and latest is not None:
+            adj["rpp_year"] = int(latest)
+            filled.append({"adjustment": i, "rpp_year": int(latest)})
+    return filled
+
+
 def create_manifest(
     path_or_dict: Union[str, Path, Mapping[str, Any]], path: Optional[Union[str, Path]] = None,
     client: Any = None, resolve: bool = True,
@@ -604,8 +921,9 @@ def create_manifest(
     to the repository to fix the pre-registration (PLAN_ROUND_8 decision 3).
 
     An RPP adjustment without ``rpp_year`` gets the latest year in the active RPP
-    table before validation and hashing, so the hash fixes the applied year; the
-    result says so (``filled``, ``notes``) and the completed manifest is written to
+    table before validation and hashing, so the hash fixes the applied year (with
+    several releases: ``dollar_year``, ``price_index`` and ``rpp_years`` get their
+    defaults, :func:`_fill_adjustment_defaults`); the result says so (``filled``, ``notes``) and the completed manifest is written to
     ``path``, or, when no ``path`` is given, to a new sibling file
     ``<name>.completed.json`` (the input file is never overwritten; a dict input
     without ``path`` gets it in ``manifest``). Commit and run the completed file.
@@ -613,19 +931,7 @@ def create_manifest(
     ``"manifest"`` when something was filled in).
     """
     manifest = load_manifest(path_or_dict)
-    filled: List[Dict[str, Any]] = []
-    adjustments = manifest.get("adjustments")
-    if isinstance(adjustments, list):
-        year = None
-        for i, adj in enumerate(adjustments):
-            if isinstance(adj, dict) and adj.get("type") == "rpp" and adj.get("rpp_year") is None:
-                try:
-                    year = year or latest_rpp_year()
-                except Exception:  # noqa: BLE001 - an unreadable RPP table is reported by validation
-                    year = None
-                if year is not None:
-                    adj["rpp_year"] = int(year)
-                    filled.append({"adjustment": i, "rpp_year": int(year)})
+    filled = _fill_adjustment_defaults(manifest)
     errors = validate_manifest(manifest, resolve=resolve, client=client)
     out_path = str(path) if path else (str(path_or_dict) if not isinstance(path_or_dict, Mapping) else None)
     write_to = path
@@ -637,10 +943,27 @@ def create_manifest(
         Path(write_to).parent.mkdir(parents=True, exist_ok=True)
         Path(write_to).write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
                                   encoding="utf-8", newline="\n")
-    notes = [f"adjustments[{f['adjustment']}]: rpp_year was omitted; filled in with {f['rpp_year']}, the latest "
-             "year in the RPP table, before hashing" + (f" (written to {write_to})" if write_to and not errors
-                                                         else "; commit the completed manifest")
-             for f in filled]
+    where = f" (written to {write_to})" if write_to and not errors else "; commit the completed manifest"
+    notes = [f"adjustments[{f['adjustment']}]: {k} was omitted; filled in with {json.dumps(v)}, "
+             + _FILL_REASONS[k] + ", before hashing" + where
+             for f in filled for k, v in f.items() if k != "adjustment"]
+    if census_vre_source(manifest):
+        missing = vre_unavailable(manifest)
+        if missing:
+            notes.append("replicates (census_vre): no published Census VRE replicates for "
+                         + "; ".join(f"{u['variable']} ({u['table']}, {u['release']})" for u in missing)
+                         + ". Under the strict confirmatory policy a replicate analysis that uses them blocks "
+                         "(replicates_incomplete) unless it declares \"replicate_scope\": \"covariates_only\" "
+                         "(outcome without replicates, held at its estimate in the refits)")
+        no_vre = {u["variable"] for u in missing}
+        for aid, held in _declared_covariates_only(manifest).items():
+            listed = [v for v in held if v not in no_vre]
+            if listed:
+                notes.append(f"analyses {aid}: replicate_scope 'covariates_only' declared, but the Census VRE "
+                             f"registry lists replicates for the outcome {listed} in every release. The outcome "
+                             "will be held at its estimate in every refit as declared (the hashed declaration "
+                             "governs; the run records whether its replicates were available); remove the "
+                             "declaration before hashing to use the outcome's replicates")
     out = {"hash": manifest_hash(manifest), "path": out_path, "errors": errors, "valid": not errors,
            "notes": notes, "filled": filled}
     if filled:
@@ -735,6 +1058,8 @@ def _run_analysis(a: Mapping[str, Any], frame: pd.DataFrame, level: float, repli
         # the failure is recorded as a "replicates_incomplete" deviation.
         args["replicate_policy"] = CONFIRMATORY_REPLICATE_POLICY
     if method == "fit_replicate":
+        if a.get("replicate_scope") == "covariates_only":  # pre-registered: the outcome is held fixed
+            args["fixed_variables"] = _formula_names(a["formula"].split("~")[0])
         return models.fit_replicate(a["formula"], frame, replicates=replicates, confidence_level=level, **args)
     if method in ("regression_calibration", "simex"):
         return getattr(models, method)(a["formula"], frame, confidence_level=level, **args)
@@ -823,6 +1148,11 @@ def run_manifest(
     (:func:`replicates_sha256`); ``replicates_synthetic`` (default: the data
     source's synthetic flag, or ``replicates.attrs["synthetic"]``) marks them
     synthetic in the methods text.
+    A manifest with ``"replicates": {"source": "census_vre"}`` fetches the
+    Census VRE files itself (:func:`census.replicate.fetch_vre` and its cache)
+    for its tables, geography and releases; the run records each file's URL and
+    SHA-256 and the variables without published replicates
+    (``replicates.unavailable``). Passing ``replicates`` as well is an error.
     ``analysis_status`` is ``"confirmatory"`` only without blocking deviations,
     else ``"confirmatory_incomplete"`` (see the module docstring).
     Never raises on data problems; returns ``success``, ``deviations``,
@@ -836,6 +1166,9 @@ def run_manifest(
 
     m = load_manifest(manifest)
     errors = validate_manifest(m, resolve=True, client=client)
+    if census_vre_source(m) and replicates is not None:
+        errors.append("replicates: the manifest declares replicates.source 'census_vre' (fetched by run_manifest); "
+                      "do not also supply replicates (replicates_path)")
     h = manifest_hash(m)
     out = Path(output_dir)
     if errors:
@@ -861,6 +1194,7 @@ def run_manifest(
     panels: List[pd.DataFrame] = []
     extraction: Dict[str, Any] = {}
     name_of = {str(v["ref"]): str(v["name"]) for v in m["variables"]}
+    codes_by_year: Dict[str, Dict[int, str]] = {}  # manifest name -> {release: ACS base code} (VRE rows)
     for table, refs in tables_and_refs(m).items():
         plan = plan_extraction(table, entities, releases, "panel", opts, variables=refs, client=client)
         plan_pub = {k: v for k, v in plan.items() if not k.startswith("_")}
@@ -887,6 +1221,11 @@ def run_manifest(
             continue
         codebook = pd.read_csv(res["codebook_path"], dtype=str)
         cid_of = {s["input"]: s["concept_id"] for s in plan.get("selection", [])}
+        conc = plan.get("_concordance")
+        for ref in refs:
+            concept = getattr(conc, "concepts", {}).get(cid_of.get(ref, ref))
+            if concept is not None:
+                codes_by_year[name_of[ref]] = {int(y): str(c) for y, c in concept.codes.items()}
         tcols = {}
         for ref in refs:
             cols = _codebook_columns(codebook, cid_of.get(ref, ref))
@@ -928,6 +1267,17 @@ def run_manifest(
             except Exception as exc:
                 deviations.append({"kind": "analysis_frame_failed", "detail": str(exc)})
 
+    # 3a. Census VRE replicates fetched for the manifest (replicates.source census_vre)
+    vre_info: Optional[Dict[str, Any]] = None
+    if census_vre_source(m) and frame is not None:
+        try:
+            replicates, vre_info = _census_vre_replicates(m, frame, codes_by_year, client)
+        except Exception as exc:  # noqa: BLE001 - recorded as a blocking deviation, never substituted
+            deviations.append({"kind": "replicates_unavailable",
+                               "detail": f"Census VRE replicates could not be fetched: {type(exc).__name__}: {exc}"})
+            vre_info = {"source": "census_vre", "error": f"{type(exc).__name__}: {exc}"}
+            replicates = None
+
     # 3b. derivations on supplied replicates
     work_reps = replicates
     derived_on_replicates: Dict[str, Dict[str, int]] = {}
@@ -968,7 +1318,7 @@ def run_manifest(
     # 4b. pre-registered adjustments (a unit still without an RPP area blocks: adjustment_failed)
     adjustment_log: List[Dict[str, Any]] = []
     if frame is not None and m.get("adjustments"):
-        frame, work_reps, adjustment_log, failure = _apply_adjustments(frame, work_reps, m, releases[0])
+        frame, work_reps, adjustment_log, failure = _apply_adjustments(frame, work_reps, m, releases)
         if failure:
             deviations.append({"kind": "adjustment_failed", "detail": failure})
             frame = None
@@ -979,6 +1329,10 @@ def run_manifest(
     # 5. analyses
     available = set(columns) | {str(d["name"]) for d in m.get("derivations") or []}
     results: Dict[str, Any] = {}
+    # caller-supplied replicates of overlapping releases: refused (census_vre is refused at validation)
+    rep_overlap = _replicate_overlap(replicates) if replicates is not None and not census_vre_source(m) else None
+    declared_fixed = _declared_covariates_only(m)
+    fixed_had_replicates: Dict[str, List[str]] = {}
     for a in m["analyses"]:
         a = _normalize_analysis(a)
         aid = a["id"]
@@ -995,6 +1349,19 @@ def run_manifest(
             deviations.append({"kind": "replicates_unavailable", "analysis": aid,
                                "detail": "manifest requires replicate SEs; none supplied, analysis not run"})
             continue
+        if census_vre_source(m) and replicates is None and a["method"] in REPLICATE_METHODS:
+            deviations.append({"kind": "replicates_unavailable", "analysis": aid,
+                               "detail": "manifest declares Census VRE replicates; none were fetched or published "
+                                         "for its variables (see replicates.unavailable), analysis not run"})
+            continue
+        if rep_overlap and a["method"] in REPLICATE_METHODS:
+            deviations.append({"kind": "replicates_overlapping_releases", "analysis": aid,
+                               "detail": rep_overlap + "; analysis not run"})
+            continue
+        if aid in declared_fixed and work_reps is not None:
+            had = [v for v in declared_fixed[aid] if _has_replicate_rows(work_reps, v)]
+            if had:
+                fixed_had_replicates[aid] = had
         try:
             results[aid] = _run_analysis(a, frame, level, work_reps, corr_method)
         except Exception as exc:
@@ -1035,7 +1402,20 @@ def run_manifest(
     complete = not any(d["kind"] in BLOCKING_DEVIATIONS for d in deviations)
     status = STATUS_CONFIRMATORY if complete else STATUS_CONFIRMATORY_INCOMPLETE
     rep_info = None
-    if replicates is not None:
+    if vre_info is not None:
+        rep_info = dict(vre_info)
+        if replicates is not None:
+            digest, reason = replicates_digest(replicates)
+            rep_info.update(rows=int(len(replicates)), sha256=digest)
+            if digest is None:
+                rep_info["sha256_unavailable"] = reason
+        if derived_on_replicates:
+            rep_info["derived_on_replicates"] = list(derived_on_replicates)
+            rep_info["derived_on_replicates_rows"] = derived_on_replicates
+        scaled = [v for a in adjustment_log for v in a["variables"]]
+        if scaled and replicates is not None:
+            rep_info["scaled_by_adjustments"] = scaled
+    elif replicates is not None:
         if replicates_synthetic is None:
             attrs = getattr(replicates, "attrs", {}) or {}
             replicates_synthetic = bool(attrs.get("synthetic", source["synthetic"]))
@@ -1050,6 +1430,16 @@ def run_manifest(
         scaled = [v for a in adjustment_log for v in a["variables"]]
         if scaled:
             rep_info["scaled_by_adjustments"] = scaled
+    if rep_info is not None and declared_fixed:
+        rep_info["declared_covariates_only"] = declared_fixed
+        if fixed_had_replicates:
+            # the hashed declaration governs: the outcome stays fixed although replicates were available
+            rep_info["covariates_only_outcome_had_replicates"] = fixed_had_replicates
+            rep_info.setdefault("notes", []).extend(
+                f"analysis {aid}: replicate_scope 'covariates_only' was declared and the outcome {names} was held "
+                "at its estimate in every refit as pre-registered, although replicates were available for it in "
+                "this run; se_sampling excludes the outcome's sampling error"
+                for aid, names in fixed_had_replicates.items())
     tagged = {aid: _tag(r, h, aid, status) for aid, r in results.items()}
     run_info = {"manifest_hash": h, "analysis_status": status, "deviations": deviations,
                 "exclusions": exclusion_log, "extraction": extraction, "n_units": None if frame is None
@@ -1068,6 +1458,25 @@ def run_manifest(
     if m.get("adjustments"):
         out_res["adjustments"] = adjustment_log
     return out_res
+
+
+def _replicate_overlap(replicates: Any) -> Optional[str]:
+    """Why caller-supplied replicates cannot be used (their releases' 5-year periods overlap), or None."""
+    if isinstance(replicates, Mapping):  # {release: frame}
+        years = [int(y) for y in replicates if str(y).isdigit()]
+    elif isinstance(replicates, pd.DataFrame) and "Year" in replicates.columns:
+        years = sorted({int(y) for y in pd.to_numeric(replicates["Year"], errors="coerce").dropna()})
+    else:
+        return None
+    return release_overlap_message(years, "caller-supplied replicates")
+
+
+def _has_replicate_rows(replicates: Any, name: str) -> bool:
+    """True when the replicate long frame has rows for manifest variable ``name``."""
+    try:
+        return bool((replicates["variable"].astype(str) == str(name)).any())
+    except Exception:  # noqa: BLE001 - malformed replicates are reported by the analysis itself
+        return False
 
 
 def _replicate_rows(frame: pd.DataFrame, name: str) -> Dict[str, int]:
@@ -1131,39 +1540,210 @@ def _derive_replicates(frame: pd.DataFrame, replicates: Any,
     return out, combined, {name: counts[name] for name in derived}
 
 
+def _census_vre_replicates(m: Mapping[str, Any], frame: pd.DataFrame, codes_by_year: Mapping[str, Mapping[int, str]],
+                           client: Any = None) -> Tuple[Optional[pd.DataFrame], Dict[str, Any]]:
+    """Fetch the Census VRE files for the manifest's variables, geography and releases with
+    :func:`census.replicate.fetch_vre` (and its cache) and return (replicate long frame, record).
+
+    The long frame has GEOID, Year, variable (the manifest variable name), estimate and the 80
+    replicates, for the analysis frame's units only. The record lists every file (URL, SHA-256 of
+    the file as downloaded, release, summary level, published-MOE self-check) and every variable
+    without published replicates (``unavailable``: table not on the release's VRE list, or the
+    line missing from the file). Raises when a published file cannot be fetched."""
+    from . import replicate as vre
+    from .analysis import REPLICATE_COLUMNS
+    from .pipeline import expand_states
+    geo = m["geography"]
+    level = _vre_level(geo["level"])
+    sumlev = vre.sumlev_for(level)
+    states: List[Optional[str]] = []
+    for st in manifest_states(geo):
+        states += list(expand_states(st)) if st else []
+    calls: List[Optional[str]] = sorted(set(states)) if sumlev in vre.PER_STATE_SUMLEVS else [None]
+    if not calls:  # per-state files and no state: nothing could be fetched (validation requires a state)
+        raise ValueError(f"Census VRE files of summary level {sumlev} ({geo['level']}) are published per state, "
+                         "and the manifest geography names no state (geography.state or geography.states), so "
+                         "no VRE file could be requested")
+    units = frame[["GEOID", "Year"]].astype({"GEOID": str, "Year": "int64"})
+    releases = [int(r) for r in m["releases"]]
+    names_by_table: Dict[str, List[str]] = {}
+    for v in m["variables"]:
+        names_by_table.setdefault(str(_table_of(v)), []).append(str(v["name"]))
+    files: List[Dict[str, Any]] = []
+    unavailable: List[Dict[str, Any]] = []
+    parts: List[pd.DataFrame] = []
+    covered: Dict[str, List[int]] = {}
+    for table, names in names_by_table.items():
+        for year in releases:
+            info = vre.vre_availability(table, year, level)
+            if not info["available"]:
+                unavailable += [{"variable": n, "table": table, "release": year, "reason": info["reason"]}
+                                for n in names]
+                continue
+            want = set(units.loc[units["Year"] == year, "GEOID"])
+            frames = []
+            for st in calls:
+                f = vre.fetch_vre(table, year, level, state_code=st, client=client)
+                files.append({"table": table, "release": year, "summary_level": f.attrs.get("summary_level"),
+                              "state_code": f.attrs.get("state_code"), "url": f.attrs.get("source_url"),
+                              "sha256": f.attrs.get("sha256"), "moe_check": f.attrs.get("moe_check")})
+                frames.append(f[f["GEOID"].astype(str).isin(want)])
+            rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            for n in names:
+                code = (codes_by_year.get(n) or {}).get(year)
+                sub = rows[rows["variable"] == code] if code is not None and len(rows) else rows.iloc[0:0]
+                if sub.empty:
+                    unavailable.append({"variable": n, "table": table, "release": year,
+                                        "reason": f"{code or 'no code'} has no rows in the {table} VRE file for "
+                                                  "the analysed units"})
+                    continue
+                part = sub[["GEOID", "estimate"] + REPLICATE_COLUMNS].copy()
+                part.insert(1, "Year", int(year))
+                part.insert(2, "variable", n)
+                parts.append(part)
+                covered.setdefault(n, []).append(int(year))
+    reps = pd.concat(parts, ignore_index=True) if parts else None
+    if reps is not None:
+        reps.attrs["synthetic"] = False
+    record = {"source": "census_vre", "synthetic": False, "files": files, "variables": covered,
+              "unavailable": unavailable, "documentation": vre.VRE_DOCUMENTATION}
+    return reps, record
+
+
+def _scale_rows(frame: pd.DataFrame, replicates: Any, variables: List[str], rows: np.ndarray, factor: float,
+                year: Optional[int]) -> Tuple[pd.DataFrame, Any]:
+    """Multiply estimates and SEs of ``variables`` on ``rows`` (and their replicates of release
+    ``year``) by ``factor`` (the CPI conversion to the dollar year)."""
+    from .analysis import REPLICATE_COLUMNS
+    frame = frame.copy()
+    for v in variables:
+        for col in (v, f"{v}_se"):
+            vals = pd.to_numeric(frame[col], errors="coerce").to_numpy(float).copy()
+            vals[rows] = vals[rows] * factor
+            frame[col] = vals
+    if replicates is not None:
+        reps = replicates.copy()
+        sel = reps["variable"].isin(variables).to_numpy(copy=True)
+        if year is not None:
+            sel = sel & (pd.to_numeric(reps["Year"]).astype(int) == int(year)).to_numpy()
+        cols = ["estimate"] + [c for c in REPLICATE_COLUMNS if c in reps.columns]
+        reps[cols] = reps[cols].astype(float)
+        reps.loc[sel, cols] = reps.loc[sel, cols].to_numpy(float) * factor
+        replicates = reps
+    return frame, replicates
+
+
 def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any],
-                       release: int) -> Tuple[Optional[pd.DataFrame], Any, List[Dict[str, Any]], Optional[str]]:
+                       releases: List[int]) -> Tuple[Optional[pd.DataFrame], Any, List[Dict[str, Any]], Optional[str]]:
     """Run the manifest's ``adjustments`` in order with the place_adjust_frame core.
-    Returns (frame, replicates, log, failure message or None)."""
+
+    Per release (D15-2): with a declared ``dollar_year``, estimates, SEs and replicates of the
+    release are first converted to dollars of that year with the declared price index
+    (CPI(dollar_year) / CPI(release); R-CPI-U-RS by default, the index the Census Bureau uses for
+    ACS dollars), then divided by the RPP / 100 of the release's own ``rpp_years`` entry (one
+    release: ``rpp_year``). Returns (frame, replicates, log, failure message or None)."""
     from . import rpp
+    from .inflation import INDEX_DISPLAY, get_cpi, price_index_info
     from .pipeline import normalize_geo_level
     from .workflows_microdata import place_adjust
     level = normalize_geo_level(m["geography"]["level"])
     log: List[Dict[str, Any]] = []
+    multi = len(releases) > 1
+    if frame.empty:  # e.g. exclusions removed every unit: nothing to scale; the analyses report the outcome
+        return frame, replicates, log, None
     for i, adj in enumerate(m.get("adjustments") or []):
         variables = [str(v) for v in adj["variables"]]
         areas = adj.get("areas", default_rpp_areas(level))
-        rpp_year = int(adj["rpp_year"])  # required by validation, so the hash fixes it
+        dollar_year = adj.get("dollar_year")
+        index = adj.get("price_index")
+        rpp_years = {int(k): int(v) for k, v in (adj.get("rpp_years") or {}).items()} \
+            or {int(releases[0]): int(adj["rpp_year"])}  # required by validation, so the hash fixes them
+        per_release: List[Dict[str, Any]] = []
+        parts: List[pd.DataFrame] = []
+        rep_parts: List[pd.DataFrame] = []
         try:
-            res = place_adjust(frame, variables, release, areas=areas, replicates=replicates, rpp_year=rpp_year)
+            if multi and replicates is not None and "Year" not in replicates.columns:
+                raise ValueError("replicates need a Year column when the manifest has several releases")
+            # one release: the whole frame (as in Round 14); several: the rows of each release
+            years_col = pd.to_numeric(frame["Year"]).astype(int).to_numpy() if multi \
+                else np.full(len(frame), int(releases[0]))
+            work, wreps = frame, replicates
+            cpis: Dict[int, Optional[Dict[str, Any]]] = {}
+            for release in releases:  # 1. price index: release dollars -> dollar_year dollars
+                cpis[release] = None
+                if dollar_year is not None:
+                    c_from, c_to = get_cpi(int(release), index=index), get_cpi(int(dollar_year), index=index)
+                    cpis[release] = {"index": index, "from_year": int(release), "to_year": int(dollar_year),
+                                     "index_from": c_from, "index_to": c_to, "factor": c_to / c_from}
+                    work, wreps = _scale_rows(work, wreps, variables, years_col == int(release), c_to / c_from,
+                                              int(release) if multi else None)
+            done: List[int] = []
+            for release in releases:  # 2. RPP of the release's own rpp_years entry
+                rows = years_col == int(release)
+                if not rows.any():
+                    continue
+                sub_reps = wreps
+                if wreps is not None and multi:
+                    sub_reps = wreps[pd.to_numeric(wreps["Year"]).astype(int).to_numpy() == int(release)]
+                res = place_adjust(work[rows], variables, int(release), areas=areas, replicates=sub_reps,
+                                   rpp_year=rpp_years[int(release)])
+                parts.append(res["frame"])
+                if sub_reps is not None:
+                    rep_parts.append(res["replicates"])
+                done.append(int(release))
+                cpi = cpis[release]
+                notes = ([f"PRICE INDEX: release {release} dollars converted to {cpi['to_year']} dollars with "
+                          f"{INDEX_DISPLAY.get(index, index)} (factor {cpi['factor']:.6f}) before the RPP division "
+                          "below."] if cpi else []) + list(res["notes"])
+                per_release.append({"release": int(release), "rpp_year": res["rpp_year"], "cpi": cpi,
+                                    "rpp_year_matches_release": res["rpp_year"] == int(release),
+                                    "rpp_areas": res["rpp_areas"], "boundary_source": res["boundary_source"],
+                                    "rows": int(len(res["frame"])), "notes": notes,
+                                    "advisories": res["advisories"], "custom_table": res["custom_table"]})
+            if not per_release:
+                raise ValueError("no rows to adjust")
         except Exception as exc:  # noqa: BLE001 - recorded as a blocking deviation, never substituted
             return None, replicates, log, f"adjustments[{i}] ({adj.get('type')}): {type(exc).__name__}: {exc}"
-        frame = res["frame"]
-        if replicates is not None:
-            replicates = res["replicates"]
-        notes = list(res["notes"])
+        if multi:
+            frame = pd.concat(parts).loc[frame.index[np.isin(years_col, done)]]
+            if wreps is not None:
+                rest = wreps[~np.isin(pd.to_numeric(wreps["Year"]).astype(int).to_numpy(), done)]
+                replicates = pd.concat([rest] + rep_parts, ignore_index=True)
+        else:
+            frame = parts[0]
+            if wreps is not None:
+                replicates = rep_parts[0]
         info = rpp.price_parity_info()
-        table: Dict[str, Any] = {"source": "custom" if res["custom_table"] else "bundled"}
-        if res["custom_table"]:
-            table.update(res["custom_table"])
+        custom = next((r["custom_table"] for r in per_release if r["custom_table"]), None)
+        table: Dict[str, Any] = {"source": "custom" if custom else "bundled"}
+        if custom:
+            table.update(custom)
         else:
             table["sha256"] = (info.get("csv_sha256") or {}).get("rpp.csv")
-        log.append({"type": adj["type"], "variables": variables, "areas": areas, "dollar_year": int(release),
-                    "rpp_year": res["rpp_year"], "rpp_year_source": "manifest",
-                    "rpp_year_matches_release": res["rpp_year"] == int(release),
-                    "rpp_areas": res["rpp_areas"], "boundary_source": res["boundary_source"],
-                    "rpp_table": table, "rows": int(len(frame)), "notes": notes,
-                    "advisories": res["advisories"], "applied_by_default": False})
+        first = per_release[0]
+        entry: Dict[str, Any] = {
+            "type": adj["type"], "variables": variables, "areas": areas,
+            "dollar_year": int(dollar_year) if dollar_year is not None else int(releases[0]),
+            "rpp_year": first["rpp_year"] if not multi else None, "rpp_year_source": "manifest",
+            "rpp_year_matches_release": all(r["rpp_year_matches_release"] for r in per_release),
+            "rpp_areas": first["rpp_areas"] if not multi else
+            [dict(a, release=r["release"]) for r in per_release for a in r["rpp_areas"]],
+            "boundary_source": first["boundary_source"], "rpp_table": table,
+            "rows": int(len(frame)), "notes": [n for r in per_release for n in r["notes"]],
+            "advisories": sorted({a for r in per_release for a in r["advisories"]}), "applied_by_default": False}
+        if dollar_year is not None:
+            pinfo = price_index_info(index)
+            entry["price_index"] = {"index": index, "name": INDEX_DISPLAY.get(index, index),
+                                    "sha256": pinfo.get("custom_table", {}).get("sha256") or pinfo.get("csv_sha256"),
+                                    "source": "custom" if pinfo.get("custom_table") else "bundled"}
+            entry["order"] = "price index to dollar_year first, then the RPP of each release's rpp_year"
+        if multi or adj.get("rpp_years") is not None:
+            entry["rpp_years"] = {str(r["release"]): r["rpp_year"] for r in per_release}
+            entry["releases"] = [{k: r[k] for k in ("release", "rpp_year", "cpi", "rpp_year_matches_release",
+                                                    "boundary_source", "rows")} for r in per_release]
+        elif dollar_year is not None:
+            entry["releases"] = [{k: r[k] for k in ("release", "rpp_year", "cpi")} for r in per_release]
+        log.append(entry)
     return frame, replicates, log, None
 
 
@@ -1336,7 +1916,9 @@ def _write_bundle(folder: Path, m, h, results, hyp_df, run_info, citation) -> Di
     if "adjustments" in run_info:  # RPP provenance: years, areas, table hash
         provenance["adjustments"] = [{k: a[k] for k in ("type", "variables", "areas", "dollar_year", "rpp_year",
                                                         "rpp_year_source", "rpp_areas", "boundary_source",
-                                                        "rpp_table")} for a in run_info["adjustments"]]
+                                                        "rpp_table", "rpp_years", "price_index", "order",
+                                                        "releases") if k in a}
+                                     for a in run_info["adjustments"]]
     return results_bundle(folder, tables=tables, figures=figures_, methods=methods_section(m, run_info),
                           results=payload, provenance=provenance, citation=citation)
 
@@ -1370,6 +1952,41 @@ _METHOD_TEXT = {
 }
 
 
+def _multi_release_adjustment_text(m: Mapping[str, Any], adj: Mapping[str, Any],
+                                   done: Optional[Mapping[str, Any]]) -> str:
+    """Methods text of an adjustment with a declared dollar year (CPI, then RPP; D15-2)."""
+    from .inflation import INDEX_DISPLAY
+    index = INDEX_DISPLAY.get(str(adj.get("price_index")), str(adj.get("price_index")))
+    rpp_years = adj.get("rpp_years") or {str(m.get("releases", [None])[0]): adj.get("rpp_year")}
+    areas = (done or {}).get("areas") or adj.get("areas") or "default"
+    text = (f"- Price adjustment{' (after the exclusions)' if m.get('exclusions') else ''}, in this order: "
+            f"(1) the values of {', '.join(adj.get('variables', []))} from each release were converted from the release's "
+            f"end-year dollars to {adj['dollar_year']} dollars with the {index} (annual averages; factor "
+            f"{index}({adj['dollar_year']}) / {index}(release end year)); (2) the converted values were divided by "
+            "the BEA Regional Price Parity (U.S. = 100) / 100 of each unit's area for the release's own RPP year ("
+            + ", ".join(f"release {k}: RPP {v}" for k, v in sorted(rpp_years.items())) + ")"
+            + (" (the county's metropolitan statistical area, else the state's nonmetropolitan portion; CBSA "
+               "membership from Census boundaries of the OMB 23-01 delineation)" if areas == "county_metro"
+               else " (its state)" if areas == "state" else "")
+            + ". Estimates, SEs and any replicates are scaled by the same factors and CVs are unchanged. Both "
+            "factors are multiplicative, so the order does not change the values; it is stated so the price "
+            "concepts are clear (national inflation first, then place). The price index and RPPs are treated "
+            "as fixed: their own estimation error is not in any SE or interval.")
+    if done:
+        for r in done.get("releases") or []:
+            cpi = r.get("cpi") or {}
+            if cpi:
+                text += (f"\n  Release {r['release']}: {index} {cpi['index_from']} -> {cpi['index_to']} (factor "
+                         f"{cpi['factor']:.6f}); RPP year {r['rpp_year']}.")
+        pidx = done.get("price_index") or {}
+        text += (f"\n  {len(done.get('rpp_areas') or [])} release-by-RPP-area entries were used; RPP table "
+                 + (f"custom {done['rpp_table'].get('path')} (SHA-256 {done['rpp_table'].get('sha256')}, not verified)"
+                    if done["rpp_table"].get("source") == "custom"
+                    else f"bundled (SHA-256 {done['rpp_table'].get('sha256')})")
+                 + f"; price index table {pidx.get('source', 'bundled')} (SHA-256 {pidx.get('sha256')}).")
+    return text
+
+
 def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, Any]] = None) -> str:
     """Markdown methods text matching what the manifest specifies (and, with
     ``results`` = the run info of :func:`run_manifest`, what actually ran)."""
@@ -1380,7 +1997,19 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
     run = results or {}
     source = run.get("data_source") or effective_data_source(m)
     rep_info = run.get("replicates")
-    if rep_info:
+    if rep_info and rep_info.get("source") == "census_vre":
+        files = rep_info.get("files") or []
+        tabs = sorted({f["table"] for f in files})
+        rep_source = ("the 80 replicate estimates of the Census Bureau's variance replicate estimate (VRE) files "
+                      f"fetched by the toolkit ({len(files)} file(s): tables {', '.join(tabs) or 'none'}; URLs and "
+                      "SHA-256 of each file in run.json"
+                      + (f"; canonical SHA-256 of the replicates used `{rep_info['sha256']}`" if rep_info.get("sha256")
+                         else "") + ")")
+        rep_short = " and replicate-based standard errors from Census VRE files"
+    elif results is None and census_vre_source(m):
+        rep_source = "the 80 replicate estimates of the Census VRE files fetched for the manifest's tables"
+        rep_short = " and replicate-based standard errors from Census VRE files"
+    elif rep_info:
         kind = "synthetic caller-supplied" if rep_info.get("synthetic") else "caller-supplied"
         rep_source = (f"the {kind} replicate estimates (not fetched from Census variance replicate files by "
                       + (f"the toolkit; canonical SHA-256 `{rep_info['sha256']}`)" if rep_info.get("sha256")
@@ -1419,9 +2048,13 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                  "rather than being substituted):")
     lines += [f"- `{v['name']}`: {v['ref']}" + (f" (table {v['table']})" if v.get("table") else "")
               for v in m.get("variables", [])]
-    if len(m.get("releases", [])) > 1:
-        lines.append("Multiple releases were linked through the concordance; overlapping 5-year periods "
-                     "share sample years and are not independent.")
+    if len(manifest_releases(m)) > 1:
+        if release_overlap_message(manifest_releases(m), "releases") is not None:
+            lines.append("Multiple releases were linked through the concordance; overlapping 5-year periods "
+                         "share sample years and are not independent.")
+        else:
+            lines.append("Multiple releases were linked through the concordance; the 5-year periods do not "
+                         "overlap (no shared sample years), so their estimates come from independent samples.")
     if m.get("aggregation"):
         lines.append(f"Geographies were aggregated into {len(set(m['aggregation']['mapping'].values()))} groups; "
                      "aggregate MOEs use replicate variance where available, else the ACS approximation "
@@ -1450,6 +2083,9 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
     run_adj = {i: a for i, a in enumerate(run.get("adjustments") or [])}
     for i, adj in enumerate(m.get("adjustments") or []):
         done = run_adj.get(i)
+        if adj.get("dollar_year") is not None:
+            lines.append(_multi_release_adjustment_text(m, adj, done))
+            continue
         year = (done or {}).get("rpp_year") or adj.get("rpp_year")
         areas = (done or {}).get("areas") or adj.get("areas") or "default"
         lines.append(f"- Price adjustment{' (after the exclusions)' if m.get('exclusions') else ''}: "
@@ -1470,6 +2106,11 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                          + (f"custom {done['rpp_table'].get('path')} (SHA-256 {done['rpp_table'].get('sha256')}, "
                             "not verified)" if done["rpp_table"].get("source") == "custom"
                             else f"bundled (SHA-256 {done['rpp_table'].get('sha256')})") + ".")
+    if rep_info and rep_info.get("source") == "census_vre" and rep_info.get("unavailable"):
+        miss = sorted({f"{u['variable']} ({u['table']})" for u in rep_info["unavailable"]})
+        lines.append(f"No Census VRE replicates are published for {', '.join(miss)}; replicate analyses using "
+                     "them as variables with sampling error stop under the strict confirmatory policy unless "
+                     "the manifest declares otherwise (below).")
     lines.append("Rows with missing or undefined estimates were dropped analysis by analysis (complete cases).")
     lines += ["", "### Analyses", ""]
     for a in m.get("analyses", []):
@@ -1488,6 +2129,25 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                                       "(se_sampling)", "se_total": "combined SE (se_total)"}[info["basis_column"]],
                            cov=", ".join(a.get("error_covariates") or args.get("error_covariates") or []),
                            rep=rep_short if (a.get("replicates") or rep_info) else "", rep_source=rep_source)
+        if a.get("replicate_scope") == "covariates_only":
+            held = _formula_names(str(a.get("formula", "")).split("~")[0])
+            had = ((rep_info or {}).get("covariates_only_outcome_had_replicates") or {}).get(a["id"])
+            text += (f" Pre-registered replicate scope `covariates_only`: the outcome ({', '.join(held)}) was held "
+                     "at its estimate in every refit"
+                     + (" as declared, although replicates were available for it in this run" if had
+                        else " (declared because it has no published replicates)")
+                     + ", so se_sampling covers the covariates' sampling error only; the stated interval does not "
+                     "use se_sampling alone.")
+        if a.get("formula") and "C(Year)" in str(a["formula"]) and len(manifest_releases(m)) > 1:
+            if release_overlap_message(manifest_releases(m), "releases") is None:
+                text += (" `C(Year)` contrasts the releases; replicate r of each release enters refit r together. "
+                         "The ACS 5-year periods of these releases share no sample years, so their replicates come "
+                         "from independent samples: the cross-release products have expectation zero and the "
+                         "replicate variance of the contrast estimates the sum of the releases' sampling variances.")
+            else:
+                text += (" `C(Year)` contrasts releases whose ACS 5-year periods overlap (shared sample years): "
+                         "their estimates are not independent, and no standard error reported here accounts for "
+                         "that covariance (replicate SEs across overlapping releases are refused).")
         target = a.get("formula") or a.get("variables") or a.get("variable")
         lines.append(f"- **{a['id']}** (`{target}`): {text}")
         cites += refs

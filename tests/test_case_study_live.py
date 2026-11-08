@@ -117,6 +117,19 @@ class TestCaseStudyLive(unittest.TestCase):
         self.assertEqual(prov["adjustments"][0]["rpp_year"], 2024)
         self.assertEqual(len(prov["adjustments"][0]["rpp_areas"]), 31)
 
+    def test_change_across_releases(self):
+        """PLAN_ROUND_15 A3 (section 8): two releases, CPI then RPP, Census VRE replicates fetched."""
+        from tests.test_manifest_releases import LIVE_RESULT
+
+        run = [o for n, o in self.outputs if n == "run_manifest"][1]
+        self.assertEqual(run["analysis_status"], "confirmatory")
+        self.assertEqual(run["deviations"], [])
+        self.assertEqual(run["replicates"]["source"], "census_vre")
+        self.assertEqual(len(run["replicates"]["files"]), 4)
+        h1 = run["hypotheses"][0]
+        for k, v in LIVE_RESULT.items():
+            self.assertAlmostEqual(h1[k], v, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

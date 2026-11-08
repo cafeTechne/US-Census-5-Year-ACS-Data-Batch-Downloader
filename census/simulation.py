@@ -408,8 +408,10 @@ def fast_config(**overrides: Any) -> SimConfig:
 # output is unchanged; use spatial_config() to run them, e.g.
 # run_study(spatial_config(fast=True), studies=list(SPATIAL_STUDIES)).
 
-SPATIAL_REPS_FULL = {"spatial_fay_herriot": 1000, "morans_i_replicate_se": 2000}
-SPATIAL_REPS_FAST = {"spatial_fay_herriot": 40, "morans_i_replicate_se": 150}
+SPATIAL_REPS_FULL = {"spatial_fay_herriot": 1000, "morans_i_replicate_se": 2000,
+                     "spatial_regression_coverage": 1000, "local_morans_size": 1000}
+SPATIAL_REPS_FAST = {"spatial_fay_herriot": 40, "morans_i_replicate_se": 150,
+                     "spatial_regression_coverage": 6, "local_morans_size": 30}
 SAR_RHO = 0.5           # SAR(1) autocorrelation of area effects (spatial FH study)
 MORAN_RHO = 0.6         # SAR(1) autocorrelation of the true-value surface (Moran study)
 MORAN_SIGNAL_SD = 15.0  # SD of the SAR innovations (true-value surface, mean 50)
@@ -539,9 +541,260 @@ def study_morans_i_replicate_se(cfg: SimConfig, reps: int) -> List[Dict[str, Any
                              covered_true, {"attenuation": extra["attenuation"]}, gated=False)]
 
 
+# Round 15 (PLAN_ROUND_15 workstream B, decision D15-1): info rows only, never gated.
+SPREG_SIDE = 12                  # 12 x 12 rook lattice (144 areas, close to cfg.n_areas)
+SPREG_RHOS = (0.0, 0.3, 0.6)     # rho (lag DGP) / lambda (error DGP)
+SPREG_SECONDARY_SHARE = 0.5      # share of reps for the reference (no sampling error) and noisy-x cells
+SPREG_NOISY_X_RHO = 0.3
+LM_SIZE_ALPHA = 0.05             # level of lm_diagnostics' decision rule
+LISA_SIDE = 12
+LISA_MU = 50.0                   # mean of the true values
+LISA_TAU = 10.0                  # SD of the independent true values
+LISA_BLOCK = 4                   # clustered alternative: a 4 x 4 hot spot ...
+LISA_SHIFT = 1.5 * LISA_TAU      # ... raised by 1.5 true-value SDs
+
+
+def _rate_row(method: str, target: str, rates: Sequence[float], nominal_rate: float,
+              extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Info row for an error rate: coverage = 1 - mean rate, size = mean rate.
+
+    ``rates``: one rate per repetition (0/1 for a family-wise event, a share
+    for a per-area rate); the MC SE is the between-repetition SE, since areas
+    in one repetition share a map.
+    """
+    v = np.asarray(rates, float)
+    r = int(v.size)
+    rate = float(v.mean()) if r else float("nan")
+    row = {"method": method, "target": target, "reps": r, "nominal": 1 - nominal_rate, "coverage": 1 - rate,
+           "mc_se": float(v.std(ddof=1) / math.sqrt(r)) if r > 1 else float("nan"), "status": "info",
+           "size": rate, "nominal_size": nominal_rate}
+    row.update(extra or {})
+    return row
+
+
+def study_spatial_regression_coverage(cfg: SimConfig, reps: int,
+                                      rhos: Sequence[float] = SPREG_RHOS) -> List[Dict[str, Any]]:
+    """Default intervals of census.spatial.spatial_regression under ACS-like outcome error (info only).
+
+    12 x 12 rook lattice (row-standardized). Each repetition draws
+    x ~ N(cfg.x_mean, cfg.x_sd^2) and e ~ N(0, cfg.sigma_u^2), then the true
+    outcome from a spatial lag DGP, y* = (I - rho W)^-1 (10 + beta x + e), or
+    a spatial error DGP, y* = 10 + beta x + (I - lambda W)^-1 e, at each
+    rho/lambda in ``rhos``. The published outcome adds independent sampling
+    error with SE = tract-profile CV x the mean of y* (the outcome is
+    measured with error; the model has no term for it). Every estimator the
+    tool offers (ML and GMM; the tool default, marked "[tool default]" and
+    ``tool_default``, is GMM for lag and ML for error) is fitted to the same
+    draws through spatial_regression with its other defaults (population
+    target: se_model, 90% intervals, ml_method 'full'); reported: coverage of beta and of
+    rho/lambda, and bias. Secondary cells (SPREG_SECONDARY_SHARE of the reps):
+    the same DGPs without sampling error (rho > 0; separates estimator
+    behavior from the measurement-error effect), and a noisy covariate (x
+    also measured with tract-profile error) at rho = SPREG_NOISY_X_RHO.
+    LM diagnostics: rejection rates at 0.05 and the share of fits where the
+    decision rule suggests a spatial model, pooled over the two rho = 0
+    cells with sampling error (no spatial dependence). Each (model, rho,
+    scenario) cell has its own seed, so cells do not depend on run order.
+    """
+    from .spatial import DEFAULT_METHODS, SPATIAL_METHODS, SPATIAL_MODELS, spatial_regression
+    side = SPREG_SIDE
+    m = side * side
+    g = _geoids(m)
+    w = lattice_weights(side, g)
+    W = w.full()[0]
+    n_sec = max(int(round(reps * SPREG_SECONDARY_SHARE)), 1)
+    rows: List[Dict[str, Any]] = []
+    lm_names = ("lm_error", "lm_lag", "robust_lm_error", "robust_lm_lag", "lm_sarma")
+    lm_rej: Dict[str, List[bool]] = {k: [] for k in lm_names}
+    lm_spatial: List[bool] = []
+    scenarios = (("acs", "ACS-like outcome error"), ("none", "reference: no sampling error"),
+                 ("noisy_x", "ACS-like outcome and covariate error"))
+    for mi, model in enumerate(SPATIAL_MODELS):
+        sp = "rho" if model == "lag" else "lambda"
+        for ri, rho in enumerate(rhos):
+            Binv = sar_inverse(W, rho)
+            mean_y = (10.0 + cfg.beta * cfg.x_mean) / (1 - rho) if model == "lag" else 10.0 + cfg.beta * cfg.x_mean
+            for si, (scen, scen_label) in enumerate(scenarios):
+                if (scen == "none" and rho == 0) or (scen == "noisy_x" and rho != SPREG_NOISY_X_RHO):
+                    continue
+                n_reps = reps if scen == "acs" else n_sec
+                rng = np.random.default_rng(cfg.seed + 400 + 100 * mi + 10 * ri + si)
+                est = {k: {"x": [], sp: []} for k in SPATIAL_METHODS}
+                cov = {k: {"x": [], sp: []} for k in SPATIAL_METHODS}
+                failures = {k: 0 for k in SPATIAL_METHODS}
+                for _ in range(n_reps):
+                    x = cfg.x_mean + cfg.x_sd * rng.standard_normal(m)
+                    e = cfg.sigma_u * rng.standard_normal(m)
+                    ystar = Binv @ (10.0 + cfg.beta * x + e) if model == "lag" else 10.0 + cfg.beta * x + Binv @ e
+                    ses: Dict[str, np.ndarray] = {}
+                    y, xo = ystar, x
+                    if scen != "none":
+                        ses["y"] = draw_cv(m, "tract", rng) / 100 * mean_y
+                        y = ystar + ses["y"] * rng.standard_normal(m)
+                    if scen == "noisy_x":
+                        ses["x"] = draw_cv(m, "tract", rng) / 100 * cfg.x_mean
+                        xo = x + ses["x"] * rng.standard_normal(m)
+                    frame = acs_frame(g, {"y": y, "x": xo}, ses)
+                    for k in SPATIAL_METHODS:
+                        try:
+                            res = spatial_regression("y ~ x", frame, w, model=model, method=k)
+                        except Exception:  # noqa: BLE001 - counted and reported
+                            failures[k] += 1
+                            continue
+                        tab = res.coefficients.set_index("term")
+                        for term, truth in (("x", cfg.beta), (sp, rho)):
+                            est[k][term].append(float(tab.loc[term, "estimate"]))
+                            cov[k][term].append(bool(tab.loc[term, "ci_lower"] <= truth <= tab.loc[term, "ci_upper"]))
+                        if scen == "acs" and rho == 0 and k == SPATIAL_METHODS[0]:
+                            lm = res.diagnostics["lm_tests"]
+                            for name in lm_names:
+                                lm_rej[name].append(lm[name]["p_value"] < LM_SIZE_ALPHA)
+                            lm_spatial.append(not lm["suggested_model"].startswith("ols"))
+                for k in SPATIAL_METHODS:
+                    for term, truth in (("x", cfg.beta), (sp, rho)):
+                        e_k = np.asarray(est[k][term], float)
+                        dflt = k == DEFAULT_METHODS[model]
+                        extra = {"model": model, "estimator": k, "rho": rho, "scenario": scen, "term": term,
+                                 "tool_default": dflt,
+                                 "bias": float(e_k.mean() - truth) if e_k.size else float("nan"),
+                                 "fit_failures": failures[k]}
+                        if term == "x":
+                            extra["rel_bias"] = extra["bias"] / cfg.beta
+                        rows.append(coverage_summary(
+                            f"spatial_regression {model} {'ML' if k == 'ml' else 'GMM'}"
+                            f"{' [tool default]' if dflt else ''} (default intervals), "
+                            f"{side}x{side} rook lattice, {sp}={rho}, {scen_label}",
+                            f"{'beta' if term == 'x' else sp} ({truth})", cov[k][term], extra, gated=False))
+    for name in lm_names:
+        rows.append(_rate_row(f"lm_diagnostics {name}, no spatial dependence, ACS-like outcome error",
+                              f"size of the {LM_SIZE_ALPHA:g} test (coverage = 1 - size)", lm_rej[name],
+                              LM_SIZE_ALPHA, {"term": name}))
+    rows.append(_rate_row("lm_diagnostics decision rule, no spatial dependence, ACS-like outcome error",
+                          "share of fits suggesting a spatial model (coverage = 1 - share)", lm_spatial,
+                          float("nan"), {"term": "suggested_model"}))
+    return rows
+
+
+def _lisa_gradient_rank(side: int) -> np.ndarray:
+    """Rank (0 = lowest) of each lattice cell along the diagonal, for spatially clustered SEs."""
+    r, c = np.divmod(np.arange(side * side), side)
+    return np.argsort(np.argsort(r + c + 1e-3 * r, kind="mergesort"), kind="mergesort")
+
+
+def study_local_morans_size(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
+    """False positives and power of census.spatial.local_morans with its defaults (info only).
+
+    12 x 12 rook lattice. True values are independent N(LISA_MU, LISA_TAU^2);
+    the published values add independent sampling error with SE =
+    tract-profile CV x LISA_MU. Scenarios: (a) CVs assigned at random (the
+    published values are exchangeable: spatial randomness holds); (b) the
+    same CVs sorted along the lattice diagonal (sampling noise, not the
+    values, is spatially clustered, like rural/urban CV gradients);
+    (c) clustered alternative: a LISA_BLOCK x LISA_BLOCK block of true
+    values raised by LISA_SHIFT, CVs at random. The permutation seed is
+    drawn from the cell's generator.
+
+    Each repetition calls local_morans twice on the same map: with its
+    defaults (two-sided p_value = min(1, 2 p_sim), 9999 permutations, BH,
+    alpha 0.10; the ``default`` reading) and with the pre-Round 15 defaults
+    (permutations=999, sided='folded'; the ``previous_default`` reading).
+    Two more readings are derived from the same calls: ``folded_9999`` (BH
+    on the folded p_sim of the 9999-permutation call) and ``two_sided_999``
+    (BH on min(1, 2 p_sim) of the 999-permutation call).
+
+    Reported under the null (a, b): per-area rate of the uncorrected p-value
+    <= alpha, per-area and family-wise rate of significant areas after the
+    correction (under the complete null every discovery is false, so the
+    family-wise rate equals the FDR). Under the alternative (c): power
+    (share of hot-spot areas flagged significant HH) and the false discovery
+    proportion (discoveries outside the hot spot / discoveries, 0 when
+    none), averaged over repetitions.
+    """
+    from .multitest import adjust_pvalues
+    from .spatial import local_morans
+    side = LISA_SIDE
+    m = side * side
+    g = _geoids(m)
+    w = lattice_weights(side, g)
+    r_, c_ = np.divmod(np.arange(m), side)
+    lo = (side - LISA_BLOCK) // 2
+    block = (r_ >= lo) & (r_ < lo + LISA_BLOCK) & (c_ >= lo) & (c_ < lo + LISA_BLOCK)
+    grad = _lisa_gradient_rank(side)
+    alpha = 0.10
+    # key, call, two-sided?, permutations, label
+    readings = (("default", "new", True, 9999,
+                 "[tool default] two-sided p_value = min(1, 2 p_sim), 9999 permutations, BH, alpha 0.10"),
+                ("folded_9999", "new", False, 9999, "folded p_sim, 9999 permutations, BH, alpha 0.10"),
+                ("previous_default", "old", False, 999,
+                 "[previous default] folded p_sim, 999 permutations, BH, alpha 0.10"),
+                ("two_sided_999", "old", True, 999, "two-sided p_value = min(1, 2 p_sim), 999 permutations, BH, "
+                 "alpha 0.10"))
+    rows: List[Dict[str, Any]] = []
+    scenarios = (("null_random_se", "spatial independence, ACS-like SEs at random"),
+                 ("null_clustered_se", "spatial independence, SEs clustered along a gradient"),
+                 ("hot_spot", f"{LISA_BLOCK}x{LISA_BLOCK} hot spot (+{LISA_SHIFT:g}), ACS-like SEs at random"))
+    for si, (scen, label) in enumerate(scenarios):
+        rng = np.random.default_rng(cfg.seed + 500 + si)
+        stats: Dict[str, Dict[str, List[float]]] = {k[0]: {"raw": [], "per_area": [], "fwer": [], "power": [],
+                                                            "fdp": []} for k in readings}
+        for _ in range(reps):
+            theta = LISA_MU + LISA_TAU * rng.standard_normal(m) + (LISA_SHIFT * block if scen == "hot_spot" else 0.0)
+            cv = draw_cv(m, "tract", rng)
+            if scen == "null_clustered_se":
+                cv = np.sort(cv)[grad]
+            se = cv / 100 * LISA_MU
+            y = theta + se * rng.standard_normal(m)
+            frame = acs_frame(g, {"y": y}, {"y": se})
+            seed = int(rng.integers(2 ** 31 - 1))
+            outs = {"new": local_morans(frame, "y", w, seed=seed),
+                    "old": local_morans(frame, "y", w, permutations=999, sided="folded", seed=seed)}
+            for key, call, two, _, _ in readings:
+                out = outs[call]
+                if key in ("default", "previous_default"):  # the tool's own columns
+                    p, sig = out["p_value"].to_numpy(float), out["significant"].to_numpy(bool)
+                else:
+                    ps = out["p_sim"].to_numpy(float)
+                    p = np.minimum(1.0, 2 * ps) if two else ps
+                    sig = np.asarray(adjust_pvalues(p, "bh"), float) <= alpha
+                st = stats[key]
+                st["raw"].append(float(np.mean(p <= alpha)))
+                st["per_area"].append(float(np.mean(sig)))
+                st["fwer"].append(float(sig.any()))
+                if scen == "hot_spot":
+                    hh = out["quadrant"].to_numpy() == "HH"
+                    st["power"].append(float(np.mean(sig[block] & hh[block])))
+                    st["fdp"].append(float((sig & ~block).sum() / max(int(sig.sum()), 1)))
+        for key, _, two, perms, how in readings:
+            st = stats[key]
+            meth = f"local_morans {how}, {side}x{side} rook lattice, {label}"
+            extra = {"scenario": scen, "reading": key, "permutations": perms, "tool_default": key == "default"}
+            if scen == "hot_spot":
+                pw = np.asarray(st["power"])
+                rows.append({"method": meth, "target": f"power: share of the {int(block.sum())} hot-spot areas "
+                             "flagged significant HH (coverage column = power)", "reps": int(pw.size),
+                             "nominal": float("nan"), "coverage": float(pw.mean()),
+                             "mc_se": float(pw.std(ddof=1) / math.sqrt(pw.size)) if pw.size > 1 else float("nan"),
+                             "status": "info", "power": float(pw.mean()), **extra})
+                rows.append(_rate_row(meth, "FDR: discoveries outside the hot spot / discoveries (coverage = 1 - FDR)",
+                                      st["fdp"], alpha, {**extra, "fdr": float(np.mean(st["fdp"]))}))
+                continue
+            pname = "two-sided p_value" if two else "folded p_sim"
+            rows += [
+                _rate_row(meth, f"per-area false-positive rate, uncorrected {pname} <= 0.10 (coverage = 1 - rate)",
+                          st["raw"], alpha, extra),
+                _rate_row(meth, "per-area false-positive rate after correction (coverage = 1 - rate)",
+                          st["per_area"], alpha, extra),
+                _rate_row(meth, "family-wise error rate = FDR under the complete null (coverage = 1 - rate)",
+                          st["fwer"], alpha, extra),
+            ]
+    return rows
+
+
 SPATIAL_STUDIES: Dict[str, Callable[[SimConfig, int], List[Dict[str, Any]]]] = {
     "spatial_fay_herriot": study_spatial_fay_herriot,
     "morans_i_replicate_se": study_morans_i_replicate_se,
+    "spatial_regression_coverage": study_spatial_regression_coverage,  # info only (D15-1)
+    "local_morans_size": study_local_morans_size,                      # info only (D15-1)
 }
 STUDIES.update(SPATIAL_STUDIES)
 

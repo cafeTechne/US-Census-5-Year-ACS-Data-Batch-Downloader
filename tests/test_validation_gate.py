@@ -186,3 +186,53 @@ class TestParallelJobs(unittest.TestCase):
         a = pd.concat(serial, ignore_index=True).drop(columns="seconds")
         b = pd.concat(par, ignore_index=True).drop(columns="seconds")
         self.assertEqual(a.to_csv(index=False), b.to_csv(index=False))
+
+
+class TestRound15SpatialStudies(unittest.TestCase):
+    """PLAN_ROUND_15 B3 (D15-1): spatial regression / local Moran's I studies are info only."""
+
+    NAMES = ("spatial_regression_coverage", "local_morans_size")
+
+    def test_registered_in_default_report_not_required(self):
+        from census.simulation import SPATIAL_REPS_FAST, SPATIAL_REPS_FULL, SPATIAL_STUDIES, STUDIES
+        for name in self.NAMES:
+            self.assertIn(name, STUDIES)  # runnable with --studies
+            self.assertIn(name, SPATIAL_STUDIES)  # and in the default full report (spatial group)
+            self.assertGreater(SPATIAL_REPS_FULL[name], 0)
+            self.assertGreater(SPATIAL_REPS_FAST[name], 0)
+            self.assertNotIn(name, iv.REQUIRED_STUDIES)
+
+    def test_tiny_smoke_runs_are_info_only(self):
+        from census.simulation import FAST, study_local_morans_size, study_spatial_regression_coverage
+        reg = pd.DataFrame(study_spatial_regression_coverage(FAST, 2, rhos=(0.0, 0.3)))
+        lisa = pd.DataFrame(study_local_morans_size(FAST, 2))
+        for df in (reg, lisa):
+            self.assertTrue(len(df))
+            self.assertEqual(set(df["status"]), {"info"})
+            self.assertTrue(df["coverage"].between(0, 1).all())
+        # both estimators and models, both parameters; LM size rows at the null
+        self.assertEqual(set(reg["estimator"].dropna()), {"ml", "gm"})
+        self.assertEqual(set(reg["model"].dropna()), {"lag", "error"})
+        self.assertEqual(set(reg["term"].dropna()) >= {"x", "rho", "lambda", "lm_error", "lm_lag"}, True)
+        self.assertTrue(reg["target"].str.startswith("size of the 0.05 test").any())
+        self.assertEqual(set(lisa["scenario"]), {"null_random_se", "null_clustered_se", "hot_spot"})
+        self.assertTrue(lisa["power"].notna().any())
+        # the tool-default rows are labelled: GMM lag, ML error; two-sided 9999-permutation LISA
+        dflt = reg[reg["tool_default"].fillna(False).astype(bool)]
+        self.assertEqual(set(zip(dflt["model"], dflt["estimator"])), {("lag", "gm"), ("error", "ml")})
+        self.assertTrue(dflt["method"].str.contains(r"\[tool default\]").all())
+        ld = lisa[lisa["reading"] == "default"]
+        self.assertTrue(ld["tool_default"].all() and (ld["permutations"] == 9999).all())
+        self.assertTrue(ld["method"].str.contains(r"\[tool default\] two-sided").all())
+        # info rows never fail the gate, and never satisfy a required study
+        both = pd.concat([reg, lisa]).assign(study="x")
+        self.assertTrue(iv.gate(both, ())[0])
+        ok, problems = iv.gate(both, ("x",))
+        self.assertFalse(ok)
+        self.assertIn("x: required study missing", problems[0])
+
+    def test_rows_depend_only_on_the_seed(self):
+        from census.simulation import FAST, study_local_morans_size
+        a = pd.DataFrame(study_local_morans_size(FAST, 2))
+        b = pd.DataFrame(study_local_morans_size(FAST, 2))
+        self.assertEqual(a.to_csv(index=False), b.to_csv(index=False))

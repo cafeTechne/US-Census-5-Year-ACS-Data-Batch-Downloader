@@ -76,7 +76,8 @@ DESCRIPTION_BUDGET = 700  # characters, enforced by tests/test_mcp_profiles.py
 DESCRIPTION_OVERRIDES: Dict[str, str] = {
     "get_recipe": (
         "Return numbered steps for a standard analysis. Call this first when unsure what to do.\n"
-        "name: compare_counties | tract_trend | regression_sampling_error | small_area | preregistered; "
+        "name: compare_counties | tract_trend | regression_sampling_error | small_area | preregistered | "
+        "decennial_counts; "
         "omit to list recipes.\n"
         "Example: get_recipe(name=\"compare_counties\")"
     ),
@@ -102,6 +103,7 @@ DESCRIPTION_OVERRIDES: Dict[str, str] = {
         "table_code: e.g. 'B17001'. geography: us|state|county|tract|place|zcta|msa, optional "
         "':codes' e.g. 'county:453,201'.\n"
         "state_code: 2-digit FIPS. years: releases (default latest). variables: codes used.\n"
+        "dataset: 'dec/dhc' or 'dec/pl' for 2020 Census counts (no MOE).\n"
         "Example: download_table(table_code=\"B17001\", geography=\"county:453\", state_code=\"48\", "
         "years=[2023], variables=[\"B17001_001\", \"B17001_002\"])"
     ),
@@ -312,5 +314,7 @@ def build_profile_server(base: Any, profile: str) -> Any:
             description = DESCRIPTION_OVERRIDES.get(name, tool.description)
         else:
             fn, description = tool.fn, tool.description
-        server.add_tool(fn, name=name, description=description)
+        # Python 3.13+ strips docstring indentation at compile time; older versions do not.
+        # Normalise so every Python sends the same (shorter) text and the budget holds.
+        server.add_tool(fn, name=name, description=inspect.cleandoc(description) if description else description)
     return server

@@ -57,6 +57,7 @@ from census import describe_variable as _describe_variable
 from census import generate_codebook as _generate_codebook
 from census.concordance import BLOCKING_KINDS
 from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+from census.decennial import DISCLOSURE_AVOIDANCE_ADVISORY, is_decennial, uncertainty_record
 from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
@@ -108,6 +109,12 @@ Derived statistics (every result records its `method`):
 - Nationwide: state_code='all'. Reproducibility: replay_extraction.
 - run_validation checks the toolkit against Census-published values.
 
+2020 Census: dataset='dec/dhc' (DHC: P1, P12, H1, H3, ...) or 'dec/pl' (P.L. 94-171,
+down to blocks), years 2020 only, through the same plan_extraction / batch_download.
+Census counts are not sample-based: MOE/CV are undefined (never 0); significance tools
+refuse decennial-only tests (product='decennial'); an ACS estimate can be tested against
+a census count with calculate_significance(product='5-year', product2='decennial').
+
 Inflation: default index is R-CPI-U-RS (the Census Bureau's ACS index); 'c-cpi-u'
 matches CPS ASEC income reports. Never pass guessed values via cpi_table.
 Branch on error_code in failed results.
@@ -145,7 +152,7 @@ def _entities_for(
         places_file = None if is_nationwide(state_code) else get_local_places_file(state_code or "")
         if places_file and os.path.exists(places_file):
             names = {p[1]: p[2] for p in load_places_from_local(places_file)}
-    elif geo_level in ("county", "tract"):
+    elif geo_level in ("county", "tract", "block"):
         codes = county_codes
     elif geo_level == "zcta":
         codes = zcta_codes
@@ -342,7 +349,9 @@ def list_zctas(
 
 
 @mcp.tool()
-def search_tables(query: str, limit: int = 25, year: Optional[int] = None) -> List[Dict[str, str]]:
+def search_tables(
+    query: str, limit: int = 25, year: Optional[int] = None, dataset: Optional[str] = None
+) -> List[Dict[str, str]]:
     """Search ACS 5-year tables (detailed, data profile, subject, comparison profile)
     by code or keyword.
 
@@ -350,16 +359,17 @@ def search_tables(query: str, limit: int = 25, year: Optional[int] = None) -> Li
         query: Table code (e.g. 'B01001', 'DP03', 'S1701') or keyword (e.g. 'poverty').
         limit: Maximum number of matching tables to return (default: 25).
         year: Release to search (default: latest archived release).
+        dataset: Search one dataset only, e.g. 'dec/dhc' or 'dec/pl' (2020 Census).
     """
     all_tables: Dict[str, str] = {}
-    for dataset in ("acs5", "profile", "subject", "cprofile"):
-        catalog = load_table_catalog(dataset, year) or DATASET_TABLES.get(dataset, {})
+    for ds in (dataset,) if dataset else ("acs5", "profile", "subject", "cprofile"):
+        catalog = load_table_catalog(ds, year) or DATASET_TABLES.get(ds, {})
         all_tables.update(catalog)
     q = query.strip().lower()
     matches: List[Dict[str, str]] = []
     for code, desc in sorted(all_tables.items()):
         if q in code.lower() or q in desc.lower():
-            matches.append({"table_code": code, "description": desc, "dataset": infer_dataset(code)})
+            matches.append({"table_code": code, "description": desc, "dataset": dataset or infer_dataset(code)})
             if len(matches) >= limit:
                 break
     return matches
@@ -367,17 +377,19 @@ def search_tables(query: str, limit: int = 25, year: Optional[int] = None) -> Li
 
 @mcp.tool()
 def list_variables(
-    table_code: str, year: Optional[int] = None, limit: int = 50
+    table_code: str, year: Optional[int] = None, limit: int = 50, dataset: Optional[str] = None
 ) -> Dict[str, Any]:
     """List a table's variables and labels for one release.
 
     Args:
-        table_code: ACS table code (e.g. 'B01001', 'DP02').
+        table_code: ACS table code (e.g. 'B01001', 'DP02'), or a 2020 Census table
+            with dataset='dec/dhc' / 'dec/pl' (e.g. 'P12').
         year: Release year (default: latest archived). Labels and codes differ
             between releases.
         limit: Maximum variables returned (default 50).
+        dataset: Override the inferred endpoint (e.g. 'dec/dhc').
     """
-    dataset = infer_dataset(table_code)
+    dataset = dataset or infer_dataset(table_code)
     year = year or _default_year(dataset)
     variables, source = table_variables(table_code, dataset, year, _client())
     items = sorted(variables.items())
@@ -394,16 +406,19 @@ def list_variables(
 
 
 @mcp.tool()
-def describe_variable(code: str, year: Optional[int] = None) -> Dict[str, Any]:
+def describe_variable(code: str, year: Optional[int] = None, dataset: Optional[str] = None) -> Dict[str, Any]:
     """Label, concept, table, and universe for one variable code in one release.
 
     Use this to confirm what a code means in each year before pooling years.
 
     Args:
-        code: Variable code (e.g. 'DP02_0016PE', 'B19013_001E').
+        code: Variable code (e.g. 'DP02_0016PE', 'B19013_001E', or a 2020 Census
+            count such as 'P12_002N').
         year: Release year (default: latest archived).
+        dataset: Override the inferred endpoint ('dec/dhc' or 'dec/pl' for the 2020
+            Census; '<code>N' codes default to 'dec/dhc').
     """
-    return _describe_variable(code, year, client=_client())
+    return _describe_variable(code, year, dataset=dataset, client=_client())
 
 
 # ---------------------------------------------------------------------------
@@ -438,13 +453,15 @@ def fetch_table_data(
         state_code: 2-digit state FIPS code (e.g. '36'); not needed for 'us'/'msa'.
         table_code: Detailed ('B01001'), data profile ('DP03'), subject ('S1701')
             or comparison profile ('CP03') table code.
-        geo_level: 'us', 'state', 'county', 'tract', 'place', 'zcta', or 'msa'.
+        geo_level: 'us', 'state', 'county', 'tract', 'place', 'zcta', or 'msa' ('block'
+            with dataset='dec/pl', one state and county).
         place_code: Required if geo_level is 'place' (e.g. '51000' for New York city).
         county_code: County FIPS for 'county'/'tract' levels (default '*' = all).
         tract_code: Optional 6-digit tract code (default all tracts).
         zcta_code: ZCTA(s) for 'zcta' level, comma-separated (default '*').
         msa_code: CBSA code(s) for 'msa' level (default '*').
-        dataset: 'acs5', 'profile', 'subject' or 'cprofile' (inferred if omitted).
+        dataset: 'acs5', 'profile', 'subject' or 'cprofile' (inferred if omitted), or the
+            2020 Census 'dec/dhc' / 'dec/pl' (counts: no MOE; see `uncertainty`).
         compute_reliability: Add standard error, CV % and reliability columns.
         clean_sentinels: Replace Census jam values (-666666666 etc.) with null.
         use_cache: Read/write the local SQLite query cache.
@@ -494,6 +511,7 @@ def fetch_table_data(
     formatted_df = df.rename(columns=rename)
     formatted_df = formatted_df.astype(object).where(pd.notna(formatted_df), None)
 
+    decennial = is_decennial(dataset)
     return {
         "success": True,
         "year": year,
@@ -501,6 +519,8 @@ def fetch_table_data(
         "table_code": table_code,
         "dataset": dataset,
         "geo_level": geo_level,
+        "uncertainty": uncertainty_record(geo_level) if decennial else None,
+        "advisories": [DISCLOSURE_AVOIDANCE_ADVISORY] if decennial else [],
         "row_count": len(formatted_df),
         "columns": list(formatted_df.columns),
         "data": formatted_df.head(max_rows).to_dict(orient="records"),
@@ -663,7 +683,8 @@ def batch_download(
         table_code: Table code ('B01001', 'DP03', 'S1701', 'CP03').
         start_year: Starting ACS 5-year end-year (e.g. 2015).
         end_year: Ending year (e.g. 2022).
-        geo_level: 'us', 'state', 'county', 'tract', 'place', 'zcta', or 'msa'.
+        geo_level: 'us', 'state', 'county', 'tract', 'place', 'zcta', or 'msa'; the 2020
+            Census also offers 'block group' and 'block' (block: dec/pl, or dec/dhc H1).
         variables: Codes the analysis uses ('B19013_001', '2018:DP02_0002', or concept
             IDs). Omitted = whole table, so any drift in the table can block.
         place_codes: Place FIPS codes (required for 'place').
@@ -673,7 +694,8 @@ def batch_download(
         county_codes: Counties for 'county' or 'tract' (omitted = all in state).
         zcta_codes: ZCTAs for 'zcta' (omitted = all ZIPs in state via zip2fips.json).
         msa_codes: CBSA codes for 'msa' (omitted = all metro/micro areas).
-        dataset: 'acs5', 'profile', 'subject', 'cprofile' (inferred if omitted).
+        dataset: 'acs5', 'profile', 'subject', 'cprofile' (inferred if omitted), or the
+            2020 Census 'dec/dhc' (DHC) / 'dec/pl' (P.L. 94-171); years 2020 only.
         concordance_mode: 'fail' (default), 'strict' (exploration), or 'code' (legacy).
         continuity_check: Check national continuity of multi-year concepts.
         allow_unverified_concordance: Required for multi-year 'code' mode.
@@ -691,7 +713,10 @@ def batch_download(
         harmonize_tracts_to: 2010 or 2020: apportion a tract panel spanning the
             2010/2020 tract change to one tract vintage (panel/parquet only).
         product: "5-year" (default) or "1-year" (areas of 65,000+ people only;
-            timelier, non-overlapping releases; never mix with 5-year in one comparison).
+            timelier, non-overlapping releases; never mix with 5-year in one comparison),
+            or "decennial" (2020 Census DHC unless dataset='dec/pl'; counts are not
+            sample-based: no MOE/SE/CV columns, a disclosure-avoidance advisory and an
+            `uncertainty` record in the metadata).
         allow_experimental_2020: 1-year only: Census published no standard 2020
             1-year estimates; opt in to acknowledge the gap (2020 is skipped with an advisory).
     """
@@ -877,7 +902,7 @@ def validate_crosswalks() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def calculate_cv(estimate: float, moe: float) -> Dict[str, Any]:
+def calculate_cv(estimate: float, moe: float, product: Optional[str] = None) -> Dict[str, Any]:
     """Standard error, coefficient of variation and reliability for an ACS estimate.
 
     SE = MOE / 1.645; CV = SE / estimate x 100.
@@ -886,8 +911,12 @@ def calculate_cv(estimate: float, moe: float) -> Dict[str, Any]:
     Args:
         estimate: The ACS estimate.
         moe: Its published 90% margin of error.
+        product: 'decennial' is refused: 2020 Census counts have no sampling MOE.
     """
-    return _calculate_cv(estimate, moe)
+    try:
+        return _calculate_cv(estimate, moe, product=product)
+    except ValueError as exc:
+        return errors.error_result(errors.INVALID_INPUT, str(exc))
 
 
 @mcp.tool()
@@ -900,6 +929,7 @@ def calculate_significance(
     year1: Optional[int] = None,
     year2: Optional[int] = None,
     product: str = "5-year",
+    product2: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Two-tailed Z-test for whether two ACS estimates differ significantly.
 
@@ -913,11 +943,17 @@ def calculate_significance(
         confidence_level: 0.90, 0.95 or 0.99 (default 0.90, the ACS standard).
         year1, year2: Optional ACS end years for the overlap adjustment.
         product: '5-year' (default) or '1-year' (1-year releases never overlap).
+            'decennial' alone is refused (census counts are not sample-based).
+        product2: Product of the second value when it differs: 'decennial' tests the
+            ACS estimate against a 2020 Census count as a fixed reference (moe2=0);
+            the result notes that only ACS sampling error is measured.
     """
+    second = product2 or product
     try:
-        overlap = acs_overlap_years(year1, year2, product) if year1 and year2 else 0
+        both_acs = not (is_decennial(product) or is_decennial(second))
+        overlap = acs_overlap_years(year1, year2, product, second) if year1 and year2 and both_acs else 0
         return z_test(est1, moe1, est2, moe2, confidence_level, overlap_years=overlap,
-                      product1=product, product2=product)
+                      product1=product, product2=second)
     except ValueError as exc:
         return errors.error_result(errors.INVALID_INPUT, str(exc))
 
@@ -985,7 +1021,8 @@ def generate_codebook(
     Args:
         table_code: e.g. 'B19013', 'DP03', 'S1701'.
         year: Release year (default: latest archived).
-        dataset: Override endpoint ('acs5', 'profile', 'subject', 'cprofile').
+        dataset: Override endpoint ('acs5', 'profile', 'subject', 'cprofile', or the 2020
+            Census 'dec/dhc' / 'dec/pl': counts only, with an Uncertainty column).
         include_moe: Include margin-of-error variables.
         include_reliability: Include derived SE / CV / reliability columns.
         output_path: Optional CSV path to also write the codebook to.
@@ -1000,6 +1037,9 @@ def generate_codebook(
 
     columns: List[str] = []
     for code in sorted(metadata):
+        if is_decennial(dataset) and code.endswith("N"):
+            columns.append(code)  # 2020 Census count: no MOE or reliability columns exist
+            continue
         if code.endswith("PE"):
             base, moe, pct = code[:-2], f"{code[:-2]}PM", True
         elif code.endswith("E") and not code.endswith("EA"):
@@ -1014,7 +1054,8 @@ def generate_codebook(
             columns += [f"{key}_SE", f"{key}_CV", f"{key}_RELIABILITY"]
 
     codebook = _generate_codebook(
-        columns, metadata, universe=table_universe(table_code, dataset, year)
+        columns, metadata, universe=table_universe(table_code, dataset, year),
+        decennial=is_decennial(dataset),
     )
     if output_path:
         codebook.to_csv(output_path, index=False, encoding="utf-8")

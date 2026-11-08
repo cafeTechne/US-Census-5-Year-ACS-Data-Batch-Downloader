@@ -28,7 +28,7 @@ class TestLiveBattery(unittest.TestCase):
 
     def test_checks_pass(self):
         # F5 has a documented medians.py discrepancy (see tests/test_validation.py).
-        for cid in ("F1", "F2", "F3", "F4", "F6", "F7", "F8", "F9", "F10"):
+        for cid in ("F1", "F2", "F3", "F4", "F6", "F7", "F8", "F9", "F10", "F11"):
             with self.subTest(check=cid):
                 r = self.results[cid]
                 self.assertTrue(r.passed, f"{cid}: {r.notes} {r.failures[:3]}")
