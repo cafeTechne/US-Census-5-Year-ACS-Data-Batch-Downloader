@@ -42,6 +42,19 @@ def _refuse(*args, **kwargs):
     raise OSError("network access refused by the offline acceptance test")
 
 
+_REAL_CONNECT = socket.socket.connect
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _refuse_unless_loopback(sock, address, *args, **kwargs):
+    # Windows asyncio (ProactorEventLoop) builds its self-pipe from a loopback socket
+    # pair; allow loopback only, so the MCP route can run, and refuse everything else.
+    host = address[0] if isinstance(address, tuple) and address else None
+    if host in _LOOPBACK:
+        return _REAL_CONNECT(sock, address, *args, **kwargs)
+    raise OSError("network access refused by the offline acceptance test")
+
+
 def bash_blocks(path=DOC):
     with open(path, encoding="utf-8") as f:
         return re.findall(r"```bash\n(.*?)```", f.read(), flags=re.S)
@@ -49,7 +62,7 @@ def bash_blocks(path=DOC):
 
 @contextlib.contextmanager
 def offline():
-    with mock.patch.object(socket.socket, "connect", _refuse), \
+    with mock.patch.object(socket.socket, "connect", _refuse_unless_loopback), \
             mock.patch.object(socket, "create_connection", _refuse), \
             mock.patch.object(requests.Session, "request", _refuse):
         yield
@@ -172,6 +185,12 @@ class TestReferenceWorkflow(unittest.TestCase):
 
     def outputs_named(self, name, execution=0):
         return [o for n, o in self.outputs[execution] if n == name]
+
+    def test_offline_guard_refuses_non_loopback(self):
+        with offline():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                with self.assertRaisesRegex(OSError, "refused by the offline acceptance test"):
+                    sock.connect(("192.0.2.1", 80))  # TEST-NET-1, never routable
 
     def test_frozen_inputs_untouched(self):
         for name, data in self.fixture_bytes.items():
