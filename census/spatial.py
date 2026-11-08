@@ -29,7 +29,9 @@ Urban Economics 26:77-104; Kelejian & Prucha (1998, 2010); Rey & Anselin (2007)
 PySAL; ACS Variance Replicate Estimate Tables documentation.
 """
 
+import contextlib
 import hashlib
+import io
 import math
 import os
 import warnings
@@ -443,7 +445,9 @@ def _scalar(x) -> float:
 def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, ml_method: str, kwargs):
     import spreg
 
-    with warnings.catch_warnings():
+    # spreg 1.9 prints the estimator's class name to stdout from its summary code;
+    # swallow it (stdout carries the MCP stdio protocol).
+    with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
         warnings.simplefilter("ignore")
         if model == "lag" and method == "ml":
             r = spreg.ML_Lag(y, X, w, method=ml_method, spat_diag=False, name_x=names, name_y=yname, **kwargs)
