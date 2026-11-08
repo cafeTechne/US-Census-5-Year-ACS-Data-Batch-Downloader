@@ -37,12 +37,17 @@ any level difference between the two states that the price adjustment does not r
 ```sh
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
+. .venv/bin/activate   # every `python` below is this venv's interpreter
 ```
 
 Get your own Census API key (https://api.census.gov/data/key_signup.html) and set
 `CENSUS_API_KEY` in the environment or in a `.env` file at the repository root
 (`census/api.py` loads it with `python-dotenv`). Never print or commit the key. The
 toolkit's normal query cache (`.cache/`) is used; nothing here marks it synthetic.
+
+The whole workflow takes about 2 minutes on a cold cache and downloads about 30 MB (query
+cache, the B15002 county VRE file and the 2024 boundary files) into `.cache/`; outputs take
+about 8 MB.
 
 ## 0. Workspace
 
@@ -59,8 +64,9 @@ python -m census extract --table B15002 --geo county --state 26 --years 2024 --v
 python -m census extract --table B15002 --geo county --state 36 --years 2024 --variables B15002_001,B15002_015,B15002_016,B15002_017,B15002_018,B15002_032,B15002_033,B15002_034,B15002_035 --reliability --codebook --slug-style code --out "case_study_output/extract/36/B15002" --json
 ```
 
-Expected for each: `"success": true`, one call, `"failed_calls": []`, concordance status
-`stable`. Each folder holds the panel (`*_county_panel_2024.csv`: estimate, MOE, SE =
+Expected for each: `"success": true`, one call, `"failed_calls": []`, and every concept
+with status `stable` in `*_concordance_issues.json` (`status_counts`). The progress line
+`concordance policy: fail` on stderr is the policy (stop on blocking issues), not a result. Each folder holds the panel (`*_county_panel_2024.csv`: estimate, MOE, SE =
 MOE / 1.645, CV, reliability), the codebook, and `*_extraction_metadata.json` (endpoint
 `https://api.census.gov/data/{year}/acs/acs5`, variables, concept IDs, metadata vintage
 hashes, package version and git commit), which `python -m census replay` can re-run (step 6).
@@ -90,7 +96,7 @@ estimate and its SE are divided by RPP/100 (the CV is unchanged). `rpp_26.json` 
 
 Expected RPP areas (2024 RPPs, U.S. = 100):
 
-| State | Areas | Nonmetropolitan portion | Largest metropolitan areas |
+| State | Areas | Nonmetropolitan portion | Selected metropolitan areas |
 | :--- | :--- | :--- | :--- |
 | Michigan | 17: 16 MSAs (30 counties) and the nonmetro portion | 88.972 (53 counties) | Detroit-Warren-Dearborn 100.298 (6 counties), Grand Rapids-Wyoming-Kentwood 95.546 (5), Ann Arbor 100.880 (1) |
 | New York | 14: 13 MSAs (37 counties) and the nonmetro portion | 91.613 (25 counties) | New York-Newark-Jersey City NY-NJ 112.563 (10 counties), Albany-Schenectady-Troy 99.566 (5), Rochester 97.035 (5) |
@@ -99,10 +105,10 @@ Expected descriptive statistics of RPP-adjusted county median household income
 (`tables/income_26.md`, `tables/income_36.md`; median SE is the median of the counties'
 sampling SEs):
 
-| State | Counties | Median | Min | Max | Median SE | Median CV | CV > 30% |
+| State | Counties | Median | Min | Max | Median SE | Median CV | CV > 30% (share of counties) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Michigan | 83 | 70,829 | 55,505 | 106,479 | 1,676 | 2.4% | 0 |
-| New York | 62 | 76,172 | 43,243 | 129,885 | 1,718 | 2.2% | 0 |
+| Michigan | 83 | 70,829 | 55,505 | 106,479 | 1,676 | 2.4% | 0% |
+| New York | 62 | 76,172 | 43,243 | 129,885 | 1,718 | 2.2% | 0% |
 
 ### Maps
 
@@ -114,8 +120,8 @@ estimate, SE, 90% MOE, interval bounds and CV per county, a caption and a proven
   the share of adjacent-class county pairs whose 90% confidence intervals do not overlap
   (Sun and Wong 2010), and counties with CV above 30% are hatched. Expected: separability
   52% (Michigan) and 42% (New York), no hatched county. So county estimates are individually
-  precise (CVs of 1-7%), yet about half of neighbouring-class county pairs cannot be told
-  apart at 90% confidence: read class boundaries as approximate, and compare two counties
+  precise (CVs of 1-7%), yet 48% (Michigan) and 58% (New York) of neighbouring-class county
+  pairs cannot be told apart at 90% confidence: read class boundaries as approximate, and compare two counties
   with a significance test, not by their colours.
 - `maps/<state>/uncertainty.*`: the coefficient of variation of each county's estimate
   (classes at 12% and 30%).
@@ -135,7 +141,8 @@ python -m census tool fit_model --arg input_path=case_study_output/frames/model_
 
 The first command joins the four extractions into one row per county (the two tables are
 joined on GEOID; the two states are stacked; a cell given different values by two files
-would be an error), derives `pct_bachelors` and downloads the 2024 county VRE file for
+would be an error), derives `pct_bachelors` (`derive` names use the API variable codes such as `B15002_015E`;
+the panel CSV stores them as `b15002_015_est`, and the tool maps between the two) and downloads the 2024 county VRE file for
 `B15002`, evaluating the same derivation on each of the 80 replicates (so `pct_bachelors_se`
 is the exact replicate SE). `C(GEOID.str[:2])` is the state indicator (New York vs Michigan).
 The last command is a sensitivity run on nominal (unadjusted) dollars. Each `fit_model` call takes a few seconds (80 refits).
@@ -187,12 +194,13 @@ SE, in which the outcome's sampling error is absorbed by the residual. It is not
 for "these 145 counties in 2020-2024" (that would be `target=these_areas`, which uses
 `se_sampling` and here would be too narrow because the outcome has no replicates). It is an
 association between areas, not a statement about individuals and not a causal effect of
-education on income.
+education on income. Spatial correlation among counties is not modelled, so the model SE may
+also be too small (see Limitations).
 
 ## 4. Results bundle and run provenance
 
 ```bash
-python -m census tool make_results_bundle --arg output_dir=case_study_output/bundle --arg 'results={"regression": "case_study_output/results/regression.json", "regression_nominal": "case_study_output/results/regression_nominal.json", "rpp_model": "case_study_output/results/rpp_model.json", "rpp_26": "case_study_output/results/rpp_26.json", "rpp_36": "case_study_output/results/rpp_36.json", "map_26": "case_study_output/results/map_26.json", "map_36": "case_study_output/results/map_36.json"}' --arg 'figure_paths=["case_study_output/maps/26/choropleth.pdf", "case_study_output/maps/26/choropleth.png", "case_study_output/maps/26/uncertainty.pdf", "case_study_output/maps/36/choropleth.pdf", "case_study_output/maps/36/choropleth.png", "case_study_output/maps/36/uncertainty.pdf", "case_study_output/figures/coefficients.pdf"]' --arg 'inputs=["case_study_output/extract/26/B19013/B19013_extraction_metadata.json", "case_study_output/extract/36/B19013/B19013_extraction_metadata.json", "case_study_output/extract/26/B15002/B15002_extraction_metadata.json", "case_study_output/extract/36/B15002/B15002_extraction_metadata.json", "case_study_output/frames/model_frame_rpp.parquet", "case_study_output/frames/model_frame_replicates_rpp.parquet"]' --arg "title=Price-adjusted county median household income, Michigan and New York, ACS 2020-2024" --arg 'notes=["Outcome B19013 has no Census variance replicates; se_sampling covers the covariate only.", "RPPs are BEA estimates with their own error, not included in any SE, MOE or interval here.", "ACS 5-year dollars are 2024 dollars; the 2024 RPP is applied to the whole 2020-2024 period."]' --json
+python -m census tool make_results_bundle --arg output_dir=case_study_output/bundle --arg 'results={"regression": "case_study_output/results/regression.json", "regression_nominal": "case_study_output/results/regression_nominal.json", "rpp_model": "case_study_output/results/rpp_model.json", "rpp_26": "case_study_output/results/rpp_26.json", "rpp_36": "case_study_output/results/rpp_36.json", "map_26": "case_study_output/results/map_26.json", "map_36": "case_study_output/results/map_36.json", "cv_map_26": "case_study_output/results/cv_map_26.json", "cv_map_36": "case_study_output/results/cv_map_36.json"}' --arg 'figure_paths=["case_study_output/maps/26/choropleth.pdf", "case_study_output/maps/26/choropleth.png", "case_study_output/maps/26/uncertainty.pdf", "case_study_output/maps/36/choropleth.pdf", "case_study_output/maps/36/choropleth.png", "case_study_output/maps/36/uncertainty.pdf", "case_study_output/figures/coefficients.pdf"]' --arg 'inputs=["case_study_output/extract/26/B19013/B19013_extraction_metadata.json", "case_study_output/extract/36/B19013/B19013_extraction_metadata.json", "case_study_output/extract/26/B15002/B15002_extraction_metadata.json", "case_study_output/extract/36/B15002/B15002_extraction_metadata.json", "case_study_output/frames/model_frame_rpp.parquet", "case_study_output/frames/model_frame_replicates_rpp.parquet"]' --arg "title=Price-adjusted county median household income, Michigan and New York, ACS 2020-2024" --arg 'notes=["Outcome B19013 has no Census variance replicates; se_sampling covers the covariate only.", "RPPs are BEA estimates with their own error, not included in any SE, MOE or interval here.", "ACS 5-year dollars are 2024 dollars; the 2024 RPP is applied to the whole 2020-2024 period."]' --json
 ```
 
 Expected: `"success": true` and `data_source` = `{"kind": "census_api", "synthetic": false}`.
@@ -202,7 +210,7 @@ Figures with the same file name from different folders are prefixed with the fol
 the citation ("U.S. Census Bureau, American Community Survey 5-Year Estimates, 2020-2024;
 tables B15002, B19013. Retrieved via the Census Data API"), and `provenance` with
 `analysis_status: exploratory`, `data_source`, the SHA-256 of each input (extraction metadata,
-model frame, replicate file; keyed by the path relative to the inputs' common folder, e.g.
+model frame, replicate file; listed as `{path, sha256}` entries with the path relative to the inputs' common folder, e.g.
 `extract/26/B19013/B19013_extraction_metadata.json`, so the two states' files stay apart) and, per extraction, the table, release, states, endpoint,
 package version, git commit and number of failed calls (0). `bundle/methods.md` repeats each
 result's summary, interval statement and notes (including the RPP notes from
@@ -221,8 +229,9 @@ manifests take one state per run and have no place-adjustment step (see "Toolkit
 
 For five counties per state, the extracted `B19013_001` estimate and MOE were compared with
 the values the Census Data API returns directly
-(`https://api.census.gov/data/2024/acs/acs5?get=NAME,B19013_001E,B19013_001M&for=county:...&in=state:..`,
-requested with `requests`, outside the toolkit and its cache). They are **identical** for
+(requested outside the toolkit and its cache, e.g.
+`curl "https://api.census.gov/data/2024/acs/acs5?get=NAME,B19013_001E,B19013_001M&for=county:003,081,125,161,163&in=state:26&key=$CENSUS_API_KEY"`;
+the API may refuse requests without a key). They are **identical** for
 all ten (checked 2026-11-08):
 
 | County | GEOID | Estimate | MOE |

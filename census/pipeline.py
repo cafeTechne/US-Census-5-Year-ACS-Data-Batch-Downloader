@@ -90,7 +90,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.11.0"
+PACKAGE_VERSION = "0.12.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
@@ -1190,7 +1190,7 @@ def run_batch(
     emit(
         f"Starting download: {len(entities)} request target(s) x {len(years)} year(s) "
         f"({total_calls} calls, {plan['cached_calls']} cached). Table {table_code} "
-        f"[{dataset}], format: {output_format}, concordance: {options.concordance_mode}."
+        f"[{dataset}], format: {output_format}, concordance policy: {options.concordance_mode}."
     )
 
     saved_entities: List[Dict[str, Any]] = []
