@@ -178,7 +178,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(V.parse_checks(None), list(V.CHECK_IDS))
         self.assertEqual(V.parse_checks("f4, F1,F4"), ["F1", "F4"])
         with self.assertRaises(ValueError):
-            V.parse_checks("F11")
+            V.parse_checks("F12")
 
     def test_z_rounding_range(self):
         # 63.7 vs 63.8 with MOEs 0.1: published values cannot decide significance.
