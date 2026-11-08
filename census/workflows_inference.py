@@ -730,9 +730,8 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
 
     Args:
         manifest_path: the manifest JSON.
-        replicates_path: optional CSV/Parquet of replicate estimates (long format:
-            GEOID, Year, variable, rep_1..rep_80), needed for "replicates": "required".
-            Not with a census_vre manifest.
+        replicates_path: optional CSV/Parquet of replicates (long: GEOID, Year,
+            variable, rep_1..rep_80) for "replicates": "required"; not with census_vre.
         replicates_synthetic: mark supplied replicates synthetic.
 
     Returns analysis_status, data_source, replicates, deviations, hypotheses;

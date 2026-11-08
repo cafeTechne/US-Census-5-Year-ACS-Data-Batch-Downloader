@@ -314,5 +314,7 @@ def build_profile_server(base: Any, profile: str) -> Any:
             description = DESCRIPTION_OVERRIDES.get(name, tool.description)
         else:
             fn, description = tool.fn, tool.description
-        server.add_tool(fn, name=name, description=description)
+        # Python 3.13+ strips docstring indentation at compile time; older versions do not.
+        # Normalise so every Python sends the same (shorter) text and the budget holds.
+        server.add_tool(fn, name=name, description=inspect.cleandoc(description) if description else description)
     return server
