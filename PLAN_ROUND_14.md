@@ -1,7 +1,7 @@
 # Round 14: Confirmatory Multi-State Analyses
 
 **Date:** 2026-11-08
-**Status:** Authorized by the owner ("please continue", 2026-11-08); implementation in progress
+**Status:** Implemented (section 9); released as v0.13.0
 **Baseline:** v0.12.0 (Round 13 merged)
 **Companion:** [PLAN_ROUND_13.md](PLAN_ROUND_13.md) (section 11 lists the deferrals this round takes up)
 
@@ -75,3 +75,18 @@ v0.13.0 with a Zenodo DOI: code review (`/code-review high`), fixes, full gate (
 | D14-1 | Multi-state manifests stack states; cross-state models need an explicit state term in the formula (no automatic fixed effects) |
 | D14-2 | RPP year defaults to the latest bundled year, and the manifest records it. A mismatch with the ACS period is a note, not a blocking deviation |
 | D14-3 | The Michigan fixtures are committed if the fixture set stays under about 5 MB in total; otherwise the agent reports the size first |
+
+---
+
+## 9. Implementation status (2026-11-08)
+
+| Slice | Result |
+| :--- | :--- |
+| A multi-state manifests | `states`, derivations on replicates, declared RPP `adjustments` (one shared implementation with `place_adjust_frame`). Live MI/NY confirmatory run: no deviations, identical to Round 13 (811.0 [684.3, 937.7]). Existing manifest hashes unchanged |
+| B Michigan | Added to the battery; fixtures 2.0 to 2.2 MB; 10/10 checks pass live and offline; no tolerance changes |
+| C PUMS memory (R2) | Measured: about 275 MiB + 2,829 B/row; 1.9M rows peaks at 5.4 GiB after removing avoidable copies (was 6.4). 128 GiB holds every state's records at once. R2 closed |
+| D small items | MCP `cache_import`; the only pandas 4 deprecation in census/ fixed |
+| Review | `/code-review high`: 10 findings fixed with tests (`tests/test_review_fixes_r14.py`). Parent change: `create_manifest` never overwrites its input |
+| Gate | Full `--gate --jobs 0`: PASS, 17 min; coverage table unchanged |
+
+**Deferred:** adjustments limited to one release and not combinable with aggregation; `run_manifest` does not fetch VRE replicates itself; the offline multi-state test uses frozen CBSA membership (the overlay is covered by the live test).

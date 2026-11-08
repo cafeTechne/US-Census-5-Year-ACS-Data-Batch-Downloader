@@ -5,6 +5,26 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.13.0 (Round 14): confirmatory multi-state analyses
+
+- Pre-registered manifests take several states (`geography.states`, 2-digit FIPS; not
+  with ZCTAs), derivations evaluated on replicates, and a declared RPP adjustment step
+  (`adjustments`, shared with `place_adjust_frame`; `rpp_year` required, filled in by
+  `create_manifest` into `<name>.completed.json` when omitted; exclusions run first;
+  RPP provenance recorded). The Michigan/New York study runs confirmatorily
+  (`examples/manifests/mi_ny_income_education.json`) and reproduces Round 13 exactly
+  (pct_bachelors 811.0, 90% CI [684.3, 937.7]).
+- Validation battery adds Michigan (26); all 10 checks pass live and offline.
+- PUMS memory measured (`scripts/pums_memory_benchmark.py`, `docs/audits/pums_memory.md`;
+  risk R2 closed): peak about 275 MiB + 2.8 KB per person record. Avoidable weight-matrix
+  copies removed (1.9M rows: 6.4 to 5.4 GiB peak, results bit-identical); grouped medians
+  gather each group once.
+- MCP `cache_import` (full profile) with the CLI's safety rules; pandas 4 deprecation in
+  `format_dataframe` fixed.
+- Review fixes: `run_manifest` records replicate-derivation errors as deviations instead
+  of raising; ACS refs with E/PE suffixes match their replicates; methods text reports how
+  many units received replicate SEs.
+
 ## 0.12.0 (Round 13): real data, end to end
 
 - Live verification: the full battery against Census-published values passes live (10/10
