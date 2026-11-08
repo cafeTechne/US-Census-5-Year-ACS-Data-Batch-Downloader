@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Offline validation battery (PLAN_ROUND_7.md section 8) against frozen Census responses.
 
-Every check F1-F10 runs on tests/fixtures/validation/ (captured from
+Every check F1-F11 runs on tests/fixtures/validation/ (captured from
 api.census.gov and www2.census.gov, each with a .json sidecar: source URL
 without the API key, retrieval date, SHA-256). No network access.
 
@@ -104,7 +104,7 @@ class TestOfflineBattery(unittest.TestCase):
         self.assertGreater(d["decidable_tests"], 400)
 
     def test_f8_f9_f10(self):
-        for cid in ("F8", "F9", "F10"):
+        for cid in ("F8", "F9", "F10", "F11"):
             self.assertPassed(cid)
         self.assertEqual(self.results["F8"].max_abs_error, 0.0)
 

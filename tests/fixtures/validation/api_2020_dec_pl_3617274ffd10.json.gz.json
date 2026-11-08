@@ -1,0 +1,9 @@
+{
+  "kind": "census_api_response",
+  "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
+  "retrieved": "2026-11-08",
+  "sha256": "fae15afa5f60832beebdccb75e8aebb1f71fac4a83fc3092cec64a57dce470b5",
+  "size_bytes": 3157,
+  "source_url": "https://api.census.gov/data/2020/dec/pl?for=block%3A%2A&get=H1_001N&in=state%3A36+county%3A041",
+  "uncompressed_sha256": "6842fe0c15b019e3e93e181112b4ae4cae4bea9f3ec76d6093ca2b8d5687fffa"
+}
