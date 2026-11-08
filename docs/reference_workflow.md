@@ -100,6 +100,14 @@ synthetic (`QueryCache.mark_synthetic`), which is what labels every later result
 A frozen file without a `synthetic` entry (for example, preserved real API responses) is
 imported without that marker.
 
+Every file is parsed and validated before anything is written; then all responses and the
+marker are written in one transaction, so a bad file leaves the cache unchanged. A synthetic
+import into the default cache (`CENSUS_CACHE_PATH` unset) is refused, because the marker would
+label every later result from that cache synthetic, real data included: set
+`CENSUS_CACHE_PATH` as in step 0 (or pass `--allow-default-cache` deliberately). The marker
+covers the whole cache and is removed only by `python -m census cache clear`, which deletes
+every response and the marker together (its output reports `"synthetic_marker_cleared"`).
+
 Expected: `"imported": 2`, `"synthetic": true`, and in `sources` the tables `B01003`,
 `B19013` with `"sha256": "0f5725d460904f5c1ee6e74dfa5fda2f1ef3dd5a8d910515d1495dde6aa44a94"`
 (the value in step 1). A different value means different input bytes: stop.

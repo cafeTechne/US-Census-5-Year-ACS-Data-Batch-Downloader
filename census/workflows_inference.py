@@ -97,11 +97,18 @@ def _load_frames(input_path: Any) -> pd.DataFrame:
     frames = [_load_frame(str(p)) for p in paths]
     if len(frames) == 1:
         return frames[0]
+    keys = ["GEOID"] + (["Year"] if any("Year" in f.columns for f in frames) else [])
+    # rows without a key would be dropped by the merge (groupby drops missing keys): refuse instead
+    for path, frame in zip(paths, frames):
+        for key in keys:
+            if key not in frame.columns:
+                raise ValueError(f"{path} has no {key} column" + (" (another input file has one); every file "
+                                 "must carry the same keys" if key != "GEOID" else "; every input file needs one"))
+            missing = int(frame[key].isna().sum())
+            if missing:
+                raise ValueError(f"{path} has {missing} row(s) with a missing {key}; fix or drop them first")
     df = pd.concat(frames, ignore_index=True, sort=False)
-    if "GEOID" not in df.columns:
-        raise ValueError("every input file needs a GEOID column")
     df["GEOID"] = df["GEOID"].astype(str)
-    keys = [c for c in ("GEOID", "Year") if c in df.columns]
     grouped = df.groupby(keys, sort=False)
     conflicts = [c for c in df.columns if c not in keys and (grouped[c].nunique(dropna=True) > 1).any()]
     if conflicts:
@@ -500,25 +507,49 @@ def make_table(kind: str, input_path: str, output_dir: Optional[str] = None,
                table_paths=[str(p) for p in files], markdown=table.to_markdown())
 
 
-def _file_sha256(path: str) -> str:
-    import hashlib
-
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def _extraction_record(path: str) -> Optional[Dict[str, Any]]:
-    """Provenance fields of an extraction metadata JSON (None for other files)."""
-    if not path.endswith("_extraction_metadata.json"):
-        return None
-    with open(path, encoding="utf-8") as f:
-        meta = json.load(f)
+def _extraction_record(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Provenance fields of an extraction metadata JSON."""
     return {"table": meta.get("table_code"), "dataset": meta.get("dataset"), "years": meta.get("years"),
             "geo_level": meta.get("geo_level"), "endpoint": meta.get("endpoint"),
             "states": sorted({e.get("state_code") for e in meta.get("entities") or [] if e.get("state_code")}),
             "variables": meta.get("variables"), "generated_at": meta.get("generated_at"),
             "package_version": meta.get("package_version"), "git_commit": meta.get("git_commit"),
-            "failed_calls": len(meta.get("failed_calls") or [])}
+            "failed_calls": len(meta.get("failed_calls") or []), "data_source": meta.get("data_source")}
+
+
+def _recorded_source(doc: Any) -> Optional[Dict[str, Any]]:
+    """The data source a saved JSON (extraction metadata, tool result, manifest run or bundle)
+    recorded when its data were read: {"synthetic": bool, ...}, or None when it records none."""
+    if not isinstance(doc, dict):
+        return None
+    for source in (doc.get("data_source"), (doc.get("provenance") or {}).get("data_source")):
+        if isinstance(source, dict) and isinstance(source.get("synthetic"), bool):
+            return source
+    return None
+
+
+def _input_names(paths: List[str]) -> List[str]:
+    """Input paths relative to their common folder ('/'-separated), so same-named files from
+    different folders (extract/26/B19013/..., extract/36/B19013/...) stay distinguishable."""
+    full = [os.path.abspath(p) for p in paths]
+    if not full:
+        return []
+    try:
+        common = os.path.commonpath([os.path.dirname(p) for p in full])
+    except ValueError:  # different drives (Windows): keep the parent folder name
+        return [f"{os.path.basename(os.path.dirname(p))}/{os.path.basename(p)}" for p in full]
+    return [os.path.relpath(p, common).replace(os.sep, "/") for p in full]
+
+
+def _bundle_source(recorded: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Bundle data source from the inputs' recorded sources (each {path, synthetic, ...})."""
+    if not recorded:
+        return {"kind": "unknown", "synthetic": None}
+    synthetic = [r for r in recorded if r["synthetic"]]
+    if not synthetic:
+        return {"kind": "census_api", "synthetic": False}
+    marker = {k: synthetic[0][k] for k in ("description", "generator") if synthetic[0].get(k)}
+    return {"kind": "synthetic" if len(synthetic) == len(recorded) else "mixed", "synthetic": True, **marker}
 
 
 def make_results_bundle(
@@ -528,6 +559,7 @@ def make_results_bundle(
     inputs: Optional[List[str]] = None,
     title: str = "",
     notes: Optional[List[str]] = None,
+    allow_failed_results: bool = False,
 ) -> Dict[str, Any]:
     """Collect an exploratory (not pre-registered) analysis into one results bundle:
     results JSON, figures, methods.md, and bundle.json with every file's SHA-256,
@@ -536,31 +568,56 @@ def make_results_bundle(
     Args:
         output_dir: Bundle folder.
         results: {name: path} of tool results saved with `python -m census tool ... --save PATH`.
+            A saved failure (success false) is refused unless allow_failed_results=True,
+            which lists it under "Failed steps" in methods.md, never as a result.
         figure_paths: Figure files to copy (e.g. make_map figure_paths).
         inputs: Files the analysis used (extraction metadata JSON, frames, replicate
-            files); their SHA-256 and, for extraction metadata, table, years, states,
-            endpoint and call failures are recorded.
+            files); their SHA-256 (keyed by the path relative to the inputs' common
+            folder) and, for extraction metadata, table, years, states, endpoint,
+            call failures and data source are recorded.
         title, notes: Methods heading and extra methods/limitations lines.
-    The data source is observed, not declared: a cache marked synthetic labels the
-    bundle synthetic; otherwise it is Census Data API data (kind "census_api").
-    Pre-registered analyses use run_manifest instead (status "confirmatory").
+    The data source comes from what the inputs and results recorded when their data
+    were read (extraction metadata records the cache marker at extraction time): all
+    synthetic -> "synthetic", none synthetic -> "census_api", both -> "mixed" (with a
+    warning), nothing recorded -> "unknown". It is never taken from the cache present
+    at bundle time. Pre-registered analyses use run_manifest instead (status "confirmatory").
     """
     import shutil
 
-    from census.manifest import STATUS_EXPLORATORY, observed_data_source
+    from census.manifest import STATUS_EXPLORATORY
+    from census.pipeline import file_sha256
     from census.report_tables import data_citation, results_bundle
 
     try:
-        loaded = {}
+        loaded, failed, recorded = {}, [], []
         for name, path in (results or {}).items():
             with open(path, encoding="utf-8") as f:
-                loaded[name] = json.load(f)
+                res = json.load(f)
+            if isinstance(res, dict) and res.get("success") is False:
+                failed.append({"name": name, "path": os.path.basename(path), "error_code": res.get("error_code"),
+                               "error": res.get("error") or res.get("summary")})
+                if not allow_failed_results:
+                    return _fail(errors.INVALID_INPUT,
+                                 f"Saved result '{name}' ({path}) is a failure (success false: "
+                                 f"{failed[-1]['error']}); a failed step is not a result.",
+                                 "fix and re-run that step, or drop it from results (allow_failed_results=True "
+                                 "lists it under Failed steps, not as a result)")
+                continue
+            loaded[name] = res
+            source = _recorded_source(res)
+            if source:
+                recorded.append({"path": f"results/{name}.json", **source})
         input_records, extractions = [], []
-        for path in inputs or []:
-            input_records.append({"path": os.path.basename(path), "sha256": _file_sha256(path)})
-            rec = _extraction_record(path)
-            if rec:
-                extractions.append(rec)
+        for path, rel in zip(inputs or [], _input_names(list(inputs or []))):
+            input_records.append({"path": rel, "sha256": file_sha256(path)})
+            if path.lower().endswith(".json"):
+                with open(path, encoding="utf-8") as f:
+                    doc = json.load(f)
+                if path.endswith("_extraction_metadata.json") and isinstance(doc, dict):
+                    extractions.append(_extraction_record(doc))
+                source = _recorded_source(doc)
+                if source:
+                    recorded.append({"path": rel, **source})
         os.makedirs(os.path.join(output_dir, "figures"), exist_ok=True)
         figs = list(figure_paths or [])
         base = [os.path.basename(p) for p in figs]
@@ -573,15 +630,28 @@ def make_results_bundle(
             shutil.copyfile(path, os.path.join(output_dir, "figures", name))
     except (OSError, ValueError, TypeError) as exc:
         return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
-    synthetic, marker = observed_data_source()
-    source = {"kind": "synthetic" if synthetic else "census_api", "synthetic": synthetic,
-              **{k: v for k, v in marker.items() if k in ("description", "generator")}}
+    source = _bundle_source(recorded)
+    warnings: List[str] = []
+    if source["kind"] == "mixed":
+        synth = [r["path"] for r in recorded if r["synthetic"]]
+        real = [r["path"] for r in recorded if not r["synthetic"]]
+        warnings.append(f"MIXED DATA SOURCES: SYNTHETIC inputs ({', '.join(synth)}) are combined with Census "
+                        f"Data API inputs ({', '.join(real)}). These are not Census results and must not be "
+                        "reported as such; re-extract every input from one source.")
+    elif source["kind"] == "unknown":
+        warnings.append("DATA SOURCE UNKNOWN: no input records where its data came from; pass the extraction "
+                        "metadata JSON files as inputs (they record the source observed at extraction time).")
     releases = sorted({int(y) for e in extractions for y in e.get("years") or []})
     tables = sorted({e["table"] for e in extractions if e.get("table")})
-    citation = data_citation(releases, tables, synthetic=synthetic, description=marker.get("description"))
+    citation = data_citation(releases, tables, synthetic=bool(source["synthetic"]),
+                             description=source.get("description"), retrieved=source["kind"] != "unknown")
+    if source["kind"] == "mixed":
+        citation = "MIXED DATA SOURCES (some inputs synthetic): " + citation
     lines = [f"# {title or 'Results'}", "",
              f"**Analysis status:** {STATUS_EXPLORATORY} (not a pre-registered manifest run).", "",
              f"**Data:** {citation}", ""]
+    for w in warnings:
+        lines += [f"**WARNING:** {w}", ""]
     for name, res in loaded.items():
         lines.append(f"## {name}")
         lines.append("")
@@ -594,22 +664,33 @@ def make_results_bundle(
         for note in res.get("notes") or []:
             lines.append(f"- {note}")
         lines.append("")
+    if failed:
+        lines += ["## Failed steps (FAILED: not results)", ""]
+        lines += [f"- {f['name']}: FAILED ({f['error_code']}): {f['error']}" for f in failed] + [""]
     if notes:
         lines += ["## Notes and limitations", ""] + [f"- {n}" for n in notes] + [""]
     provenance = {"analysis_status": STATUS_EXPLORATORY, "data_source": source, "inputs": input_records,
-                  "extractions": extractions, "title": title}
+                  "recorded_data_sources": recorded, "extractions": extractions, "title": title}
+    if warnings:
+        provenance["warnings"] = warnings
+    if failed:
+        provenance["failed_results"] = failed
     bundle = results_bundle(output_dir, methods="\n".join(lines), results=loaded, provenance=provenance,
                             citation=citation)
     return _ok(f"Results bundle with {len(loaded)} result(s), {len(figure_paths or [])} figure file(s) and "
-               f"{len(input_records)} input hash(es) written; data source {source['kind']}.",
-               "cite bundle.json (file hashes and provenance) and methods.md with the results",
-               output_dir=output_dir, data_source=source, citation=citation,
-               files=len(bundle.get("files", {})), extractions=extractions)
+               f"{len(input_records)} input hash(es) written; data source {source['kind']}."
+               + (f" WARNING: {' '.join(warnings)}" if warnings else ""),
+               "cite bundle.json (file hashes and provenance) and methods.md with the results"
+               + ("; resolve the data source warning before reporting" if warnings else ""),
+               output_dir=output_dir, data_source=source, citation=citation, warnings=warnings,
+               results=list(loaded), files=len(bundle.get("files", {})), extractions=extractions)
 
 
 def save_json(result: Dict[str, Any], path: str) -> str:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(_jsonable(result), f, indent=2)
+    """Write a tool result as the JSON ``--json`` prints (``python -m census tool ... --save PATH``)."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(result, indent=2, default=str) + "\n")
     return path
 
 

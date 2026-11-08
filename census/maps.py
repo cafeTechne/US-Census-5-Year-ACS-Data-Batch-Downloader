@@ -53,7 +53,7 @@ not a reimplementation of either paper's algorithm.
 """
 
 import math
-import textwrap
+import re
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -339,11 +339,32 @@ def _ids(gdf) -> pd.DataFrame:
 LEGEND_TITLE_WIDTH = 26
 
 
+def wrap_legend_title(title: str, width: int = LEGEND_TITLE_WIDTH) -> str:
+    """Wrap each line of ``title`` at ``width`` characters, breaking only at spaces,
+    after hyphens, or after underscores, so an identifier such as
+    ``median_hh_income_rpp_adjusted`` is never split inside one of its parts. A
+    single part longer than ``width`` is kept whole."""
+    out = []
+    for line in title.split("\n"):
+        rows: List[str] = []
+        cur = ""
+        for word in line.split():
+            for i, part in enumerate(p for p in re.split(r"(?<=[_-])", word) if p):
+                sep = " " if i == 0 and cur else ""
+                if cur and len(cur) + len(sep) + len(part) > width:
+                    rows.append(cur)
+                    cur = part
+                else:
+                    cur += sep + part
+        out.append("\n".join(rows + [cur]))
+    return "\n".join(out)
+
+
 def _legend(ax, handles, title: str) -> None:
     """Legend outside the map, to the right, left-aligned title. Title lines are
-    wrapped at 26 characters so a long variable label is not clipped at the
-    figure's right edge (journal widths are fixed)."""
-    title = "\n".join(textwrap.fill(line, LEGEND_TITLE_WIDTH) if line else line for line in title.split("\n"))
+    wrapped at 26 characters (:func:`wrap_legend_title`) so a long variable label
+    is not clipped at the figure's right edge (journal widths are fixed)."""
+    title = wrap_legend_title(title)
     leg = ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False,
                     fontsize=6, title_fontsize=6, title=title, alignment="left")
     leg.set_gid("legend")

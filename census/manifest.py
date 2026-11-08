@@ -844,6 +844,16 @@ def observed_data_source(client: Any = None, use_cache: bool = True) -> Tuple[bo
     return synthetic, dict(marker or {})
 
 
+def data_source_record(client: Any = None, use_cache: bool = True) -> Dict[str, Any]:
+    """Observed data source as recorded in extraction metadata and results bundles:
+    {"kind": "synthetic" | "census_api", "synthetic": bool} plus the synthetic
+    marker's description and generator when set (:func:`observed_data_source`)."""
+    synthetic, marker = observed_data_source(client, use_cache)
+    record: Dict[str, Any] = {"kind": "synthetic" if synthetic else "census_api", "synthetic": synthetic}
+    record.update({k: marker[k] for k in ("description", "generator") if marker.get(k)})
+    return record
+
+
 def resolve_data_source(manifest: Mapping[str, Any], client: Any = None,
                         use_cache: bool = True) -> Tuple[Dict[str, Any], Optional[str]]:
     """Data-source label for a run: the observed source wins over the declaration.

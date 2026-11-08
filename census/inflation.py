@@ -26,7 +26,6 @@ callers should pair with provisional_advisory().
 
 import csv
 import io
-import json
 import os
 import re
 from functools import lru_cache
@@ -34,7 +33,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
-from census.data_integrity import clear_verification_cache, read_table_bytes, same_directory
+from census.data_integrity import read_sidecar, read_table_bytes, same_directory
 from census.geo import get_resource_path
 from census.stats import parse_variable_code
 
@@ -60,13 +59,6 @@ def price_index_dir() -> str:
     return os.getenv("CENSUS_PRICE_INDEX_DIR") or bundled_price_index_dir()
 
 
-def _read_sidecar(path: str) -> Dict[str, Any]:
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
 @lru_cache(maxsize=None)
 def _read_index_table(index: str) -> Tuple[Dict[int, float], Optional[Dict[str, Any]]]:
     """(values, custom-table record); the record is None for bundled data or a missing file."""
@@ -78,7 +70,7 @@ def _read_index_table(index: str) -> Tuple[Dict[int, float], Optional[Dict[str, 
         return {}, None
     sidecar = os.path.join(directory, f"{_INDEX_FILES[index]}.json")
     bundled = same_directory(directory, bundled_price_index_dir())
-    expected = _read_sidecar(sidecar).get("csv_sha256") if bundled else None
+    expected = read_sidecar(sidecar).get("csv_sha256") if bundled else None
     raw, digest = read_table_bytes(path, bundled, expected, sidecar, "scripts/update_price_indexes.py")
     values = {
         int(r["year"]): float(r["value"])
@@ -108,7 +100,6 @@ def load_price_index(index: str = DEFAULT_PRICE_INDEX, allow_provisional: bool =
 def _clear_price_index_caches() -> None:
     _read_index_table.cache_clear()
     price_index_info.cache_clear()
-    clear_verification_cache()
 
 
 # Tests and the update script call load_price_index.cache_clear() after rewriting files.
@@ -124,7 +115,7 @@ def price_index_info(index: str = DEFAULT_PRICE_INDEX) -> Dict[str, Any]:
     """
     if index not in _INDEX_FILES:
         raise ValueError(f"Unknown price index '{index}'. Choose from {PRICE_INDEXES}.")
-    info = _read_sidecar(os.path.join(price_index_dir(), f"{_INDEX_FILES[index]}.json"))
+    info = read_sidecar(os.path.join(price_index_dir(), f"{_INDEX_FILES[index]}.json"))
     custom = _read_index_table(index)[1]
     if custom is not None:
         info = {**info, "custom_table": custom}

@@ -37,7 +37,6 @@ unscaled per-area value.
 
 import csv
 import io
-import json
 import os
 import re
 from functools import lru_cache
@@ -45,7 +44,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
-from census.data_integrity import clear_verification_cache, read_table_bytes, same_directory
+from census.data_integrity import read_sidecar, read_table_bytes, same_directory
 from census.geo import get_resource_path
 from census.inflation import DEFAULT_PRICE_INDEX, INDEX_DISPLAY, inflation_factor
 
@@ -74,14 +73,6 @@ def price_parity_dir() -> str:
     return os.getenv("CENSUS_PRICE_PARITY_DIR") or bundled_price_parity_dir()
 
 
-def _sidecar() -> Dict[str, Any]:
-    path = os.path.join(price_parity_dir(), "rpp.json")
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
 @lru_cache(maxsize=None)
 def _read_table(name: str) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dict[str, Any]]]:
     """(rows of ``name``, custom-table record); rows None when missing, record None for bundled data."""
@@ -90,8 +81,9 @@ def _read_table(name: str) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dic
     if not os.path.exists(path):
         return None, None
     bundled = same_directory(directory, bundled_price_parity_dir())
-    expected = (_sidecar().get("csv_sha256") or {}).get(name) if bundled else None
-    raw, digest = read_table_bytes(path, bundled, expected, os.path.join(directory, "rpp.json"),
+    sidecar = os.path.join(directory, "rpp.json")
+    expected = (read_sidecar(sidecar).get("csv_sha256") or {}).get(name) if bundled else None
+    raw, digest = read_table_bytes(path, bundled, expected, sidecar,
                                    "scripts/update_price_parities.py")
     rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8"), newline="")))
     custom = None if bundled else {"path": os.path.abspath(path), "sha256": digest, "verified": False}
@@ -120,7 +112,7 @@ def price_parity_info() -> Dict[str, Any]:
     With a custom CENSUS_PRICE_PARITY_DIR, ``custom_tables`` maps each CSV
     present to its path and SHA-256 (``verified: False``: nothing was checked).
     """
-    info = _sidecar()
+    info = read_sidecar(os.path.join(price_parity_dir(), "rpp.json"))
     custom = {n: c for n in ("rpp.csv", "pce_price_index.csv") for c in [_read_table(n)[1]] if c is not None}
     if custom:
         info = {**info, "custom_tables": custom}
@@ -139,7 +131,6 @@ def clear_cache() -> None:
     _read_table.cache_clear()
     _load.cache_clear()
     price_parity_info.cache_clear()
-    clear_verification_cache()
 
 
 def load_price_parities() -> pd.DataFrame:
@@ -274,6 +265,12 @@ def adjust_for_place_and_time(value: float, geography: Any, year: int, base_year
     return float(value) * 100.0 / rpp * inflation_factor(year, base_year, cpi_table, index, allow_provisional)
 
 
+def custom_table_note(custom: Mapping[str, Any]) -> str:
+    """Result note for an RPP table from CENSUS_PRICE_PARITY_DIR (``place_parity()["custom_table"]``)."""
+    return (f"CUSTOM RPP TABLE: {custom['path']} (SHA-256 {custom['sha256']}), supplied through "
+            "CENSUS_PRICE_PARITY_DIR and not checked against the bundled checksums.")
+
+
 def describe_place_adjustment(geography: Any, year: int, state: Optional[str] = None,
                               portion: Optional[str] = None, base_year: Optional[int] = None,
                               index: str = DEFAULT_PRICE_INDEX, acs_period_years: int = 5) -> Dict[str, Any]:
@@ -288,8 +285,7 @@ def describe_place_adjustment(geography: Any, year: int, state: Optional[str] = 
                      "applied to the whole period.")
     notes += p["advisories"]
     if p.get("custom_table"):
-        notes.append(f"CUSTOM RPP TABLE: {p['custom_table']['path']} (SHA-256 {p['custom_table']['sha256']}), "
-                     "supplied through CENSUS_PRICE_PARITY_DIR and not checked against the bundled checksums.")
+        notes.append(custom_table_note(p["custom_table"]))
     notes.append(RPP_ESTIMATION_ERROR_NOTE)
     return {**p, "notes": notes, "applied_by_default": False}
 

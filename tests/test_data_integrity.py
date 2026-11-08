@@ -119,11 +119,16 @@ class TestBundledVerification(_Base):
     def test_verified_once_per_file(self):
         with patch.object(data_integrity, "sha256_bytes", wraps=data_integrity.sha256_bytes) as spy:
             for _ in range(3):
-                inflation._read_index_table.cache_clear()  # force a re-read, keep the verification cache
                 load_price_index(CPI_U)
+                price_index_info(CPI_U)
             self.assertEqual(spy.call_count, 1)
             load_price_index(R_CPI_U_RS)
             self.assertEqual(spy.call_count, 2)
+            for _ in range(3):
+                rpp.load_price_parities()
+                rpp.place_parity("us", 2020)
+                rpp.price_parity_info()
+            self.assertEqual(spy.call_count, 4)  # rpp.csv and pce_price_index.csv, once each
 
     def test_file_changed_after_verification_is_rechecked(self):
         copy = self._copy(INDEX_DIR)
