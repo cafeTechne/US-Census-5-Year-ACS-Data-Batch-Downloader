@@ -697,6 +697,8 @@ def save_json(result: Dict[str, Any], path: str) -> str:
 def create_manifest(manifest_path: str) -> Dict[str, Any]:
     """Validate a pre-registration manifest (JSON) and return its SHA-256 hash.
     Commit the manifest and hash BEFORE pulling data; then call run_manifest.
+    Several states: geography {"level": "county", "states": ["26", "36"]}; a price
+    adjustment: "adjustments": [{"type": "rpp", "variables": ["income"], "rpp_year": 2024}].
 
     The schema is documented in census/manifest.py and examples/manifests/.
     Example: create_manifest("examples/manifests/income_population_tracts.json")
@@ -753,6 +755,8 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
         "analysis_status": status, "data_source": res.get("data_source"), "replicates": res.get("replicates"),
         "deviations": devs, "hypotheses": hyp, "bundle": res.get("bundle"),
     }
+    if "adjustments" in res:
+        out["adjustments"] = res["adjustments"]
     payload = _jsonable(out)
     if not res.get("success"):
         kinds = sorted({str(d.get("kind")) for d in devs})

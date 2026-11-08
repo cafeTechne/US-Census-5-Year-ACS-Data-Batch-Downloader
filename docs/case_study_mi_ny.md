@@ -10,6 +10,16 @@ frozen inputs, this one downloads real data from the Census Data API, the Census
 replicate (VRE) files and Census cartographic boundary files. Results are real ACS
 estimates and can change if the Census Bureau revises the release.
 
+The study runs two ways (PLAN_ROUND_14 A4):
+
+1. **Confirmatory** (section 1): one pre-registered manifest,
+   [`examples/manifests/mi_ny_income_education.json`](../examples/manifests/mi_ny_income_education.json),
+   run with `run_manifest`. It fixes the states, variables, derivation, price adjustment,
+   model, hypothesis and correction before any data are pulled. This is the result to report.
+2. **Exploratory, as sensitivity analysis** (sections 2-7): the same analysis built step by
+   step (Round 13), plus what the manifest does not cover: maps, a nominal-dollar model and
+   replicate SEs for the covariate.
+
 ## Purpose and research question
 
 How does county median household income compare across Michigan and New York counties once
@@ -55,7 +65,87 @@ Run the commands from the repository root. All outputs go under `case_study_outp
 (gitignored; never committed); paths are written out in full so every command can be pasted
 as is into a POSIX shell (bash, zsh).
 
-## 1. Extraction with MOEs and provenance
+## 1. Confirmatory run: the pre-registered manifest
+
+```bash
+python -m census tool create_manifest --arg manifest_path=examples/manifests/mi_ny_income_education.json --json
+python -m census tool run_manifest --arg manifest_path=examples/manifests/mi_ny_income_education.json --arg output_dir=case_study_output/confirmatory --json
+```
+
+`create_manifest` validates the manifest offline. Expected: `"valid": true` and
+`"hash": "d8905f57625e1d1862a63ca0f6deeb364a7643385fc4a700b6691e855e3bfcb0"`. A different
+hash means a different pre-registration. The MCP tool `run_manifest` takes the same
+arguments and gives the same result.
+
+What the manifest fixes:
+
+| Manifest entry | Value |
+| :--- | :--- |
+| `geography` | `{"level": "county", "states": ["26", "36"]}`: each table is extracted per state and the two states are stacked (145 counties) |
+| `variables` | `median_hh_income` = `2024:B19013_001`; `ed_total` = `2024:B15002_001`, and the eight bachelor's-or-higher cells `B15002_015`..`_018` and `_032`..`_035` |
+| `derivations` | `pct_bachelors`: proportion of the eight cells over `ed_total`, as a percent |
+| `adjustments` | `{"type": "rpp", "variables": ["median_hh_income"], "rpp_year": 2024, "areas": "county_metro"}` |
+| `exclusions` | CV screen at 30% on `median_hh_income` and `pct_bachelors`, flag only |
+| `analyses` | m1: `fit_replicate`, OLS `median_hh_income ~ pct_bachelors + C(GEOID.str[:2])`, `population` target, 90% intervals |
+| `hypotheses` | H1: coefficient of `pct_bachelors` > 0 (one-sided); Holm correction (one hypothesis) |
+
+The `adjustments` step uses the same code as the `place_adjust_frame` tool (section 3):
+each county gets its MSA's 2024 RPP, or the state's nonmetropolitan-portion RPP outside a
+metropolitan CBSA, and the estimate and SE are divided by RPP/100 (replicates too, when
+replicates are supplied). Multi-state manifests get no automatic state effect: the formula
+names the state term `C(GEOID.str[:2])` explicitly. Without `rpp_year` the latest year in
+the RPP table would be used and recorded; a year other than the release end year is
+recorded as a note, not a deviation.
+
+Expected in the JSON output: `"analysis_status": "confirmatory"`, `"deviations": []`,
+`data_source` `{"synthetic": false, ...}`, and for H1:
+
+| Term | Estimate | se_model | 90% CI (from se_model) | One-sided p (Holm) |
+| :--- | ---: | ---: | :--- | ---: |
+| pct_bachelors | 811.00 | 77.03 | [684.29, 937.71] | 3.2e-26 |
+
+`confirmatory/bundle/results/m1.json` also gives New York vs Michigan 1,643.83 ([-965.49,
+4,253.15]) and the intercept 51,698.07. `confirmatory/bundle/results/run.json` records
+`n_units` 145, no county flagged by the CV screen, and under `adjustments`: the RPP year
+(2024, `rpp_year_source` `manifest`), the 31 RPP areas used (29 MSAs and the two
+nonmetropolitan portions) with their RPP values and county counts, the CBSA boundary file,
+and the SHA-256 of the bundled RPP table
+(`3e726a9d274636a2cce1301bac17000b66c71cb37090b9ac001c5c1082fd2dd9`; a table from
+`CENSUS_PRICE_PARITY_DIR` would be recorded with its path and hash as `custom`).
+`bundle.json` carries the same RPP provenance and `analysis_status: confirmatory`, and
+`methods.md` describes the adjustment.
+
+**Comparison with the exploratory result (section 4).** The confirmatory coefficient,
+`se_model` and interval are identical to the Round 13 exploratory result (811.00, 90% CI
+[684.29, 937.71]), and so are the state and intercept terms. They have to be: both routes use
+the same API responses, the same county-to-RPP assignment, the same derived share and the
+same OLS fit, and with the `population` target the interval uses the model SE. There is one
+difference. The confirmatory run has **no `se_sampling`**. No replicates are supplied, and
+they could not be complete: `B19013` has no Census replicates, and a confirmatory run uses
+`replicate_policy="strict"`, so supplying only the `B15002` replicates would stop m1 with a
+blocking `replicates_incomplete` deviation. The covariate-only `se_sampling` (11.98) is
+reported by the exploratory route below as a sensitivity result. It does not enter the
+stated interval in either route. In the manifest frame `pct_bachelors_se` is the ACS
+approximation rather than the exact replicate SE; this affects only the CV screen, which
+flags no county in either route.
+
+**What "confirmatory" means here.** The manifest was written after the Round 13
+exploratory analysis of the same data, so this run confirms that the analysis reproduces
+exactly under a fixed protocol. It is not an independent test of the hypothesis. An
+independent confirmation would apply the same manifest, with only `states` or `releases`
+changed, to data not yet analysed, for example other states or the next ACS release.
+
+The offline test `tests/test_manifest_multistate.py` runs these two commands on frozen
+copies of the four API responses (trimmed to the manifest's variables) with network access
+refused, and checks the numbers above for the CLI and MCP routes. The opt-in live test
+(`CENSUS_LIVE_TESTS=1`) runs them against the Census API and the boundary files.
+
+## Sensitivity analysis: the exploratory route
+
+Sections 2-7 build the same model step by step with separate tools. Results from this
+route are labelled `exploratory`.
+
+## 2. Extraction with MOEs and provenance
 
 ```bash
 python -m census extract --table B19013 --geo county --state 26 --years 2024 --variables B19013_001 --reliability --codebook --slug-style code --out "case_study_output/extract/26/B19013" --json
@@ -69,9 +159,9 @@ with status `stable` in `*_concordance_issues.json` (`status_counts`). The progr
 `concordance policy: fail` on stderr is the policy (stop on blocking issues), not a result. Each folder holds the panel (`*_county_panel_2024.csv`: estimate, MOE, SE =
 MOE / 1.645, CV, reliability), the codebook, and `*_extraction_metadata.json` (endpoint
 `https://api.census.gov/data/{year}/acs/acs5`, variables, concept IDs, metadata vintage
-hashes, package version and git commit), which `python -m census replay` can re-run (step 6).
+hashes, package version and git commit), which `python -m census replay` can re-run (step 7).
 
-## 2. Price adjustment and maps, one state at a time
+## 3. Price adjustment and maps, one state at a time
 
 ```bash
 python -m census tool build_analysis_frame --arg input_path=case_study_output/extract/26/B19013/B19013_county_panel_2024.csv --arg 'variables={"median_hh_income": "B19013_001"}' --arg year=2024 --arg output_path=case_study_output/frames/income_26.parquet --json
@@ -130,7 +220,7 @@ Small copies of the two choropleth PNGs are kept in the repository:
 [`docs/case_study/choropleth_26.png`](case_study/choropleth_26.png) and
 [`docs/case_study/choropleth_36.png`](case_study/choropleth_36.png).
 
-## 3. Regression with replicate standard errors
+## 4. Regression with replicate standard errors
 
 ```bash
 python -m census tool build_analysis_frame --arg 'input_path=["case_study_output/extract/26/B19013/B19013_county_panel_2024.csv", "case_study_output/extract/36/B19013/B19013_county_panel_2024.csv", "case_study_output/extract/26/B15002/B15002_county_panel_2024.csv", "case_study_output/extract/36/B15002/B15002_county_panel_2024.csv"]' --arg 'variables={"median_hh_income": "B19013_001"}' --arg 'derive=[{"name": "pct_bachelors", "op": "proportion", "num": ["B15002_015E", "B15002_016E", "B15002_017E", "B15002_018E", "B15002_032E", "B15002_033E", "B15002_034E", "B15002_035E"], "den": "B15002_001E", "as_percent": true}]' --arg use_replicates=true --arg table_code=B15002 --arg year=2024 --arg output_path=case_study_output/frames/model_frame.parquet --json
@@ -197,7 +287,7 @@ association between areas, not a statement about individuals and not a causal ef
 education on income. Spatial correlation among counties is not modelled, so the model SE may
 also be too small (see Limitations).
 
-## 4. Results bundle and run provenance
+## 5. Results bundle and run provenance
 
 ```bash
 python -m census tool make_results_bundle --arg output_dir=case_study_output/bundle --arg 'results={"regression": "case_study_output/results/regression.json", "regression_nominal": "case_study_output/results/regression_nominal.json", "rpp_model": "case_study_output/results/rpp_model.json", "rpp_26": "case_study_output/results/rpp_26.json", "rpp_36": "case_study_output/results/rpp_36.json", "map_26": "case_study_output/results/map_26.json", "map_36": "case_study_output/results/map_36.json", "cv_map_26": "case_study_output/results/cv_map_26.json", "cv_map_36": "case_study_output/results/cv_map_36.json"}' --arg 'figure_paths=["case_study_output/maps/26/choropleth.pdf", "case_study_output/maps/26/choropleth.png", "case_study_output/maps/26/uncertainty.pdf", "case_study_output/maps/36/choropleth.pdf", "case_study_output/maps/36/choropleth.png", "case_study_output/maps/36/uncertainty.pdf", "case_study_output/figures/coefficients.pdf"]' --arg 'inputs=["case_study_output/extract/26/B19013/B19013_extraction_metadata.json", "case_study_output/extract/36/B19013/B19013_extraction_metadata.json", "case_study_output/extract/26/B15002/B15002_extraction_metadata.json", "case_study_output/extract/36/B15002/B15002_extraction_metadata.json", "case_study_output/frames/model_frame_rpp.parquet", "case_study_output/frames/model_frame_replicates_rpp.parquet"]' --arg "title=Price-adjusted county median household income, Michigan and New York, ACS 2020-2024" --arg 'notes=["Outcome B19013 has no Census variance replicates; se_sampling covers the covariate only.", "RPPs are BEA estimates with their own error, not included in any SE, MOE or interval here.", "ACS 5-year dollars are 2024 dollars; the 2024 RPP is applied to the whole 2020-2024 period."]' --json
@@ -222,10 +312,10 @@ no source give `unknown`; synthetic and real inputs together give `mixed` with a
 SOURCES` warning. A saved result with `"success": false` is refused (a failed step is not a
 result) unless `allow_failed_results=true`, which lists it under "Failed steps" in `methods.md`.
 
-This analysis is **exploratory**: it was not pre-registered with `run_manifest`, whose
-manifests take one state per run and have no place-adjustment step (see "Toolkit gaps").
+This route is **exploratory**: its steps were not pre-registered. Section 1 is the
+pre-registered, confirmatory run of the same analysis.
 
-## 5. Spot check against the live API
+## 6. Spot check against the live API
 
 For five counties per state, the extracted `B19013_001` estimate and MOE were compared with
 the values the Census Data API returns directly
@@ -256,7 +346,7 @@ CENSUS_LIVE_TESTS=1 python -m pytest -q tests/test_case_study_live.py
 
 No values were taken from data.census.gov.
 
-## 6. Re-running
+## 7. Re-running
 
 ```bash
 python -m census replay "case_study_output/extract/26/B19013/B19013_extraction_metadata.json" --out "case_study_output/replay_26_B19013" --json
@@ -281,7 +371,7 @@ fields: timestamps (`generated_at`), absolute paths, the git commit, and figure 
   counties of a state share the nonmetropolitan-portion RPP; within-area price differences
   (e.g. Manhattan vs the rest of the New York MSA) are not captured.
 - **Outcome replicates.** `B19013` has no published variance replicates, so the replicate SE
-  covers the covariate only (see section 3). The model-SE interval is unaffected.
+  covers the covariate only (see section 4). The model-SE interval is unaffected.
 - **Measurement error in the covariate.** Replicate refits capture the coefficient's sampling
   variability; they do not correct attenuation from a noisy covariate. With covariate CVs
   of about 3.5% (median) the bias is likely small; `fit_model method=regression_calibration`
@@ -289,11 +379,13 @@ fields: timestamps (`generated_at`), absolute paths, the git commit, and figure 
 - **Pooling two states.** The state indicator removes a level difference only; the slope is
   assumed common to both states. Counties are not independent draws (spatial correlation is
   not modelled; `spatial_autocorrelation` is the check).
-- **Exploratory, not confirmatory.** Not pre-registered (see section 4).
+- **Confirmatory, not independent.** The manifest (section 1) was registered after the
+  exploratory analysis of the same data. It fixes the protocol but does not replicate the
+  finding on new data (see section 1).
 
 ## Toolkit gaps found while writing this workflow
 
-Closed in this change (with offline tests):
+Closed in Round 13 (with offline tests):
 
 - `build_analysis_frame` took one input file and one replicate table; it now takes a list of
   files (other tables joined on GEOID/Year, other states stacked) and a list of tables.
@@ -306,9 +398,14 @@ Closed in this change (with offline tests):
   the right edge for some area shapes (New York counties): legend titles are now wrapped and
   axes are shrunk until the legend fits the fixed journal width.
 
+Closed in Round 14 (PLAN_ROUND_14 A1-A4, offline tests in `tests/test_manifest_multistate.py`):
+
+- `run_manifest` took a single state and had no place-adjustment step. Manifests now take
+  `geography.states` (extracted per state and stacked) and an `adjustments` step
+  (`{"type": "rpp", ...}`) that reuses the `place_adjust_frame` code and records RPP
+  provenance. Derivations are evaluated on supplied replicates. Section 1 is the result.
+
 Open (documented, not closed):
 
-- `run_manifest` geography takes a single state and has no place-adjustment step, so this
-  analysis cannot be pre-registered as one manifest.
 - Census publishes no replicates for `B19013` (and other published medians not on the VRE
   list); exact replicate SEs for a model with such an outcome are not available.

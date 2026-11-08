@@ -256,6 +256,101 @@ def _county_rpp_areas(geoids: List[str], year: int) -> Any:
     return county_cbsa_membership(counties, cbsas).set_index("GEOID"), cbsas.attrs.get("source_url")
 
 
+def place_adjust(frame: Any, variables: List[str], year: int, areas: str = "county_metro",
+                 replicates: Any = None, rpp_year: Optional[int] = None) -> Dict[str, Any]:
+    """Core of :func:`place_adjust_frame` and of the manifest ``adjustments`` step
+    (census.manifest): the one implementation of the RPP adjustment of a frame.
+
+    ``frame``: analysis frame (DataFrame, GEOID per row; a modified copy is returned).
+    ``variables``: dollar variables; ``<v>`` and ``<v>_se`` are divided by RPP/100.
+    ``year``: the dollars' year (ACS: release end year; also the county boundary year).
+    ``rpp_year``: the RPP year (default ``year``). ``replicates``: optional replicate
+    long frame; rows of ``variables`` are scaled by the same factor, and their rows
+    whose GEOID is not in the frame are dropped.
+    Returns {"frame", "replicates", "rpp_year", "parity", "rpp_areas", "boundary_source",
+    "notes", "advisories", "custom_table"}. Raises on bad input or a missing RPP.
+    """
+    import pandas as pd
+
+    from census import rpp
+    from census.analysis import REPLICATE_COLUMNS
+
+    if areas not in _RPP_AREAS:
+        raise ValueError(f"areas must be one of {_RPP_AREAS}.")
+    if isinstance(variables, str):
+        variables = [variables]
+    variables = list(variables)
+    rpp_year = int(year if rpp_year is None else rpp_year)
+    frame = frame.copy()
+    missing = [v for v in variables if v not in frame.columns or f"{v}_se" not in frame.columns]
+    if missing:
+        raise KeyError(f"frame lacks {missing} (or their _se columns); use analysis variable names")
+    if "Year" in frame.columns and set(pd.to_numeric(frame["Year"]).astype(int)) - {int(year)}:
+        raise ValueError(f"frame has releases other than {int(year)}; adjust one release at a time")
+    geoids = [str(g) for g in frame["GEOID"]]
+    boundary_source = None
+    if areas == "county_metro":
+        if any(len(g) != 5 for g in geoids):
+            raise ValueError("areas='county_metro' needs county GEOIDs (5 digits); use areas='state'")
+        membership, boundary_source = _county_rpp_areas(sorted(set(geoids)), int(year))
+        member = {g: membership.loc[g] for g in set(geoids)}
+        keys = [rpp.county_rpp_area(g, member[g]["CBSA"] if pd.notna(member[g]["CBSA"]) else None,
+                                    member[g]["LSAD"] if pd.notna(member[g]["LSAD"]) else None)
+                for g in geoids]
+        frame["cbsa"] = [member[g]["CBSA"] if pd.notna(member[g]["CBSA"]) else "" for g in geoids]
+        frame["cbsa_type"] = [{"M1": "metropolitan", "M2": "micropolitan"}.get(member[g]["LSAD"], "none")
+                              if pd.notna(member[g]["LSAD"]) else "none" for g in geoids]
+    else:
+        keys = [g[:2] for g in geoids]
+    parity = {k: rpp.place_parity(k, rpp_year) for k in sorted(set(keys))}
+    frame["rpp_area"] = [parity[k]["geo_fips"] for k in keys]
+    frame["rpp_area_name"] = [parity[k]["geo_name"] for k in keys]
+    frame["rpp"] = [parity[k]["rpp"] for k in keys]
+    factor = 100.0 / frame["rpp"].to_numpy(float)
+    for v in variables:
+        frame[v] = pd.to_numeric(frame[v], errors="coerce").to_numpy(float) * factor
+        frame[f"{v}_se"] = pd.to_numeric(frame[f"{v}_se"], errors="coerce").to_numpy(float) * factor
+    reps = None
+    if replicates is not None:
+        reps = replicates.copy()
+        by_geoid = dict(zip(geoids, factor))
+        sel = reps["variable"].isin(variables)
+        unmatched = sorted(set(reps.loc[sel, "GEOID"].astype(str)) - set(by_geoid))
+        f = reps.loc[sel, "GEOID"].astype(str).map(by_geoid).to_numpy(float)
+        cols = ["estimate"] + [c for c in REPLICATE_COLUMNS if c in reps.columns]
+        # whole-number replicate files read as int64; pandas 3 refuses float values in int columns
+        reps[cols] = reps[cols].astype(float)
+        reps.loc[sel, cols] = reps.loc[sel, cols].to_numpy(float) * f[:, None]
+        if unmatched:
+            reps = reps[~(sel & reps["GEOID"].astype(str).isin(unmatched))]
+    counts = frame.groupby(["rpp_area", "rpp_area_name"]).agg(rpp=("rpp", "first"), rows=("rpp", "size")).reset_index()
+    notes = [f"PLACE ADJUSTMENT: {', '.join(variables)} divided by the BEA Regional Price Parity ({rpp_year}, "
+             "U.S.=100) of each row's area, i.e. expressed in national-average purchasing power; _se scaled by "
+             "the same factor."]
+    if rpp_year == int(year):
+        notes.append(f"ACS 5-year dollars are in end-year ({int(year)}) dollars; the {int(year)} RPP is applied to "
+                     "the whole period.")
+    else:
+        notes.append(f"RPP YEAR: the {rpp_year} RPP is applied to ACS dollars of {int(year)} (the release end "
+                     f"year); price-level differences between places are assumed unchanged between {rpp_year} "
+                     f"and {int(year)}.")
+    if areas == "county_metro":
+        notes.append("RPP AREA: counties in a metropolitan CBSA use that MSA's RPP; micropolitan and rural "
+                     "counties use the state nonmetropolitan-portion RPP (BEA nonmetro portions include "
+                     f"micropolitan counties). CBSA membership from {boundary_source} (OMB bulletin 23-01 "
+                     "delineation, as in BEA's RPPs).")
+    # provenance as in rpp.describe_place_adjustment: advisories and an unverified custom RPP table
+    advisories = sorted({a for p in parity.values() for a in p["advisories"]})
+    custom = next((p["custom_table"] for p in parity.values() if p.get("custom_table")), None)
+    notes += advisories
+    if custom:
+        notes.append(rpp.custom_table_note(custom))
+    notes.append(rpp.RPP_ESTIMATION_ERROR_NOTE)
+    return {"frame": frame, "replicates": reps, "rpp_year": rpp_year, "parity": parity,
+            "rpp_areas": _records(counts), "boundary_source": boundary_source, "notes": notes,
+            "advisories": advisories, "custom_table": custom}
+
+
 def place_adjust_frame(
     input_path: str,
     variables: List[str],
@@ -264,6 +359,7 @@ def place_adjust_frame(
     replicates_path: Optional[str] = None,
     output_path: Optional[str] = None,
     replicates_output_path: Optional[str] = None,
+    rpp_year: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Express dollar variables of an analysis frame in national-average purchasing
     power with BEA Regional Price Parities, row by row (value * 100 / RPP).
@@ -279,95 +375,39 @@ def place_adjust_frame(
             "state" (the state RPP for every row).
         replicates_path: Replicate file from build_analysis_frame; the rows of
             the adjusted variables are scaled too (written to replicates_output_path).
+        rpp_year: RPP year when it differs from year (default: year); noted in the result.
     The RPP is treated as fixed: its own estimation error is not in the adjusted
-    SEs, MOEs or replicates. Never applied automatically.
+    SEs, MOEs or replicates. Never applied automatically. A manifest can declare the
+    same adjustment as an "adjustments" step (run_manifest).
     Example: place_adjust_frame("frame.parquet", ["income"], 2024)
     """
-    import numpy as np
-    import pandas as pd
-
     from census import rpp
-    from census.analysis import REPLICATE_COLUMNS
 
     if areas not in _RPP_AREAS:
         return _fail(errors.INVALID_INPUT, f"areas must be one of {_RPP_AREAS}.")
     if isinstance(variables, str):
         variables = [variables]
     try:
-        frame = _load_frame(input_path)
-        missing = [v for v in variables if v not in frame.columns or f"{v}_se" not in frame.columns]
-        if missing:
-            raise KeyError(f"frame lacks {missing} (or their _se columns); use analysis variable names")
-        if "Year" in frame.columns and set(pd.to_numeric(frame["Year"]).astype(int)) - {int(year)}:
-            raise ValueError(f"frame has releases other than {int(year)}; adjust one release at a time")
-        geoids = [str(g) for g in frame["GEOID"]]
-        boundary_source = None
-        if areas == "county_metro":
-            if any(len(g) != 5 for g in geoids):
-                raise ValueError("areas='county_metro' needs county GEOIDs (5 digits); use areas='state'")
-            membership, boundary_source = _county_rpp_areas(sorted(set(geoids)), int(year))
-            member = {g: membership.loc[g] for g in set(geoids)}
-            keys = [rpp.county_rpp_area(g, member[g]["CBSA"] if pd.notna(member[g]["CBSA"]) else None,
-                                        member[g]["LSAD"] if pd.notna(member[g]["LSAD"]) else None)
-                    for g in geoids]
-            frame["cbsa"] = [member[g]["CBSA"] if pd.notna(member[g]["CBSA"]) else "" for g in geoids]
-            frame["cbsa_type"] = [{"M1": "metropolitan", "M2": "micropolitan"}.get(member[g]["LSAD"], "none")
-                                  if pd.notna(member[g]["LSAD"]) else "none" for g in geoids]
-        else:
-            keys = [g[:2] for g in geoids]
-        parity = {k: rpp.place_parity(k, int(year)) for k in sorted(set(keys))}
-        frame["rpp_area"] = [parity[k]["geo_fips"] for k in keys]
-        frame["rpp_area_name"] = [parity[k]["geo_name"] for k in keys]
-        frame["rpp"] = [parity[k]["rpp"] for k in keys]
-        factor = 100.0 / frame["rpp"].to_numpy(float)
-        for v in variables:
-            frame[v] = pd.to_numeric(frame[v], errors="coerce").to_numpy(float) * factor
-            frame[f"{v}_se"] = pd.to_numeric(frame[f"{v}_se"], errors="coerce").to_numpy(float) * factor
+        reps = _read_replicates(replicates_path) if replicates_path else None
+        res = place_adjust(_load_frame(input_path), variables, year, areas=areas, replicates=reps,
+                           rpp_year=rpp_year)
         rep_out = None
         if replicates_path:
-            reps = _read_replicates(replicates_path)
-            by_geoid = dict(zip(geoids, factor))
-            sel = reps["variable"].isin(variables)
-            unmatched = sorted(set(reps.loc[sel, "GEOID"].astype(str)) - set(by_geoid))
-            f = reps.loc[sel, "GEOID"].astype(str).map(by_geoid).to_numpy(float)
-            cols = ["estimate"] + [c for c in REPLICATE_COLUMNS if c in reps.columns]
-            # whole-number replicate files read as int64; pandas 3 refuses float values in int columns
-            reps[cols] = reps[cols].astype(float)
-            reps.loc[sel, cols] = reps.loc[sel, cols].to_numpy(float) * f[:, None]
-            if unmatched:
-                reps = reps[~(sel & reps["GEOID"].astype(str).isin(unmatched))]
-            rep_out = _write_frame(reps, replicates_output_path
+            rep_out = _write_frame(res["replicates"], replicates_output_path
                                    or os.path.splitext(replicates_path)[0] + "_rpp.parquet", "replicates_rpp.parquet")
     except BundledDataIntegrityError as exc:
         return integrity_error_result(exc)
     except (*_ERRORS, rpp.RPPUnavailable) as exc:
         return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
+    frame = res["frame"]
     path = _write_frame(frame, output_path or os.path.splitext(input_path)[0] + "_rpp.parquet", "frame_rpp.parquet")
-    counts = frame.groupby(["rpp_area", "rpp_area_name"]).agg(rpp=("rpp", "first"), rows=("rpp", "size")).reset_index()
-    notes = [f"PLACE ADJUSTMENT: {', '.join(variables)} divided by the BEA Regional Price Parity ({int(year)}, "
-             "U.S.=100) of each row's area, i.e. expressed in national-average purchasing power; _se scaled by "
-             "the same factor.",
-             f"ACS 5-year dollars are in end-year ({int(year)}) dollars; the {int(year)} RPP is applied to the "
-             "whole period."]
-    if areas == "county_metro":
-        notes.append("RPP AREA: counties in a metropolitan CBSA use that MSA's RPP; micropolitan and rural "
-                     "counties use the state nonmetropolitan-portion RPP (BEA nonmetro portions include "
-                     f"micropolitan counties). CBSA membership from {boundary_source} (OMB bulletin 23-01 "
-                     "delineation, as in BEA's RPPs).")
-    # provenance as in rpp.describe_place_adjustment: advisories and an unverified custom RPP table
-    advisories = sorted({a for p in parity.values() for a in p["advisories"]})
-    custom = next((p["custom_table"] for p in parity.values() if p.get("custom_table")), None)
-    notes += advisories
-    if custom:
-        notes.append(rpp.custom_table_note(custom))
-    notes.append(rpp.RPP_ESTIMATION_ERROR_NOTE)
-    return _ok(f"Adjusted {', '.join(variables)} for {len(frame)} rows with {len(parity)} RPP area(s).",
+    return _ok(f"Adjusted {', '.join(variables)} for {len(frame)} rows with {len(res['parity'])} RPP area(s).",
                "fit_model or make_map with input_path=output_path"
                + (" and replicates_path=replicates_output_path" if rep_out else "")
                + "; state in results that a regional price parity adjustment was applied",
                output_path=path, replicates_output_path=rep_out, areas=areas, year=int(year),
-               rpp_areas=_records(counts), notes=notes, advisories=advisories, custom_table=custom,
-               applied_by_default=False)
+               rpp_year=res["rpp_year"], rpp_areas=res["rpp_areas"], notes=res["notes"],
+               advisories=res["advisories"], custom_table=res["custom_table"], applied_by_default=False)
 
 
 def make_web_map(
