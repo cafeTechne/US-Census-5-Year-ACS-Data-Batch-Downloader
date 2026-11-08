@@ -19,7 +19,7 @@ All commands use `.venv/bin/python` from the repository root.
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
 | Multilevel, known variance (`census.multilevel`) | `-m pytest -q tests/test_multilevel.py` (includes the dense fixed-variance reference `TestKnownVarianceDenseReference`) | `multilevel_known_variance`, `multilevel_random_slope`, `multilevel_replicate` |
-| Difference-in-differences (`census.did`) | `-m pytest -q tests/test_did.py` (includes the hand-built differenced reference `TestTwoGroupDenseReference`) | `did_two_group`, `did_event`, `did_replicate`; serial correlation: `did_serial` |
+| Difference-in-differences (`census.did`) | `-m pytest -q tests/test_did.py` (includes the hand-built differenced reference `TestTwoGroupDenseReference`) | `did_two_group`, `did_event`, `did_replicate`; serial correlation (info only): `did_ar1_sensitivity`, `did_serial` |
 | Release gate itself (`scripts/inference_validation.py`) | `-m pytest -q tests/test_validation_gate.py` | n/a |
 
 Release studies:
@@ -45,12 +45,29 @@ Release studies:
   only catches gross regressions (a broken interval, a crash, a study that
   stops producing rows); it is not release evidence. The full-configuration
   band and verdict are unchanged and remain the release gate.
-- Multilevel and DiD studies are not run by the script. Run them with
-  `census.simulation.run_study(designs_config(fast=False), studies=list(DESIGN_STUDIES))`
-  and, for DiD serial correlation,
-  `run_study(serial_config(fast=False), studies=["did_serial"])`. Their
-  results are recorded in the `census.multilevel` / `census.did` docstrings,
-  not gated by the script.
+- Multilevel and DiD studies: the default-method ones run in every full
+  report and gate (see "Release gate scope" below). The others run when
+  named with `--studies` (`multilevel_replicate`, `did_replicate`,
+  `did_ar1_sensitivity`), or, for the Round 11 study `did_serial`, only via
+  `run_study(serial_config(fast=False), studies=["did_serial"])` (the script
+  does not route it; naming it with `--studies` runs nothing). Their results
+  are recorded in the `census.multilevel` / `census.did` docstrings.
+- DiD serial-correlation sensitivity (PLAN_ROUND_13 C2, owner decision
+  D13-3): `scripts/inference_validation.py --studies did_ar1_sensitivity`
+  (about 19 min single-threaded). The `did_two_group` (4 periods) and
+  `did_event` (5 periods) designs and default population intervals with
+  stationary AR(1) area-by-period errors at rho 0, 0.3, 0.6 and 0.9. Every
+  row has status `info`: it reports, never gates, and is in neither
+  `DEFAULT_DESIGN_STUDIES` nor `REQUIRED_STUDIES`. Model scope: the DiD
+  intervals assume area-by-period errors independent across periods (there
+  is no clustered-SE option); the 2026-11-07 run (1000 repetitions per cell)
+  found coverage 0.882-0.914 at every rho for both designs, so no
+  degradation was observed in these short (4-5 period) panels. Results and
+  scope note: `census.did` docstring.
+- Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
+  process, and `--jobs N` (0 = one per CPU) runs studies in parallel
+  processes with output identical to a serial run (except the `seconds`
+  column). Full `--gate --jobs 0`: 21.7 min on 16 cores (2026-11-07).
 
 Scope of the dense reference tests: they check fixed-variance GLS algebra
 (and, for DiD, that the reported REML A is a stationary point of an
@@ -61,4 +78,4 @@ coverage evidence comes only from the T3 studies.
 
 ## Release gate scope (decided 2026-11-07)
 
-`python scripts/inference_validation.py --gate` runs and requires the default-method studies, including the Round 10 designs: `multilevel_known_variance`, `multilevel_random_slope`, `did_two_group`, `did_event`. The slower replicate-refit variants (`multilevel_replicate`, `did_replicate`) and the serial-correlation study (`did_serial`) run on demand by naming them with `--studies` (or via `run_study` as above); they are reported but not required.
+`python scripts/inference_validation.py --gate` runs and requires the default-method studies, including the Round 10 designs: `multilevel_known_variance`, `multilevel_random_slope`, `did_two_group`, `did_event`. The slower replicate-refit variants (`multilevel_replicate`, `did_replicate`) and the AR(1) sensitivity study (`did_ar1_sensitivity`, info rows only) run on demand by naming them with `--studies`; the Round 11 serial-correlation study (`did_serial`) runs only via `run_study` as above. They are reported but not required.
