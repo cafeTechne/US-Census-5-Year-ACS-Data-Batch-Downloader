@@ -82,9 +82,22 @@ replicate analysis that uses such a variable blocks (``replicates_incomplete``)
 unless the analysis declares ``"replicate_scope": "covariates_only"``
 (fit_replicate only; target ``population`` or ``conservative``): its outcome is
 then held at its estimate in every refit, and the declaration is in the hash and
-the methods text. With census_vre the releases must not overlap (the trend
-module's overlap rule: replicates of overlapping periods do not carry their
-covariance), and caller-supplied ``replicates`` are an error.
+the methods text. The declaration is allowed whenever it is well-formed: an
+outcome the VRE registry lists can still lack replicates for the analysed units,
+so create_manifest only notes such an outcome, and a run that finds replicates
+for it still holds it fixed as declared (the hashed declaration governs) and
+records that (``replicates.covariates_only_outcome_had_replicates``). Census VRE
+files of tract and block-group geographies are per state, so those levels need
+``geography.state`` or ``states``. Caller-supplied ``replicates`` are an error
+with census_vre.
+
+Releases whose ACS 5-year periods overlap (shared sample years) are never
+combined through replicates (the trend module's overlap rule: published
+replicates do not carry the covariance of overlapping periods): validation
+refuses census_vre or an analysis declaring ``"replicates": "required"`` with
+overlapping releases, and caller-supplied replicates spanning overlapping
+releases stop every replicate analysis with a blocking
+``replicates_overlapping_releases`` deviation.
 
 When replicates are supplied and the manifest has derivations, each
 derivation absent from the replicate frame is evaluated on the replicates of
@@ -154,7 +167,8 @@ INCOMPLETE_STATUS_TEXT = "pre-registered analysis did not run as registered; res
 BLOCKING_DEVIATIONS = ("blocked_variable", "extraction_failed", "variable_missing_from_extraction",
                        "aggregation_failed", "analysis_frame_failed", "analysis_not_run",
                        "replicates_unavailable", "analysis_failed", "replicates_incomplete",
-                       "hypothesis_not_tested", "failed_calls", "data_source_mismatch", "adjustment_failed")
+                       "hypothesis_not_tested", "failed_calls", "data_source_mismatch", "adjustment_failed",
+                       "replicates_overlapping_releases")
 DATA_SOURCE_KEYS = ("synthetic", "description", "generator")
 STATUS_EXPLORATORY = "exploratory"
 
@@ -344,7 +358,7 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
         level = normalize_geo_level(geo.get("level", ""))
     except Exception:  # noqa: BLE001 - geography errors are reported by _check_geography
         level = geo.get("level")
-    releases = [r for r in manifest.get("releases") or [] if isinstance(r, int) and not isinstance(r, bool)]
+    releases = manifest_releases(manifest)
     if adjustments and manifest.get("aggregation") is not None:
         errors.append("adjustments cannot be combined with aggregation (RPP areas are assigned per GEOID)")
     adjusted: List[str] = []
@@ -400,6 +414,27 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
 
 def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def manifest_releases(manifest: Mapping[str, Any]) -> List[int]:
+    """The manifest's integer releases, in order (anything else is reported by validate_manifest)."""
+    releases = manifest.get("releases")
+    return [r for r in releases if _is_int(r)] if isinstance(releases, list) else []
+
+
+def release_overlap_message(releases: List[int], subject: str) -> Optional[str]:
+    """None when the ACS 5-year periods of ``releases`` share no sample years, else why replicate
+    SEs across them are refused (the trend module's overlap rule, census.trends.overlap_design_check)."""
+    if len(set(releases)) < 2:
+        return None
+    from .trends import overlap_design_check
+    design = overlap_design_check(releases)
+    if not design["overlapping"]:
+        return None
+    return (f"{subject} with overlapping 5-year periods: releases "
+            f"{[(p['year1'], p['year2']) for p in design['overlapping_pairs']]} share sample years, and their "
+            "replicates do not carry that covariance, so replicate SEs of analyses that combine or contrast them "
+            f"would be wrong; use non-overlapping releases {design['suggested_nonoverlapping']}")
 
 
 def _check_rpp_years(adj: Mapping[str, Any], i: int, releases: List[int], years: List[int],
@@ -489,11 +524,16 @@ def _check_replicates(manifest: Mapping[str, Any], errors: List[str]) -> None:
         errors.append(f"replicates.source must be one of {REPLICATE_SOURCES}")
         return
     from . import replicate as vre
+    geo = manifest.get("geography") if isinstance(manifest.get("geography"), Mapping) else {}
     try:
-        vre.sumlev_for(_vre_level((manifest.get("geography") or {}).get("level", "")))
+        sumlev = vre.sumlev_for(_vre_level(geo.get("level", "")))
     except Exception as exc:  # noqa: BLE001 - unsupported level for VRE files
         errors.append(f"replicates.source census_vre: {exc}")
-    releases = [r for r in manifest.get("releases") or [] if _is_int(r)]
+        sumlev = None
+    if sumlev in vre.PER_STATE_SUMLEVS and not geo.get("state") and not geo.get("states"):
+        errors.append(f"replicates.source census_vre at level {geo.get('level')!r}: Census VRE files of summary "
+                      f"level {sumlev} are published per state; give geography.state or geography.states")
+    releases = manifest_releases(manifest)
     bad = [r for r in releases if r not in vre.VRE_LAYOUTS]
     if bad:
         errors.append(f"replicates.source census_vre: no Census VRE release for {bad} (5-year releases "
@@ -501,24 +541,22 @@ def _check_replicates(manifest: Mapping[str, Any], errors: List[str]) -> None:
     if manifest.get("aggregation") is not None:
         errors.append("replicates.source census_vre cannot be combined with aggregation (VRE replicates are "
                       "per GEOID and are not aggregated by run_manifest)")
-    if len(releases) > 1:
-        from .trends import overlap_design_check
-        design = overlap_design_check(releases)
-        if design["overlapping"]:
-            errors.append("replicates.source census_vre with overlapping 5-year periods: releases "
-                          f"{[(p['year1'], p['year2']) for p in design['overlapping_pairs']]} share sample years, "
-                          "and their published replicates do not carry that covariance, so replicate SEs of "
-                          "comparisons between them would be wrong; use non-overlapping releases "
-                          f"{design['suggested_nonoverlapping']}")
+    overlap = release_overlap_message(releases, "replicates.source census_vre")
+    if overlap:
+        errors.append(overlap)
 
 
 def _variable_tables(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
     """Manifest variable or derivation name -> the tables it is built from."""
     out: Dict[str, List[str]] = {}
-    for v in manifest.get("variables") or []:
-        if isinstance(v, Mapping) and _table_of(v):
+    variables = manifest.get("variables")
+    for v in variables if isinstance(variables, list) else []:
+        if isinstance(v, Mapping) and v.get("name") is not None and _table_of(v):  # invalid entries: reported
             out[str(v["name"])] = [str(_table_of(v))]
-    for d in manifest.get("derivations") or []:
+    derivations = manifest.get("derivations")
+    for d in derivations if isinstance(derivations, list) else []:
+        if not isinstance(d, Mapping):  # reported by validate_manifest
+            continue
         refs = [r for part in ("num", "den")
                 for r in (d.get(part) if isinstance(d.get(part), list) else [d.get(part)]) if r is not None]
         out[str(d.get("name"))] = sorted({t for r in refs for t in out.get(str(r), [])})
@@ -531,7 +569,7 @@ def vre_unavailable(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     from . import replicate as vre
     level = _vre_level((manifest.get("geography") or {}).get("level", ""))
     out = []
-    releases = [r for r in manifest.get("releases") or [] if _is_int(r)]
+    releases = manifest_releases(manifest)
     for name, tables in _variable_tables(manifest).items():
         for table in tables:
             for year in releases:
@@ -598,6 +636,9 @@ def _check_variables(manifest: Mapping[str, Any], errors: List[str], resolve: bo
     variables = manifest.get("variables") or []
     if not variables:
         errors.append("variables: at least one variable is required")
+        return
+    if not isinstance(variables, list):
+        errors.append("variables must be a list of {name, ref} objects")
         return
     by_table: Dict[str, List[str]] = {}
     for i, v in enumerate(variables):
@@ -668,7 +709,7 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     except ValueError:
         errors.append("created must be an ISO 8601 timestamp")
     releases = manifest.get("releases") or []
-    if not releases or not all(isinstance(r, int) for r in releases):
+    if not isinstance(releases, list) or not releases or not all(_is_int(r) for r in releases):
         errors.append("releases must be a non-empty list of ACS 5-year end years (integers)")
     _check_geography(manifest.get("geography") or {}, errors)
     level = manifest.get("confidence_level", 0.90)
@@ -698,8 +739,13 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         errors.append("missing: only 'complete_case' is supported")
 
     _check_variables(manifest, errors, resolve, client)
-    names = [str(v.get("name")) for v in manifest.get("variables", []) if isinstance(v, Mapping)]
-    for d in manifest.get("derivations") or []:
+    variables = manifest.get("variables")
+    names = [str(v.get("name")) for v in (variables if isinstance(variables, list) else []) if isinstance(v, Mapping)]
+    derivations = manifest.get("derivations") or []
+    for i, d in enumerate(derivations if isinstance(derivations, list) else [derivations]):
+        if not isinstance(d, Mapping):
+            errors.append(f"derivations[{i}] must be an object {{name, op, num, den}}")
+            continue
         names.append(str(d.get("name")))
         for part in ("num", "den"):
             refs = d.get(part)
@@ -716,7 +762,6 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         errors.append("aggregation.mapping must be an object GEOID -> group id")
     _check_adjustments(manifest, names, errors)
     _check_replicates(manifest, errors)
-    no_vre = {u["variable"] for u in vre_unavailable(manifest)} if census_vre_source(manifest) else set()
 
     for i, ex in enumerate(manifest.get("exclusions") or []):
         if ex.get("rule") not in EXCLUSION_RULES:
@@ -731,6 +776,7 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     if not analyses:
         errors.append("analyses: at least one analysis is required")
     ids = {}
+    needs_replicates: List[str] = []  # replicate analyses declaring "replicates": "required"
     for i, a in enumerate(analyses):
         for k in _duplicate_spec_keys(a):
             errors.append(f"analyses[{i}]: {k!r} given both at the top level and in args; give it once")
@@ -742,6 +788,8 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
         if a.get("id") in ids or not a.get("id"):
             errors.append(f"analyses[{i}]: id must be present and unique")
         ids[a.get("id")] = method
+        if method in REPLICATE_METHODS and a.get("replicates") == "required":
+            needs_replicates.append(str(a.get("id")))
         for req in ANALYSIS_METHODS[method][0]:
             if req not in a:
                 errors.append(f"analyses[{i}] ({method}): {req!r} is required")
@@ -769,10 +817,14 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
             elif len(outcome) != 1:
                 errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope 'covariates_only' needs a formula "
                               "whose outcome is one manifest variable")
-            elif census_vre_source(manifest) and outcome[0] not in no_vre:
-                errors.append(f"analyses[{i}] ({a.get('id')}): replicate_scope 'covariates_only' declared, but "
-                              f"the outcome {outcome[0]!r} has published Census VRE replicates for every release; "
-                              "remove the declaration")
+            # An outcome the VRE registry lists may still lack replicates for the analysed units (a line
+            # missing from the file), so the declaration is allowed; create_manifest notes it and the run
+            # records whether the outcome had replicates (it is held fixed either way: the hash governs).
+    if needs_replicates and not census_vre_source(manifest):  # census_vre: _check_replicates
+        overlap = release_overlap_message(manifest_releases(manifest),
+                                          f"analyses {needs_replicates} require replicates")
+        if overlap:
+            errors.append(overlap)
     hyps = manifest.get("hypotheses") or []
     if not hyps:
         errors.append("hypotheses: at least one pre-registered hypothesis is required")
@@ -798,6 +850,18 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     return errors
 
 
+def _declared_covariates_only(manifest: Mapping[str, Any]) -> Dict[str, List[str]]:
+    """{analysis id: outcome names} of analyses declaring ``replicate_scope: "covariates_only"``."""
+    out: Dict[str, List[str]] = {}
+    for a in manifest.get("analyses") or []:
+        if not isinstance(a, Mapping):
+            continue
+        a = _normalize_analysis(a)
+        if a.get("replicate_scope") == "covariates_only" and "~" in str(a.get("formula", "")):
+            out[str(a.get("id"))] = _formula_names(str(a["formula"]).split("~")[0])
+    return out
+
+
 _FILL_REASONS = {
     "rpp_year": "the latest year in the RPP table",
     "dollar_year": "the latest release",
@@ -818,15 +882,13 @@ def _fill_adjustment_defaults(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
     adjustments = manifest.get("adjustments")
     if not isinstance(adjustments, list):
         return filled
-    releases = [r for r in manifest.get("releases") or [] if _is_int(r)]
+    releases = manifest_releases(manifest)
     multi = len(releases) > 1
     try:
-        rpp_years = latest = None
         from . import rpp
-        rpp_years = rpp._years()
-        latest = rpp_years[-1] if rpp_years else None
+        rpp_years, latest = rpp._years(), latest_rpp_year()
     except Exception:  # noqa: BLE001 - an unreadable RPP table is reported by validation
-        pass
+        rpp_years = latest = None
     for i, adj in enumerate(adjustments):
         if not (isinstance(adj, dict) and adj.get("type") == "rpp"):
             continue
@@ -893,6 +955,15 @@ def create_manifest(
                          + ". Under the strict confirmatory policy a replicate analysis that uses them blocks "
                          "(replicates_incomplete) unless it declares \"replicate_scope\": \"covariates_only\" "
                          "(outcome without replicates, held at its estimate in the refits)")
+        no_vre = {u["variable"] for u in missing}
+        for aid, held in _declared_covariates_only(manifest).items():
+            listed = [v for v in held if v not in no_vre]
+            if listed:
+                notes.append(f"analyses {aid}: replicate_scope 'covariates_only' declared, but the Census VRE "
+                             f"registry lists replicates for the outcome {listed} in every release. The outcome "
+                             "will be held at its estimate in every refit as declared (the hashed declaration "
+                             "governs; the run records whether its replicates were available); remove the "
+                             "declaration before hashing to use the outcome's replicates")
     out = {"hash": manifest_hash(manifest), "path": out_path, "errors": errors, "valid": not errors,
            "notes": notes, "filled": filled}
     if filled:
@@ -1258,6 +1329,10 @@ def run_manifest(
     # 5. analyses
     available = set(columns) | {str(d["name"]) for d in m.get("derivations") or []}
     results: Dict[str, Any] = {}
+    # caller-supplied replicates of overlapping releases: refused (census_vre is refused at validation)
+    rep_overlap = _replicate_overlap(replicates) if replicates is not None and not census_vre_source(m) else None
+    declared_fixed = _declared_covariates_only(m)
+    fixed_had_replicates: Dict[str, List[str]] = {}
     for a in m["analyses"]:
         a = _normalize_analysis(a)
         aid = a["id"]
@@ -1279,6 +1354,14 @@ def run_manifest(
                                "detail": "manifest declares Census VRE replicates; none were fetched or published "
                                          "for its variables (see replicates.unavailable), analysis not run"})
             continue
+        if rep_overlap and a["method"] in REPLICATE_METHODS:
+            deviations.append({"kind": "replicates_overlapping_releases", "analysis": aid,
+                               "detail": rep_overlap + "; analysis not run"})
+            continue
+        if aid in declared_fixed and work_reps is not None:
+            had = [v for v in declared_fixed[aid] if _has_replicate_rows(work_reps, v)]
+            if had:
+                fixed_had_replicates[aid] = had
         try:
             results[aid] = _run_analysis(a, frame, level, work_reps, corr_method)
         except Exception as exc:
@@ -1332,10 +1415,6 @@ def run_manifest(
         scaled = [v for a in adjustment_log for v in a["variables"]]
         if scaled and replicates is not None:
             rep_info["scaled_by_adjustments"] = scaled
-        fixed = {a["id"]: _formula_names(a["formula"].split("~")[0]) for a in map(_normalize_analysis, m["analyses"])
-                 if a.get("replicate_scope") == "covariates_only"}
-        if fixed:
-            rep_info["declared_covariates_only"] = fixed
     elif replicates is not None:
         if replicates_synthetic is None:
             attrs = getattr(replicates, "attrs", {}) or {}
@@ -1351,6 +1430,16 @@ def run_manifest(
         scaled = [v for a in adjustment_log for v in a["variables"]]
         if scaled:
             rep_info["scaled_by_adjustments"] = scaled
+    if rep_info is not None and declared_fixed:
+        rep_info["declared_covariates_only"] = declared_fixed
+        if fixed_had_replicates:
+            # the hashed declaration governs: the outcome stays fixed although replicates were available
+            rep_info["covariates_only_outcome_had_replicates"] = fixed_had_replicates
+            rep_info.setdefault("notes", []).extend(
+                f"analysis {aid}: replicate_scope 'covariates_only' was declared and the outcome {names} was held "
+                "at its estimate in every refit as pre-registered, although replicates were available for it in "
+                "this run; se_sampling excludes the outcome's sampling error"
+                for aid, names in fixed_had_replicates.items())
     tagged = {aid: _tag(r, h, aid, status) for aid, r in results.items()}
     run_info = {"manifest_hash": h, "analysis_status": status, "deviations": deviations,
                 "exclusions": exclusion_log, "extraction": extraction, "n_units": None if frame is None
@@ -1369,6 +1458,25 @@ def run_manifest(
     if m.get("adjustments"):
         out_res["adjustments"] = adjustment_log
     return out_res
+
+
+def _replicate_overlap(replicates: Any) -> Optional[str]:
+    """Why caller-supplied replicates cannot be used (their releases' 5-year periods overlap), or None."""
+    if isinstance(replicates, Mapping):  # {release: frame}
+        years = [int(y) for y in replicates if str(y).isdigit()]
+    elif isinstance(replicates, pd.DataFrame) and "Year" in replicates.columns:
+        years = sorted({int(y) for y in pd.to_numeric(replicates["Year"], errors="coerce").dropna()})
+    else:
+        return None
+    return release_overlap_message(years, "caller-supplied replicates")
+
+
+def _has_replicate_rows(replicates: Any, name: str) -> bool:
+    """True when the replicate long frame has rows for manifest variable ``name``."""
+    try:
+        return bool((replicates["variable"].astype(str) == str(name)).any())
+    except Exception:  # noqa: BLE001 - malformed replicates are reported by the analysis itself
+        return False
 
 
 def _replicate_rows(frame: pd.DataFrame, name: str) -> Dict[str, int]:
@@ -1452,6 +1560,10 @@ def _census_vre_replicates(m: Mapping[str, Any], frame: pd.DataFrame, codes_by_y
     for st in manifest_states(geo):
         states += list(expand_states(st)) if st else []
     calls: List[Optional[str]] = sorted(set(states)) if sumlev in vre.PER_STATE_SUMLEVS else [None]
+    if not calls:  # per-state files and no state: nothing could be fetched (validation requires a state)
+        raise ValueError(f"Census VRE files of summary level {sumlev} ({geo['level']}) are published per state, "
+                         "and the manifest geography names no state (geography.state or geography.states), so "
+                         "no VRE file could be requested")
     units = frame[["GEOID", "Year"]].astype({"GEOID": str, "Year": "int64"})
     releases = [int(r) for r in m["releases"]]
     names_by_table: Dict[str, List[str]] = {}
@@ -1537,6 +1649,8 @@ def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any
     level = normalize_geo_level(m["geography"]["level"])
     log: List[Dict[str, Any]] = []
     multi = len(releases) > 1
+    if frame.empty:  # e.g. exclusions removed every unit: nothing to scale; the analyses report the outcome
+        return frame, replicates, log, None
     for i, adj in enumerate(m.get("adjustments") or []):
         variables = [str(v) for v in adj["variables"]]
         areas = adj.get("areas", default_rpp_areas(level))
@@ -1934,9 +2048,8 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                  "rather than being substituted):")
     lines += [f"- `{v['name']}`: {v['ref']}" + (f" (table {v['table']})" if v.get("table") else "")
               for v in m.get("variables", [])]
-    if len(m.get("releases", [])) > 1:
-        from .trends import overlap_design_check
-        if overlap_design_check([int(r) for r in m["releases"]])["overlapping"]:
+    if len(manifest_releases(m)) > 1:
+        if release_overlap_message(manifest_releases(m), "releases") is not None:
             lines.append("Multiple releases were linked through the concordance; overlapping 5-year periods "
                          "share sample years and are not independent.")
         else:
@@ -2018,14 +2131,23 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                            rep=rep_short if (a.get("replicates") or rep_info) else "", rep_source=rep_source)
         if a.get("replicate_scope") == "covariates_only":
             held = _formula_names(str(a.get("formula", "")).split("~")[0])
-            text += (f" Pre-registered replicate scope `covariates_only`: the outcome ({', '.join(held)}) has no "
-                     "published replicates and was held at its estimate in every refit, so se_sampling covers "
-                     "the covariates' sampling error only; the stated interval does not use se_sampling alone.")
-        if a.get("formula") and "C(Year)" in str(a["formula"]) and len(m.get("releases", [])) > 1:
-            text += (" `C(Year)` contrasts the releases; replicate r of each release enters refit r together. "
-                     "Replicates of non-overlapping releases come from independent samples, so the cross-release "
-                     "products have expectation zero and the replicate variance of the contrast estimates the sum "
-                     "of the releases' sampling variances.")
+            had = ((rep_info or {}).get("covariates_only_outcome_had_replicates") or {}).get(a["id"])
+            text += (f" Pre-registered replicate scope `covariates_only`: the outcome ({', '.join(held)}) was held "
+                     "at its estimate in every refit"
+                     + (" as declared, although replicates were available for it in this run" if had
+                        else " (declared because it has no published replicates)")
+                     + ", so se_sampling covers the covariates' sampling error only; the stated interval does not "
+                     "use se_sampling alone.")
+        if a.get("formula") and "C(Year)" in str(a["formula"]) and len(manifest_releases(m)) > 1:
+            if release_overlap_message(manifest_releases(m), "releases") is None:
+                text += (" `C(Year)` contrasts the releases; replicate r of each release enters refit r together. "
+                         "The ACS 5-year periods of these releases share no sample years, so their replicates come "
+                         "from independent samples: the cross-release products have expectation zero and the "
+                         "replicate variance of the contrast estimates the sum of the releases' sampling variances.")
+            else:
+                text += (" `C(Year)` contrasts releases whose ACS 5-year periods overlap (shared sample years): "
+                         "their estimates are not independent, and no standard error reported here accounts for "
+                         "that covariance (replicate SEs across overlapping releases are refused).")
         target = a.get("formula") or a.get("variables") or a.get("variable")
         lines.append(f"- **{a['id']}** (`{target}`): {text}")
         cites += refs
