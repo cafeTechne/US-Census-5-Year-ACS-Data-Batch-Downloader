@@ -107,6 +107,8 @@ label every later result from that cache synthetic, real data included: set
 `CENSUS_CACHE_PATH` as in step 0 (or pass `--allow-default-cache` deliberately). The marker
 covers the whole cache and is removed only by `python -m census cache clear`, which deletes
 every response and the marker together (its output reports `"synthetic_marker_cleared"`).
+The MCP tool `cache_import` (full profile) follows the same rules: it validates every file
+first, and a synthetic import into the default cache needs `allow_default_cache=true`.
 
 Expected: `"imported": 2`, `"synthetic": true`, and in `sources` the tables `B01003`,
 `B19013` with `"sha256": "0f5725d460904f5c1ee6e74dfa5fda2f1ef3dd5a8d910515d1495dde6aa44a94"`
@@ -284,7 +286,7 @@ re-execution byte-for-byte input-identical.
 | Step | Python | CLI | MCP |
 | :--- | :--- | :--- | :--- |
 | Validate manifest and hash | `census.manifest.create_manifest` | `tool create_manifest` | `create_manifest` |
-| Freeze source into cache | `census.cache.import_frozen` | `cache import <file or dir>` | not available (use the CLI) |
+| Freeze source into cache | `census.cache.import_frozen` | `cache import <file or dir>` (or `tool cache_import`) | `cache_import` (full profile; `source`, `allow_default_cache`) |
 | Plan | `census.pipeline.plan_extraction` | `plan` | `plan_extraction` |
 | Execute manifest | `census.manifest.run_manifest` (`replicates=read_replicates(path)`) | `tool run_manifest` (`replicates_path`) | `run_manifest` (`replicates_path`) |
 | Interval meaning | `census.results.interval_description` | `interval` in `results/m1.json` | same |

@@ -284,3 +284,68 @@ def test_puma_boundary_level():
     B.check_boundary_vintage(2023, 2020, "puma")
     with pytest.raises(B.BoundaryVintageError):
         B.check_boundary_vintage(2023, 2019, "puma")
+
+
+# --------------------------------------------------------------------------- memory fixes (PLAN_ROUND_14 C)
+
+def _weighted_median_v0_12(values, weights):
+    """weighted_median as of v0.12.0 (two gathers of the weight matrix)."""
+    x = np.asarray(values, float)
+    w = np.asarray(weights, float)
+    if w.ndim == 1:
+        w = w[:, None]
+    ok = np.isfinite(x)
+    x, w = x[ok], w[ok]
+    if not len(x):
+        return np.full(w.shape[1], np.nan)
+    order = np.argsort(x, kind="mergesort")
+    x, w = x[order], w[order]
+    cum = np.cumsum(w, axis=0)
+    half = cum[-1] / 2.0
+    reached = cum >= half - 1e-9 * np.abs(half)
+    idx = reached.argmax(axis=0)
+    out = x[idx].astype(float)
+    exact = np.isclose(cum[idx, np.arange(w.shape[1])], half, rtol=1e-12, atol=1e-9)
+    for r in np.flatnonzero(exact):
+        nz = np.flatnonzero(w[:, r] != 0)
+        pos = np.searchsorted(nz, idx[r], side="right")
+        if pos < len(nz):
+            out[r] = (x[idx[r]] + x[nz[pos]]) / 2.0
+    return np.where(half > 0, out, np.nan)
+
+
+def _group_sum_v0_12(ids, mat, n_groups):
+    ok = ids >= 0
+    out = np.zeros((n_groups, mat.shape[1]))
+    if ok.any():
+        sums = pd.DataFrame(mat[ok]).groupby(ids[ok]).sum()
+        out[sums.index.to_numpy()] = sums.to_numpy()
+    return out
+
+
+def test_memory_fixes_give_identical_results():
+    rng = np.random.default_rng(7)
+    for n in (1, 2, 9, 500):
+        x = np.round(rng.normal(50, 20, n))  # ties
+        x[rng.random(n) < 0.2] = np.nan
+        w = rng.integers(0, 4, (n, 81)).astype(float)
+        assert np.array_equal(P.weighted_median(x, w), _weighted_median_v0_12(x, w), equal_nan=True)
+        ids = rng.integers(-1, 5, n)
+        assert np.array_equal(P._group_sum(ids, w, 5), _group_sum_v0_12(ids, w, 5))
+        ids[:] = 0
+        assert np.array_equal(P._group_sum(ids, w, 1), _group_sum_v0_12(ids, w, 1))
+    assert np.array_equal(P.weighted_median(np.array([1.0, 2, 3, 4]), np.ones(4)), [2.5])
+
+
+def test_tabulate_median_groups_unchanged():
+    df = synthetic(n=600)
+    df.loc[:40, "x"] = np.nan
+    for bins in (None, [-np.inf, 5, 8, 10, 12, 15, np.inf]):
+        t = P.tabulate(df, "median", "x", by="g", where="flag == 1", bins=bins, return_replicates=True)
+        for _, row in t.iterrows():
+            sub = df[(df.g == row.g) & (df.flag == 1) & df.x.notna()]
+            W = sub[["PWGTP"] + REPS].to_numpy(np.float64)
+            ref = (_weighted_median_v0_12(sub.x.to_numpy(), W) if bins is None
+                   else P.binned_median(sub.x.to_numpy(), W, bins))
+            got = np.array([row.estimate] + [row[f"rep_{i}"] for i in range(1, 81)])
+            assert np.array_equal(got, ref)

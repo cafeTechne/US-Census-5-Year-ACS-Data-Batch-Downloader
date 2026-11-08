@@ -19,7 +19,7 @@ from census import errors
 from census.aggregate import NonAdditiveError, aggregate_then_derive
 from census.aggregate import aggregate_geographies as _aggregate_geographies
 from census.api import CensusAPIClient, infer_dataset
-from census.cache import get_default_cache
+from census.cache import get_default_cache, import_frozen, read_frozen
 from census.derived import difference as derive_difference
 from census.derived import percent_change as derive_percent_change
 from census.derived import product as derive_product
@@ -739,3 +739,62 @@ def download_table(
     if isinstance(out, dict) and out.get("success"):
         out["years_requested"] = year_list
     return out
+
+
+# ---------------------------------------------------------------------------
+# Round 14 (D2): frozen API responses into the query cache (CLI `cache import`)
+# ---------------------------------------------------------------------------
+
+def import_into_cache(cache: Any, source: Optional[str], allow_default_cache: bool = False,
+                      allow_hint: str = "allow_default_cache=true") -> Dict[str, Any]:
+    """Shared by the CLI ``cache import`` and the MCP ``cache_import`` tool.
+
+    Every file is validated before anything is written (atomic, as
+    :func:`census.cache.import_frozen`); synthetic responses go into the
+    default cache (CENSUS_CACHE_PATH unset) only with ``allow_default_cache``.
+    ``allow_hint`` names that switch in the refusal for the caller's interface.
+    """
+    if cache is None:
+        return errors.error_result(errors.INVALID_INPUT, "The query cache is disabled "
+                                   "(CENSUS_CACHE_DISABLED); nothing to import into.")
+    if not source:
+        return errors.error_result(errors.INVALID_INPUT, "cache import needs a frozen file or directory")
+    try:
+        frozen = read_frozen(source)  # every file validated before anything is written
+        if (any(f["synthetic"] is not None for f in frozen) and not os.getenv("CENSUS_CACHE_PATH")
+                and not allow_default_cache):
+            return errors.error_result(
+                errors.INVALID_INPUT,
+                f"Refusing to import SYNTHETIC responses into the default query cache ({cache.path}): the "
+                "marker would label every later result built from that cache synthetic, including real "
+                "Census data. Set CENSUS_CACHE_PATH to a separate cache file (e.g. export "
+                f"CENSUS_CACHE_PATH=$PWD/synthetic_cache.db), or pass {allow_hint}.",
+                next_step="set CENSUS_CACHE_PATH and run cache import again")
+        result = import_frozen(cache, frozen)
+    except (OSError, ValueError) as exc:
+        return errors.error_result(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
+    return {"success": True, **result, **cache.stats()}
+
+
+def cache_import(source: str, allow_default_cache: bool = False) -> Dict[str, Any]:
+    """Load frozen Census API responses into the local query cache, so later
+    extractions and run_manifest read them instead of api.census.gov (the
+    CLI's ``python -m census cache import``).
+
+    A frozen file is JSON with ``request`` (build_request arguments: year,
+    geo_level, state_code, ...), ``requests`` ({table_code: API rows}) and,
+    for generated data, ``synthetic``. Atomic: every file is validated first;
+    on any error nothing is written. A synthetic source marks the whole cache
+    synthetic, so every later result built from it is labelled synthetic.
+
+    Args:
+        source: A frozen response JSON file, or a directory of them.
+        allow_default_cache: Allow SYNTHETIC responses into the default cache
+            (CENSUS_CACHE_PATH unset). Refused by default: set
+            CENSUS_CACHE_PATH to a separate cache file instead.
+
+    Returns success, imported (responses), sources (path, sha256, tables,
+    synthetic), synthetic (whether the cache is marked), and the cache's path
+    and entries.
+    """
+    return import_into_cache(get_default_cache(), source, allow_default_cache)

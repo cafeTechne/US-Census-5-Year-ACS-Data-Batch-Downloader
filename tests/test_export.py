@@ -4,6 +4,8 @@ import os
 import shutil
 import tempfile
 import unittest
+import warnings
+
 import pandas as pd
 from census.export import (
     enhanced_melt,
@@ -37,6 +39,18 @@ class TestCensusExport(unittest.TestCase):
         formatted = format_dataframe(df, "B01001", variable_descriptions=desc)
         self.assertIn("Total Population", formatted.columns)
         self.assertNotIn("B01001_001E", formatted.columns)
+
+    def test_format_dataframe_in_place_like_rename(self):
+        # PLAN_ROUND_14 D1: no inplace=True (pandas 3.1 Pandas4Warning), same labels, same object
+        df = pd.DataFrame([[1, 2, 3, 4]], columns=["NAME", "B01001_001E", "B01001_001E", "B01001_002E"])
+        expected = df.rename(columns={"B01001_001E": "Total", "B99999_001E": "unused"}).columns
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            out = format_dataframe(df, "B01001", variable_descriptions={"B01001_001E": "Total",
+                                                                          "B99999_001E": "unused"})
+        self.assertIs(out, df)
+        self.assertEqual(list(df.columns), list(expected))
+        self.assertEqual(df.iloc[0].tolist(), [1, 2, 3, 4])
 
     def test_enhanced_melt(self):
         df = pd.DataFrame(

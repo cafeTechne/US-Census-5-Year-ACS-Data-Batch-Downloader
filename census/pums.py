@@ -387,6 +387,7 @@ def read_pums_csv(source: Union[str, bytes, io.IOBase], record: str = "person",
             handle.close()
             zf.close()
     frame = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=wanted)
+    del parts  # the chunks, before conversion and column reordering make further copies
     frame = _convert(frame, STRING_COLUMNS | set(weights))
     frame = frame[[c for c in wanted if c in frame.columns]]
     if memory_note:
@@ -425,6 +426,9 @@ def fetch_pums(
     columns (``columns=None``) multiplies that several-fold, and multi-state
     all-column reads may need tens to hundreds of GB; ``columns=None`` on a
     zip larger than 200 MB therefore warns (UserWarning, attrs["memory_note"]).
+    docs/audits/pums_memory.md (scripts/pums_memory_benchmark.py, Round 14)
+    measures read, weight matrix and tabulation peaks at 100k-1.9M rows:
+    about 2.8 KB per record with the needed columns (5.3 GiB at 1.9M rows).
     """
     p, rec, year = _product(product), _record(record), int(year)
     _check_release(year, p, allow_experimental)
@@ -608,7 +612,10 @@ def _group_sum(ids: np.ndarray, mat: np.ndarray, n_groups: int) -> np.ndarray:
     ok = ids >= 0
     out = np.zeros((n_groups, mat.shape[1]))
     if ok.any():
-        sums = pd.DataFrame(mat[ok]).groupby(ids[ok]).sum()
+        # No copy of the n x 81 matrix when every row counts, and copy=False: pandas 3
+        # copies a 2-D array passed to DataFrame by default (PLAN_ROUND_14 C).
+        rows = ok.all()
+        sums = pd.DataFrame(mat if rows else mat[ok], copy=False).groupby(ids if rows else ids[ok]).sum()
         out[sums.index.to_numpy()] = sums.to_numpy()
     return out
 
@@ -634,12 +641,13 @@ def weighted_median(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
     w = np.asarray(weights, float)
     if w.ndim == 1:
         w = w[:, None]
-    ok = np.isfinite(x)
-    x, w = x[ok], w[ok]
-    if not len(x):
+    keep = np.flatnonzero(np.isfinite(x))
+    if not len(keep):
         return np.full(w.shape[1], np.nan)
-    order = np.argsort(x, kind="mergesort")
-    x, w = x[order], w[order]
+    # One gather of the weight rows (finite values in sorted order) rather than
+    # two successive copies (PLAN_ROUND_14 C); the order is the same.
+    keep = keep[np.argsort(x[keep], kind="mergesort")]
+    x, w = x[keep], w[keep]
     cum = np.cumsum(w, axis=0)
     half = cum[-1] / 2.0
     reached = cum >= half - 1e-9 * np.abs(half)
@@ -802,8 +810,10 @@ def tabulate(
         for g in range(G):
             rows = ids_ok == g
             if rows.any():
-                est[g] = (binned_median(x[rows], W[rows], bins) if bins is not None
-                          else weighted_median(x[rows], W[rows]))
+                # Values outside the group set to NaN, which both medians drop, instead of
+                # copying W[rows] first (the medians gather the rows they use once).
+                xg = np.where(rows, x, np.nan)
+                est[g] = (binned_median(xg, W, bins) if bins is not None else weighted_median(xg, W))
         n = _group_count(ids_ok, G)
         notes.append("median by Census bracket interpolation over bins" if bins is not None
                      else "weighted sample median (no interpolation); pass bins for the Census bracket method")
