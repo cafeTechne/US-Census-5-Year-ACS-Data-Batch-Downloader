@@ -702,6 +702,10 @@ def create_manifest(manifest_path: str) -> Dict[str, Any]:
     (rpp_year is required; when omitted, the latest RPP year is filled in before
     hashing and the completed manifest is written to <name>.completed.json, never
     over the input; commit and run that file, as the result's notes say).
+    Several releases: the adjustment also needs "dollar_year", "price_index"
+    and "rpp_years" ({"2019": 2019, "2024": 2024}); omitted ones are filled the same
+    way. "replicates": {"source": "census_vre"} makes run_manifest fetch Census
+    replicates; the notes list variables that have none.
 
     The schema is documented in census/manifest.py and examples/manifests/.
     Example: create_manifest("examples/manifests/income_population_tracts.json")
@@ -728,6 +732,7 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
         manifest_path: the manifest JSON.
         replicates_path: optional CSV/Parquet of replicate estimates (long format:
             GEOID, Year, variable, rep_1..rep_80), needed for "replicates": "required".
+            Not with a census_vre manifest.
         replicates_synthetic: mark supplied replicates synthetic.
 
     Returns analysis_status, data_source, replicates, deviations, hypotheses;
