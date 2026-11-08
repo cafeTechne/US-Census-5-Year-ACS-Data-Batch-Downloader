@@ -38,3 +38,6 @@ docs/audits/*.csv
 !data/geo_crosswalks/*.csv
 !tests/fixtures/**/*.csv
 !data/price_parities/*.csv
+
+# Agent git worktrees (local only)
+.claude/worktrees/
