@@ -697,6 +697,11 @@ def save_json(result: Dict[str, Any], path: str) -> str:
 def create_manifest(manifest_path: str) -> Dict[str, Any]:
     """Validate a pre-registration manifest (JSON) and return its SHA-256 hash.
     Commit the manifest and hash BEFORE pulling data; then call run_manifest.
+    Several states: geography {"level": "county", "states": ["26", "36"]}; a price
+    adjustment: "adjustments": [{"type": "rpp", "variables": ["income"], "rpp_year": 2024}]
+    (rpp_year is required; when omitted, the latest RPP year is filled in before
+    hashing and the completed manifest is written to <name>.completed.json, never
+    over the input; commit and run that file, as the result's notes say).
 
     The schema is documented in census/manifest.py and examples/manifests/.
     Example: create_manifest("examples/manifests/income_population_tracts.json")
@@ -710,7 +715,7 @@ def create_manifest(manifest_path: str) -> Dict[str, Any]:
     if res.get("errors"):
         return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
                      "fix the listed problems and call create_manifest again")
-    return _ok(f"Manifest valid; SHA-256 {res['hash']}.",
+    return _ok(f"Manifest valid; SHA-256 {res['hash']}." + "".join(f" {n}." for n in res.get("notes") or []),
                "commit the manifest, then run_manifest with the same path", **res)
 
 
@@ -740,8 +745,8 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
                      "pass a CSV or Parquet file in the analysis replicate long format")
     try:
         res = _run(manifest_path, folder, replicates=reps, replicates_synthetic=replicates_synthetic)
-    except (FileNotFoundError, OSError, ValueError) as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+    except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}" if isinstance(exc, KeyError) else str(exc))
     if res.get("errors"):
         return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
                      "fix the manifest with create_manifest")
@@ -753,6 +758,8 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
         "analysis_status": status, "data_source": res.get("data_source"), "replicates": res.get("replicates"),
         "deviations": devs, "hypotheses": hyp, "bundle": res.get("bundle"),
     }
+    if "adjustments" in res:
+        out["adjustments"] = res["adjustments"]
     payload = _jsonable(out)
     if not res.get("success"):
         kinds = sorted({str(d.get("kind")) for d in devs})

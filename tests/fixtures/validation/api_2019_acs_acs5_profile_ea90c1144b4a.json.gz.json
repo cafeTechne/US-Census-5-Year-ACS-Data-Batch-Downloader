@@ -1,9 +1,0 @@
-{
-  "kind": "census_api_response",
-  "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
-  "retrieved": "2026-11-02",
-  "sha256": "aa678346c4ed4b1eb73c45528bbaef1a4d8984cb48784ac8eb684321b2584458",
-  "size_bytes": 9278,
-  "source_url": "https://api.census.gov/data/2019/acs/acs5/profile?for=state%3A06%2C36%2C48%2C17%2C56&get=NAME%2Cgroup%28DP03%29",
-  "uncompressed_sha256": "5ce87f8dcdc3af9aa4629a34a8995abf8b8a731b9668f6e4a42f0e54a6c62482"
-}

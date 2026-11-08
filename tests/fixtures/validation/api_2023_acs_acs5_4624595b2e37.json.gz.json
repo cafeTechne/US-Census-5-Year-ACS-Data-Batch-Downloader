@@ -1,8 +1,8 @@
 {
   "kind": "census_api_response",
   "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
-  "retrieved": "2026-11-02",
-  "sha256": "568af51ad002b1157df74f66b1f97eb54afd5dbc61086d8e9974efb45692f425",
+  "retrieved": "2026-11-07",
+  "sha256": "6aa18dd5615c72b67b8a0d9107d136c017f047c4d612b4c8b8440e7811e8aa8f",
   "size_bytes": 1208,
   "source_url": "https://api.census.gov/data/2023/acs/acs5?for=us%3A1&get=NAME%2Cgroup%28B27010%29",
   "uncompressed_sha256": "29503801c8fa4f7c765bf20fe7b941984d83e9cb35aabd55206c66098bcc3183"

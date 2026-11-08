@@ -100,6 +100,23 @@ class TestCaseStudyLive(unittest.TestCase):
         replay = [o for n, o in self.outputs if n == "replay"][0]
         self.assertTrue(replay["verified"])
 
+    def test_confirmatory_manifest_matches_exploratory(self):
+        """PLAN_ROUND_14 A4: the pre-registered run reproduces the exploratory coefficient and interval."""
+        run = [o for n, o in self.outputs if n == "run_manifest"][0]
+        self.assertEqual(run["analysis_status"], "confirmatory")
+        self.assertEqual(run["deviations"], [])
+        h1 = run["hypotheses"][0]
+        with open(self.path("results", "regression.json"), encoding="utf-8") as f:
+            reg = json.load(f)
+        coef = {c["term"]: c for c in reg["coefficients"]}["pct_bachelors"]
+        for k in ("estimate", "ci_lower", "ci_upper"):
+            self.assertAlmostEqual(h1[k], coef[k], places=6)
+        with open(self.path("confirmatory", "bundle", "bundle.json"), encoding="utf-8") as f:
+            prov = json.load(f)["provenance"]
+        self.assertEqual(prov["analysis_status"], "confirmatory")
+        self.assertEqual(prov["adjustments"][0]["rpp_year"], 2024)
+        self.assertEqual(len(prov["adjustments"][0]["rpp_areas"]), 31)
+
 
 if __name__ == "__main__":
     unittest.main()

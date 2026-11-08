@@ -37,7 +37,9 @@ def format_dataframe(
         if variable_descriptions is not None
         else get_variable_descriptions(table_code)
     )
-    df.rename(columns=descriptions, inplace=True)
+    # The caller's frame is relabelled in place, as rename(..., inplace=True) did before
+    # pandas 3.1 deprecated that keyword (PDEP-8); no data are copied.
+    df.columns = [descriptions.get(c, c) for c in df.columns]
     return df
 
 

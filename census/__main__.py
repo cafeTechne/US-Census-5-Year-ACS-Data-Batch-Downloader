@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from census import errors
 from census import workflows
 from census.api import CensusAPIClient, infer_dataset
-from census.cache import get_default_cache, import_frozen, read_frozen
+from census.cache import get_default_cache
 from census.concordance import BLOCKING_KINDS, apply_overrides, build_concordance, validate_all_crosswalks
 from census.metadata import available_vintages, describe_variable
 from census.pipeline import (
@@ -386,33 +386,15 @@ def cmd_tool(args: argparse.Namespace) -> int:
 
 def cmd_cache(args: argparse.Namespace) -> int:
     cache = get_default_cache()
+    if args.action == "import":
+        # same rules as the MCP cache_import tool: atomic; synthetic into the default cache needs the flag
+        return _emit(workflows.import_into_cache(cache, args.source, args.allow_default_cache,
+                                                 allow_hint="--allow-default-cache"), args.json)
     if cache is None:
-        if args.action == "import":
-            return _emit(errors.error_result(errors.INVALID_INPUT, "The query cache is disabled "
-                                             "(CENSUS_CACHE_DISABLED); nothing to import into."), args.json)
         return _emit({"success": True, "cache": "disabled"}, args.json)
     if args.action == "clear":
         # responses and the synthetic marker: an empty cache has no synthetic data left to label
         return _emit({"success": True, **cache.clear_all(), "path": cache.path}, args.json)
-    if args.action == "import":
-        if not args.source:
-            return _emit(errors.error_result(errors.INVALID_INPUT, "cache import needs a frozen file or directory"),
-                         args.json)
-        try:
-            frozen = read_frozen(args.source)  # every file validated before anything is written
-            if (any(f["synthetic"] is not None for f in frozen) and not os.getenv("CENSUS_CACHE_PATH")
-                    and not args.allow_default_cache):
-                return _emit(errors.error_result(
-                    errors.INVALID_INPUT,
-                    f"Refusing to import SYNTHETIC responses into the default query cache ({cache.path}): the "
-                    "marker would label every later result built from that cache synthetic, including real "
-                    "Census data. Set CENSUS_CACHE_PATH to a separate cache file (e.g. export "
-                    "CENSUS_CACHE_PATH=$PWD/synthetic_cache.db), or pass --allow-default-cache.",
-                    next_step="set CENSUS_CACHE_PATH and run cache import again"), args.json)
-            result = import_frozen(cache, frozen)
-        except (OSError, ValueError) as exc:
-            return _emit(errors.error_result(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}"), args.json)
-        return _emit({"success": True, **result, **cache.stats()}, args.json)
     return _emit({"success": True, **cache.stats()}, args.json)
 
 

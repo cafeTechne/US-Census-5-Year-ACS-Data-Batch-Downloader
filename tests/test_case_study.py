@@ -42,6 +42,10 @@ def run_document(workdir):
     (outputs land in workdir/case_study_output). Returns (command name, JSON output)."""
     from census.__main__ import main
 
+    # the confirmatory step reads examples/manifests/ relative to the working directory
+    manifests = os.path.join(workdir, "examples", "manifests")
+    if not os.path.exists(manifests):
+        shutil.copytree(os.path.join(ROOT, "examples", "manifests"), manifests)
     outputs = []
     cwd = os.getcwd()
     os.chdir(workdir)
