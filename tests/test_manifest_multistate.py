@@ -178,7 +178,10 @@ class TestValidation(unittest.TestCase):
                                                    {"type": "rpp", "variables": ["income"]}]), "adjusted twice")
         self.check(two_state_manifest(releases=[2023, 2024], variables=[
             {"name": "income", "ref": "2024:B19013_001"}, {"name": "total", "ref": "2024:B15002_001"},
-            {"name": "college", "ref": "2024:B15002_015"}]), "exactly one release")
+            {"name": "college", "ref": "2024:B15002_015"}]), "give rpp_years")  # several releases: Round 15
+        self.check(two_state_manifest(releases=[2023, 2024], variables=[
+            {"name": "income", "ref": "2024:B19013_001"}, {"name": "total", "ref": "2024:B15002_001"},
+            {"name": "college", "ref": "2024:B15002_015"}]), "dollar_year is required")
         self.check(two_state_manifest(aggregation={"mapping": {"26001": "a"}}), "aggregation")
         tracts = two_state_manifest(geography={"level": "tract", "state": "26"},
                                     adjustments=[{"type": "rpp", "variables": ["income"], "areas": "county_metro"}])

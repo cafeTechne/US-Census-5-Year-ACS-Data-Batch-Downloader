@@ -294,6 +294,7 @@ def fit_replicate(
     max_failed_replicates: int = 0,
     target: str = "population",
     replicate_policy: str = "flag",
+    fixed_variables: Sequence[str] = (),
 ) -> ModelResult:
     """Fit a statsmodels formula model with ACS replicate sampling SEs.
 
@@ -314,6 +315,12 @@ def fit_replicate(
     and records diagnostics["replicates_incomplete"]; "strict" (confirmatory,
     used by census.manifest) raises ValueError instead. Replicates do not correct
     attenuation from noisy covariates; use regression_calibration for that.
+    ``fixed_variables``: variables declared in advance (a manifest's
+    ``replicate_scope: "covariates_only"``) to be held at their estimates in
+    every refit, whether or not replicates exist; they are not counted as
+    incomplete replicates, and the result records them
+    (diagnostics["replicates_declared_fixed"], a note): se_sampling then excludes
+    their sampling error.
     """
     model = model.lower()
     check_replicate_policy(replicate_policy)
@@ -337,10 +344,14 @@ def fit_replicate(
     method = "full_sample_fit"
 
     if replicates is not None and len(replicates):
-        mats, fixed = _replicate_matrices(data, replicates, used)
+        declared = [v for v in used if v in set(fixed_variables)]
+        if declared and target == "these_areas":
+            raise ValueError("fixed_variables cannot be combined with target='these_areas': its interval would "
+                             f"use a sampling SE without the sampling error of {declared}")
+        mats, fixed = _replicate_matrices(data, replicates, [v for v in used if v not in declared])
         if not mats:
             raise ValueError("no formula variable has replicates in the replicate frame")
-        missing = [v for v in used if v not in mats]
+        missing = [v for v in used if v not in mats and v not in declared]
         stoch_missing = stochastic_variables(frame, missing)
         precheck_replicates(replicate_policy, rows_held_fixed=fixed, variables_without_replicates=stoch_missing,
                             context="fit_replicate")
@@ -376,6 +387,11 @@ def fit_replicate(
         }
         diagnostics["replicate_failures"] = failed
         provenance["replicate_variables"] = sorted(mats)
+        if declared:
+            diagnostics["replicates_declared_fixed"] = declared
+            notes.append(f"DECLARED COVARIATE-ONLY REPLICATES: {declared} held at their estimates in every refit "
+                         "as pre-declared; se_sampling covers the sampling error of "
+                         f"{sorted(mats)} only, not of {declared}")
         notes.append("se_total = sqrt(se_model^2 + se_sampling^2) is reported but conservative (validated "
                      "coverage 0.961 at nominal 0.90): the model residual already absorbs outcome sampling error")
     else:
