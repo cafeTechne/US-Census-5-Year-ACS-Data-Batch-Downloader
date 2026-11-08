@@ -712,8 +712,9 @@ def plan_extraction(
         if dataset and dataset not in DECENNIAL_DATASETS:
             return errors.error_result(
                 errors.INVALID_DATASET,
-                f"Dataset '{dataset}' is an ACS dataset but product='decennial' was requested; use "
-                f"dataset {list(DECENNIAL_DATASETS)} for the 2020 Census.",
+                (f"Dataset '{dataset}' is an ACS dataset but product='decennial' was requested; "
+                 if dataset in DATASETS else f"Dataset '{dataset}' is not a dataset key; ")
+                + f"use dataset {list(DECENNIAL_DATASETS)} for the 2020 Census.",
             )
         if explicit_product and not is_decennial(requested_product):
             return errors.error_result(
@@ -746,7 +747,12 @@ def plan_extraction(
                 )
     dataset = dataset or infer_dataset(table_code, product)
     if dataset not in DATASETS:
-        return errors.error_result(errors.INVALID_DATASET, f"Unsupported dataset '{dataset}'.")
+        return errors.error_result(
+            errors.INVALID_DATASET,
+            f"Unsupported dataset '{dataset}'."
+            + (f" For the 2020 Census use dataset {list(DECENNIAL_DATASETS)} (or product='decennial')."
+               if str(dataset).strip().lower().startswith(("dec", "census")) else ""),
+        )
     options = replace(options, product=product)
     if options.concordance_mode not in CONCORDANCE_MODES:
         return errors.error_result(
@@ -1423,6 +1429,10 @@ def run_batch(
         columns_out = list(panel.columns)
         slug_map = make_slug_map(columns_out, label_metadata, options.slug_style)
         panel = panel.rename(columns=slug_map)
+        if is_decennial(dataset):  # explicit evidence for census.analysis (kept in Parquet files)
+            panel.attrs.update(product=PRODUCT_DECENNIAL, dataset=dataset, variable_codes={
+                slug: col for col, slug in slug_map.items()
+                if (parse_variable_code(col) or ("", ""))[1] == "N"})
         if duplicates_dropped:
             emit(f"Dropped {duplicates_dropped} duplicate (GEOID, Year) row(s).")
         ext = "parquet" if output_format == "parquet" else "csv"

@@ -214,5 +214,95 @@ class TestCleanup(unittest.TestCase):
         self.assertEqual(manifest_releases({"releases": 2019}), [])
 
 
+class TestDecennialEvidence(unittest.TestCase):
+    """Findings 5 and 6: decennial counts only from explicit evidence; defaults and base codes."""
+
+    def test_user_count_column_is_not_decennial(self):
+        from census.analysis import analysis_frame, is_decennial_count
+        from census.decennial import MIXED_NOTE
+
+        df = pd.DataFrame({"GEOID": ["01001", "01003"], "Year": [2020, 2020], "crime_count": [12, 30],
+                           "B01003_001E": [55000, 220000], "B01003_001M": [0, 0]})
+        f = analysis_frame(df, variables=["crime_count", "B01003_001"])
+        self.assertEqual(set(f["crime_count_method"]), {"no_sampling_error"})
+        self.assertEqual(f["crime_count_se"].tolist(), [0.0, 0.0])
+        self.assertNotIn(MIXED_NOTE, f.attrs["notes"])
+        self.assertEqual(set(f["release"]), {"acs5_2020"})
+        self.assertFalse(is_decennial_count("crime_count"))
+        self.assertTrue(is_decennial_count("crime_count", decennial=True))
+        self.assertFalse(is_decennial_count("P1_001N", decennial=False))
+
+    def test_archived_code_is_decennial_without_attrs(self):
+        from census.analysis import analysis_frame, is_decennial_count
+
+        self.assertTrue(is_decennial_count("P1_001N"))
+        df = pd.DataFrame({"GEOID": ["56001", "56003"], "P1_001N": [37066, 11521]})
+        f = analysis_frame(df)  # default variables: the count, named by its base code
+        self.assertEqual(list(f.attrs["variables"]), ["P1_001"])
+        self.assertTrue(f["P1_001_se"].isna().all())
+        self.assertEqual(set(f["P1_001_method"]), {"not_sample_based"})
+        self.assertEqual(set(f["release"]), {"dec_2020"})
+        g = analysis_frame(df, variables=["P1_001"])  # by base code
+        self.assertEqual(g.attrs["variables"]["P1_001"]["estimate_column"], "P1_001N")
+
+    def test_slug_frame_with_attrs_defaults_and_base_code(self):
+        from census.analysis import analysis_frame
+
+        df = pd.DataFrame({"GEOID": ["56001", "56003"], "Year": [2020, 2020], "total_count": [37066, 11521]})
+        df.attrs.update(product="decennial", dataset="dec/dhc", variable_codes={"total_count": "P1_001N"})
+        f = analysis_frame(df)
+        self.assertEqual(list(f.attrs["variables"]), ["total_count"])
+        self.assertEqual(set(f["release"]), {"dec_2020"})
+        g = analysis_frame(df, variables={"pop": "P1_001"})
+        self.assertEqual(g.attrs["variables"]["pop"]["estimate_column"], "total_count")
+        self.assertEqual(set(g["pop_method"]), {"not_sample_based"})
+        with self.assertRaises(KeyError):  # not a decennial frame: no base-code lookup
+            analysis_frame(df.copy().pipe(lambda d: setattr(d, "attrs", {}) or d), variables={"pop": "P1_001"})
+
+    def test_extraction_outputs_carry_evidence(self):
+        from census.analysis import _read, analysis_frame
+        from census.pipeline import Entity, ResearchOptions, run_batch
+        from tests.test_decennial import FakeClient
+
+        with tempfile.TemporaryDirectory() as d:
+            for fmt in ("panel", "parquet"):
+                res = run_batch("P1", [Entity("MI_WY", "state", "26,56")], [2020], os.path.join(d, fmt), fmt,
+                                ResearchOptions(use_cache=False, include_codebook=True), "dec/dhc", FakeClient())
+                self.assertTrue(res["success"], res.get("message"))
+                raw = _read(res["panel_path"])  # CSV: extraction metadata; Parquet: attrs in the file
+                self.assertEqual(raw.attrs.get("product"), "decennial", fmt)
+                self.assertEqual(raw.attrs.get("variable_codes"), {"total_count": "P1_001N"}, fmt)
+                frame = raw.rename(columns={"geoid": "GEOID", "year": "Year"})
+                f = analysis_frame(frame, variables={"pop": "P1_001"})
+                self.assertEqual(set(f["pop_method"]), {"not_sample_based"})
+                self.assertEqual(set(f["release"]), {"dec_2020"})
+            # an ACS-like CSV elsewhere carries no decennial evidence
+            path = os.path.join(d, "mine.csv")
+            pd.DataFrame({"GEOID": ["1"], "crime_count": [3]}).to_csv(path, index=False)
+            self.assertEqual(_read(path).attrs, {})
+
+
+class TestDecennialAliases(unittest.TestCase):
+    def test_generic_words_not_decennial(self):
+        from census.decennial import is_decennial
+
+        for word in ("census", "dec", "Census"):
+            self.assertFalse(is_decennial(word), word)
+        for word in ("decennial", "dec/pl", "dec/dhc", "decennial census", "2020 census"):
+            self.assertTrue(is_decennial(word), word)
+
+    def test_plan_message_for_dec(self):
+        from census.pipeline import Entity, ResearchOptions, plan_extraction
+        from tests.test_decennial import FakeClient
+
+        for ds, fragment in (("dec", "Unsupported dataset 'dec'"), ("decennial", "is not a dataset key")):
+            plan = plan_extraction("P1", [Entity("WY", "state", "56")], [2020], dataset=ds,
+                                   options=ResearchOptions(use_cache=False), client=FakeClient())
+            self.assertFalse(plan["success"])
+            self.assertIn(fragment, plan["error"])
+            self.assertIn("dec/pl", plan["error"])
+            self.assertNotIn("is an ACS dataset", plan["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
