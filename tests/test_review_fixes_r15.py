@@ -16,8 +16,6 @@
 10. spreg fits print nothing to stdout, under one lock.
 """
 
-import copy
-import json
 import os
 import shutil
 import tempfile
