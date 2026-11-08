@@ -1053,6 +1053,7 @@ for _tool in (
     workflows_inference.trend_test,
     workflows_inference.make_figure,
     workflows_inference.make_table,
+    workflows_inference.make_results_bundle,
     recipes.get_recipe,
     workflows_inference.create_manifest,
     workflows_inference.run_manifest,
@@ -1067,6 +1068,7 @@ for _tool in (
     workflows_microdata.multilevel_model,
     workflows_microdata.difference_in_differences,
     workflows_microdata.adjust_for_place,
+    workflows_microdata.place_adjust_frame,
     workflows_microdata.make_web_map,
 ):
     mcp.tool()(_tool)
@@ -1092,6 +1094,7 @@ reliability_profile = workflows_inference.reliability_profile
 trend_test = workflows_inference.trend_test
 make_figure = workflows_inference.make_figure
 make_table = workflows_inference.make_table
+make_results_bundle = workflows_inference.make_results_bundle
 create_manifest = workflows_inference.create_manifest
 run_manifest = workflows_inference.run_manifest
 get_boundaries = workflows_geo.get_boundaries
@@ -1105,6 +1108,7 @@ pums_regression = workflows_microdata.pums_regression
 multilevel_model = workflows_microdata.multilevel_model
 difference_in_differences = workflows_microdata.difference_in_differences
 adjust_for_place = workflows_microdata.adjust_for_place
+place_adjust_frame = workflows_microdata.place_adjust_frame
 make_web_map = workflows_microdata.make_web_map
 get_recipe = recipes.get_recipe
 

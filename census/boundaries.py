@@ -664,3 +664,30 @@ def equal_area_crs(gdf):
                                          "+datum=NAD83 +units=m +no_defs")
         return crs_for_region(r)
     return crs_for_region("conus")
+
+
+def county_cbsa_membership(counties, cbsas, min_share: float = 0.5) -> pd.DataFrame:
+    """The CBSA (if any) each county belongs to, from boundary polygons.
+
+    Counties are the building blocks of CBSAs, so a county lies inside one
+    CBSA or outside all of them; the polygon overlap (in an equal-area CRS)
+    only has to find which. A county is assigned the CBSA covering at least
+    ``min_share`` of its area (generalized cartographic boundaries make the
+    share slightly below 1). ``counties`` needs GEOID; ``cbsas`` needs GEOID,
+    NAME and LSAD (``M1`` metropolitan, ``M2`` micropolitan). Returns one row
+    per county: GEOID, CBSA, CBSA_NAME, LSAD, share (missing outside every CBSA).
+    """
+    import geopandas as gpd
+
+    crs = equal_area_crs(counties)
+    c = counties[["GEOID", "geometry"]].to_crs(crs)
+    c["_area"] = c.geometry.area
+    b = cbsas[["GEOID", "NAME", "LSAD", "geometry"]].rename(
+        columns={"GEOID": "CBSA", "NAME": "CBSA_NAME"}).to_crs(crs)
+    inter = gpd.overlay(c, b, how="intersection", keep_geom_type=True)
+    inter["share"] = inter.geometry.area / inter["_area"]
+    best = inter.sort_values("share").groupby("GEOID").tail(1)
+    best = best[best["share"] >= min_share]
+    out = pd.DataFrame(c[["GEOID"]]).merge(
+        pd.DataFrame(best[["GEOID", "CBSA", "CBSA_NAME", "LSAD", "share"]]), on="GEOID", how="left")
+    return out.reset_index(drop=True)

@@ -34,6 +34,7 @@ Examples:
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -376,6 +377,11 @@ def cmd_tool(args: argparse.Namespace) -> int:
                                      error_type=type(exc).__name__)
         result["summary"] = f"{args.name} failed: {type(exc).__name__}: {exc}"
         result["next_step"] = "check the arguments (column names, formula, paths) and call again"
+    if getattr(args, "save", None):
+        # the same JSON as --json prints, kept as a file for later steps (e.g. results bundles)
+        os.makedirs(os.path.dirname(os.path.abspath(args.save)), exist_ok=True)
+        with open(args.save, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(result, indent=2, default=str) + "\n")
     return _emit(result, args.json)
 
 
@@ -551,6 +557,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--arg", action="append", metavar="KEY=VALUE",
                    help="one keyword argument (repeatable); VALUE is parsed as JSON when valid, else kept as a "
                         "string, so paths need no JSON escaping (portable to Windows backslash paths)")
+    p.add_argument("--save", metavar="PATH", help="also write the JSON result to PATH (written even on failure)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tool)
 
