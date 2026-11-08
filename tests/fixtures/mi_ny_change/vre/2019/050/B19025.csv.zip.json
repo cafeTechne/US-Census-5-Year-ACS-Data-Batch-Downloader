@@ -1,0 +1,8 @@
+{
+  "source_url": "https://www2.census.gov/programs-surveys/acs/replicate_estimates/2019/data/5-year/050/B19025.csv.zip",
+  "sha256": "84c429c967c23ac4e06b70e32bfccb3e38e9a3b797c9b1de235c5877af1279f4",
+  "size_bytes": 56998,
+  "content_type": "application/zip",
+  "downloaded_at": "2026-11-08T00:00:00Z",
+  "_about": "TRIMMED copy of the Census VRE file at source_url (original SHA-256 658f77ffc48e90bed0b48a8a404f8590e52cc0bda4f8e35c2273f3ff8dea8401): header, table-title rows, and the rows of the counties of states 26, 36 for line(s) [1]; recorded by `python -m tests.test_manifest_releases --record`."
+}

@@ -361,6 +361,70 @@ printed precision as long as the API, the VRE file (cached under `.cache/vre` wi
 SHA-256) and the boundary files (`.cache/geo`, SHA-256 sidecars) are unchanged. Volatile
 fields: timestamps (`generated_at`), absolute paths, the git commit, and figure bytes.
 
+## 8. Confirmatory change across releases: 2015-2019 vs 2020-2024
+
+A second pre-registered study (PLAN_ROUND_15 A3) compares two **non-overlapping** 5-year
+periods in the same 145 counties:
+[`examples/manifests/mi_ny_income_change.json`](../examples/manifests/mi_ny_income_change.json).
+
+```bash
+python -m census tool create_manifest --arg manifest_path=examples/manifests/mi_ny_income_change.json --json
+python -m census tool run_manifest --arg manifest_path=examples/manifests/mi_ny_income_change.json --arg output_dir=case_study_output/change --json
+```
+
+Expected from `create_manifest`: `"valid": true`, `"notes": []` and
+`"hash": "c420fcf08fcb0c758b050fea18229ffdbff6b0ec22335914c00b69558c923f8f"`.
+
+| Manifest entry | Value |
+| :--- | :--- |
+| `releases` | `[2019, 2024]`: no shared sample years, so the two periods are independent samples |
+| `variables`, `derivations` | `mean_hh_income` = aggregate household income `B19025_001` / households `B19001_001` |
+| `adjustments` | `{"type": "rpp", "variables": ["mean_hh_income"], "areas": "county_metro", "dollar_year": 2024, "price_index": "r-cpi-u-rs", "rpp_years": {"2019": 2019, "2024": 2024}}` |
+| `replicates` | `{"source": "census_vre"}`: `run_manifest` fetches the four Census VRE county files itself |
+| `analyses` | m1: `fit_replicate`, OLS `mean_hh_income ~ C(Year)`, target `these_areas` (interval from the replicate SE) |
+| `hypotheses` | H1: coefficient of `C(Year)[T.2024]` > 0 (one-sided) |
+
+**Why mean, not median, household income.** The Census Bureau publishes no variance
+replicates for `B19013` (section 4), so a change in median income could have no exact
+sampling SE. Aggregate income (`B19025`) and households (`B19001`) are both on the VRE list,
+so the mean (the Census definition of mean household income: aggregate over households), its
+CPI and RPP adjustment and the change between periods are all evaluated on the 80
+replicates. The change is the unweighted mean over counties of each county's change, the
+`C(Year)` coefficient (the panel is balanced). The `these_areas` target fits the question:
+the 145 counties are all counties of the two states, so the uncertainty is ACS sampling
+error, which the replicates measure.
+
+**Price adjustment, in order (D15-2).** Each release's dollars are converted to 2024 dollars
+with the R-CPI-U-RS (2019: factor 462.511 / 375.813 = 1.2307; 2024: 1), then divided by the
+BEA RPP / 100 of the county's area **for the release's own year** (2019 RPPs for 2015-2019,
+2024 RPPs for 2020-2024). Replicates are scaled by the same factors. `run.json` records the
+CPI values and factors, the price-index and RPP table SHA-256s, and the RPP areas per release.
+
+Expected: `"analysis_status": "confirmatory"`, `"deviations": []`, and for H1 (live,
+2026-11-08):
+
+| Term | Estimate | se_sampling (VRE) | 90% CI | One-sided p (Holm) |
+| :--- | ---: | ---: | :--- | ---: |
+| C(Year)[T.2024] | 3,110.80 | 244.32 | [2,708.93, 3,512.67] | 1.9e-37 |
+
+So price-adjusted mean household income (2024 dollars, national-average purchasing power)
+rose by about $3,100 per county on average between 2015-2019 and 2020-2024. Every one of the 80
+replicate refits gives a positive change. `run.json` lists under `replicates` the four VRE
+files (`B19025` and `B19001`, 2019 and 2024, county) with URL and SHA-256, the published-MOE
+self-check of each file, `unavailable: []`, and `mean_hh_income` evaluated on the replicates
+for all 290 county-periods. The intercept (95,522) is the 2015-2019 county mean in the same
+units. Limits: the RPP and CPI errors are not in the SE; county means weight every county
+equally (not households); the 2019 RPPs use BEA's current MSA delineation (OMB 23-01), as for
+2024.
+
+A variable without published replicates (for example `B19013` as the outcome) is listed in
+`replicates.unavailable` and stops a replicate analysis under the strict confirmatory policy,
+unless the analysis declares `"replicate_scope": "covariates_only"` (outcome held at its
+estimate in every refit; `population` or `conservative` target only). The offline test
+`tests/test_manifest_releases.py` runs both commands on frozen copies of the API responses and
+of the four VRE files (trimmed to the Michigan and New York county rows of the two lines used)
+with network access refused; with `CENSUS_LIVE_TESTS=1` it runs them live.
+
 ## Limitations
 
 - **RPP error is not in any uncertainty measure.** RPPs are BEA estimates with their own
@@ -406,6 +470,14 @@ Closed in Round 14 (PLAN_ROUND_14 A1-A4, offline tests in `tests/test_manifest_m
   `geography.states` (extracted per state and stacked) and an `adjustments` step
   (`{"type": "rpp", ...}`) that reuses the `place_adjust_frame` code and records RPP
   provenance. Derivations are evaluated on supplied replicates. Section 1 is the result.
+
+Closed in Round 15 (PLAN_ROUND_15 A1-A3, offline tests in `tests/test_manifest_releases.py`):
+
+- A manifest's price adjustment covered one release only, and `run_manifest` could not fetch
+  Census replicates. Adjustments now take several releases (`dollar_year`, `price_index`,
+  `rpp_years`: CPI first, then each release's own RPP), and `"replicates": {"source":
+  "census_vre"}` fetches the VRE files and records their URLs and SHA-256s. Section 8 is the
+  result.
 
 Open (documented, not closed):
 
