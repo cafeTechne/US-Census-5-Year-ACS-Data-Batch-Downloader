@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-02T18:26:38+00:00",
+  "generated_at": "2026-11-08T02:01:53+00:00",
   "mode": "live",
   "command": "python scripts/validate_against_census.py --live",
   "summary": {
@@ -35,12 +35,12 @@
   "results": [
     {
       "check_id": "F1",
-      "description": "Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing).",
+      "description": "Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing, except controlled MOEs -> 0 with <base>_CONTROLLED = True).",
       "n_compared": 9800,
       "n_failed": 0,
       "max_abs_error": 0.0,
       "max_rel_error": null,
-      "tolerance": "exact (float equality); sentinel codes and non-numeric cells must be missing in the output",
+      "tolerance": "exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column",
       "failures": [],
       "census_source": [
         "https://api.census.gov/data/<year>/acs/acs5?get=NAME,group(B01001)&for=county:..."
@@ -61,6 +61,7 @@
             "rows_missing": 0,
             "rows_extra": 0,
             "raw_columns_unmapped": 0,
+            "controlled_moe_cells": 117,
             "concordance_issue_count": 0
           },
           "parquet": {
@@ -72,6 +73,7 @@
             "rows_missing": 0,
             "rows_extra": 0,
             "raw_columns_unmapped": 0,
+            "controlled_moe_cells": 117,
             "concordance_issue_count": 0
           }
         },
@@ -81,7 +83,7 @@
         ]
       },
       "mode": "live",
-      "seconds": 5.45
+      "seconds": 6.0
     },
     {
       "check_id": "F2",
@@ -684,7 +686,7 @@
         ]
       },
       "mode": "live",
-      "seconds": 7.55
+      "seconds": 6.85
     },
     {
       "check_id": "F3",
@@ -960,7 +962,7 @@
         "api_cell_mismatches": 0
       },
       "mode": "live",
-      "seconds": 8.75
+      "seconds": 9.0
     },
     {
       "check_id": "F4",
@@ -1122,7 +1124,7 @@
         "pairings": "same constructions and Census definitions as F2 (bachelors_or_higher excluded: B15003 has no VRE file)"
       },
       "mode": "live",
-      "seconds": 0.67
+      "seconds": 0.61
     },
     {
       "check_id": "F5",
@@ -1131,7 +1133,7 @@
       "n_failed": 0,
       "max_abs_error": 16226.11627906977,
       "max_rel_error": 0.1985113138045458,
-      "tolerance": "gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 85% of counties within 2% of B19013 (B19001 is coarser than the distribution Census interpolates)",
+      "tolerance": "gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates)",
       "failures": [
         {
           "pair": "B19001->B19013_001 2019",
@@ -1338,7 +1340,7 @@
         }
       },
       "mode": "live",
-      "seconds": 2.72
+      "seconds": 3.24
     },
     {
       "check_id": "F6",
@@ -1482,7 +1484,7 @@
         "median_items_outside_tolerance_not_asserted": 3
       },
       "mode": "live",
-      "seconds": 5.97
+      "seconds": 6.02
     },
     {
       "check_id": "F7",
@@ -2027,7 +2029,7 @@
         "census_flag_encoding": "'*' = statistically significant at 90%; null/empty = not significant (variable label 'Statistical Significance!!...', predicateType string)"
       },
       "mode": "live",
-      "seconds": 1.03
+      "seconds": 1.07
     },
     {
       "check_id": "F8",
@@ -2151,7 +2153,7 @@
         }
       },
       "mode": "live",
-      "seconds": 1.77
+      "seconds": 2.28
     },
     {
       "check_id": "F9",
@@ -2204,7 +2206,7 @@
         }
       },
       "mode": "live",
-      "seconds": 3.56
+      "seconds": 3.03
     },
     {
       "check_id": "F10",
@@ -2256,7 +2258,7 @@
         }
       },
       "mode": "live",
-      "seconds": 9.09
+      "seconds": 9.12
     }
   ]
 }

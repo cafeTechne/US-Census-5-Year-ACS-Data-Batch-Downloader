@@ -1,6 +1,6 @@
 # Validation against Census-published values
 
-Generated: 2026-11-02T18:26:38+00:00  
+Generated: 2026-11-08T02:01:53+00:00  
 Mode: live  
 Command: `python scripts/validate_against_census.py --live`  
 
@@ -10,11 +10,11 @@ Each check recomputes a number the Census Bureau computed independently and comp
 
 | Check | Status | Compared | Failed | Max abs error | Max rel error | Tolerance |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| F1 | PASSED | 9800 | 0 | 0 | - | exact (float equality); sentinel codes and non-numeric cells must be missing in the output |
+| F1 | PASSED | 9800 | 0 | 0 | - | exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column |
 | F2 | PASSED | 5040 | 0 | 0.05 | 0.04712 | estimate: \|ours - DP\| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted |
 | F3 | PASSED | 29572 | 0 | 0.5 | - | replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row) |
 | F4 | PASSED | 1038 | 0 | 0.09838 | - | \|ours - DP\| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1) |
-| F5 | PASSED | 1983 | 0 | 1.623e+04 | 0.1985 | gross rent: every county within max($1, 0.1%) of B25064. Household income: median \|relative error\| < 1% and >= 85% of counties within 2% of B19013 (B19001 is coarser than the distribution Census interpolates) |
+| F5 | PASSED | 1983 | 0 | 1.623e+04 | 0.1985 | gross rent: every county within max($1, 0.1%) of B25064. Household income: median \|relative error\| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates) |
 | F6 | PASSED | 125 | 0 | 275.6 | 0.005741 | \|ours - CP\| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes) |
 | F7 | PASSED | 442 | 0 | - | - | agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding |
 | F8 | PASSED | 110 | 0 | 0 | - | estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted |
@@ -23,18 +23,18 @@ Each check recomputes a number the Census Bureau computed independently and comp
 
 ### Known findings
 
-- **F5 (toolkit discrepancy, census/medians.py):** when the cumulative count reaches exactly 50% at a bracket boundary and the following bracket(s) are empty, Census publishes the midpoint of the empty gap; `median_for_rows` / `median_from_distribution` return the gap's lower edge. Repro: B25063 2019, Sterling County TX (48431): 50% of 54 renter units at $800, brackets $800-899 empty, ours 800, B25064 850; Stonewall County TX (48433): 50% at $550, $550-649 empty, ours 550, B25064 600. In the battery every exact-50% case without a gap matches Census (11 of 11) and every case with a gap is the midpoint (2 of 2). Fix: in the interpolation, when the 50th percentile equals a bracket's upper bound and the next non-empty bracket starts higher, return the midpoint of the gap.
-- **F5 (methodological, not a bug):** household income 2023 (2019-2023): 84.1% of counties within 2% of B19013, below the 85% criterion (2019: 90.6%); median relative error 0.64% (2019: 0.49%). The misses are small Texas counties where B19001's $10k-$50k-wide brackets are much coarser than the $2,500 distribution Census interpolates (Subject Definitions, 'Median Income'); 99.8% of counties are within the published B19013 MOE. The criterion is kept, not widened.
+- **F5 (resolved 2026-11-02, census/medians.py):** when the cumulative count reaches exactly 50% at a bracket boundary and the following bracket(s) are empty, Census publishes the midpoint of the empty gap (B25063 2019: Sterling County TX 48431, $850; Stonewall County TX 48433, $600). The interpolation now returns that midpoint; failures matching the pattern are diagnosed as failures_explained_by_empty_bracket_gap_midpoint.
+- **F5 (methodological, criterion revised 2026-11-02):** household income: B19001's $10k-$50k-wide brackets are much coarser than the $2,500 distribution Census interpolates (Subject Definitions, 'Median Income'), so a per-county 2% band measures bracket coarseness, not calculation error (first live run, 2019-2023: 84.1% of counties within 2%, 99.8% within the published B19013 MOE). The check asserts median relative error < 1% and >= 98% of counties within the published MOE; the 2% share is still reported.
 - **F9 (informational, census/continuity.py):** the Round 6 continuity check flags real 2019->2023 change in stable concepts (B19001_015-017 top income brackets in nominal dollars, B17001_015, four B27010 cells), so `run_batch` blocks those extractions in the default concordance mode. Its thresholds are documented for adjacent, overlapping releases but are applied to any requested pair.
 - **F2 (methodological):** owner-occupied (DP04_0046) county MOEs from the Handbook proportion formula miss the band in 215 of 998 county-years (median ratio 0.88); for every one of them the exact replicate MOE reproduces the DP MOE within 0.1 point, so the gap is the covariance the approximation ignores. Age 65+ (12-cell sum) approximate MOEs are ~4x the DP MOE (near-controlled age totals).
 - **F6:** Census's implied R-CPI-U-RS factor exceeds ours by 0.008% (2018->2023: 1.21729 = 449.3/369.1 vs ours 449.265/369.1) and 0.010% (2014->2019), consistent with Census using the index rounded to one decimal or an earlier vintage of the research series. 2019 CP medians are re-derived by Census, not scaled (see F6 notes).
 
 ## F1: PASSED
 
-Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing).
+Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing, except controlled MOEs -> 0 with <base>_CONTROLLED = True).
 
-- Tolerance: exact (float equality); sentinel codes and non-numeric cells must be missing in the output
-- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 5.45 s
+- Tolerance: exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column
+- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 6.0 s
 - Responses pass through run_batch unchanged via a client whose _get_json is served by the same source as the comparison, so the check isolates parsing, sentinel cleaning, concordance renaming, panel stacking, slug renaming and file export.
 
 <details><summary>Details</summary>
@@ -51,6 +51,7 @@ Every cell of run_batch output (B01001, county level, releases 2019, 2023, conco
       "rows_missing": 0,
       "rows_extra": 0,
       "raw_columns_unmapped": 0,
+      "controlled_moe_cells": 117,
       "concordance_issue_count": 0
     },
     "parquet": {
@@ -62,6 +63,7 @@ Every cell of run_batch output (B01001, county level, releases 2019, 2023, conco
       "rows_missing": 0,
       "rows_extra": 0,
       "raw_columns_unmapped": 0,
+      "controlled_moe_cells": 117,
       "concordance_issue_count": 0
     }
   },
@@ -83,7 +85,7 @@ Sources:
 Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56 and all their counties, releases 2019, 2023.
 
 - Tolerance: estimate: |ours - DP| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted
-- Compared: 5040; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 7.55 s
+- Compared: 5040; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 6.85 s
 - Census computes Data Profile MOEs from replicate weights, which capture the covariance between numerator and denominator; the Handbook approximation ignores it, so it can over- or understate the MOE (ACS General Handbook 2020, ch. 8). Where the approximate MOE misses the band, the exact replicate MOE for the same geography is computed: if it reproduces the published MOE, the toolkit's formula is right and the gap is the documented approximation error.
 
 <details><summary>Details</summary>
@@ -685,7 +687,7 @@ Sources:
 MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe, variance.replicate_moe) vs the MOE published in the same VRE file; VRE estimates and MOEs vs API estimates and MOEs for the same cells. Tables B17001, B27010, B25003, B01001, B01003, B11001, B19001, B25063, state level, releases 2019, 2023, plus the committed county/state VRE fixtures.
 
 - Tolerance: replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row)
-- Compared: 29572; failed: 0; max abs error: 0.5; max rel error: -; time: 8.75 s
+- Compared: 29572; failed: 0; max abs error: 0.5; max rel error: -; time: 9.0 s
 - Controlled rows (CME '*****', published MOE 0) and model-based rows (all 80 replicates equal the estimate, published MOE from the VRE documentation's eqs. 3-5) cannot be reproduced from replicates and are counted separately, as the VRE documentation prescribes.
 
 <details><summary>Details</summary>
@@ -960,7 +962,7 @@ Sources:
 Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.
 
 - Tolerance: |ours - DP| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1)
-- Compared: 1038; failed: 0; max abs error: 0.09838; max rel error: -; time: 0.67 s
+- Compared: 1038; failed: 0; max abs error: 0.09838; max rel error: -; time: 0.61 s
 - published_moe_at_display_floor counts rows where the DP shows a percent MOE of 0.1 while the exact replicate MOE is below 0.05 (it would round to 0.0). This occurs for the 65+ share at the state level, which is nearly controlled to the population estimates by age; Census does not display a 0.0 percent MOE for an uncontrolled item, so 0.1 acts as a floor. These rows pass only because the tolerance is 0.1; they are listed so the margin is visible.
 
 <details><summary>Details</summary>
@@ -1120,8 +1122,8 @@ Sources:
 
 Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56, releases 2019, 2023.
 
-- Tolerance: gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 85% of counties within 2% of B19013 (B19001 is coarser than the distribution Census interpolates)
-- Compared: 1983; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 2.72 s
+- Tolerance: gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates)
+- Compared: 1983; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 3.24 s
 - n_failed counts gross-rent counties outside the per-county bound plus household-income releases whose distribution criterion is not met (median relative error < 1% and >= 98% of counties within the published MOE; counties outside 2% are listed as counties_outside_2pct). Published medians at a top or bottom coding bound and medians we top/bottom-code are excluded.
 
 <details><summary>Details</summary>
@@ -1260,7 +1262,7 @@ Sources:
 Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: |ours - CP| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes)
-- Compared: 125; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 5.97 s
+- Compared: 125; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 6.02 s
 - Asserted: means, aggregates and per-capita values, which Census converts with a single factor (implied factor constant to 5 digits across items and states). Median items are compared and reported but not asserted: in the 2019 Comparison Profile their implied factors scatter (1.0747-1.0838 against 1.08097 for means), showing that Census re-derived those medians from inflation-adjusted distributions rather than scaling the published median, which no deflator can reproduce from published data; in the 2023 CP medians scale with the same constant factor and all pass. Median misses are listed with asserted=false.
 - Round 6 acceptance criterion 6: the Census-implied factor (median over mean/aggregate/per-capita items) is compared with our R-CPI-U-RS factor in details.factors.*.implied_minus_ours_percent.
 
@@ -1377,7 +1379,7 @@ Sources:
 Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding
-- Compared: 442; failed: 0; max abs error: -; max rel error: -; time: 1.03 s
+- Compared: 442; failed: 0; max abs error: -; max rel error: -; time: 1.07 s
 - The API's cprofile endpoint publishes estimates (E), annotations (EA) and significance (SS) only, no MOEs; MOEs come from each release's Data Profile (PM for percent items, M for others). For dollar items the earlier MOE is scaled by the same R-CPI-U-RS factor as the estimate.
 - Census tests unrounded estimates and standard errors; we test the published (rounded) values, so disagreements are expected only for z close to the 1.645 critical value.
 - A test is 'decidable' when every combination of unrounded values consistent with the published rounding (estimates and MOEs +/- half a unit; a published percent MOE of 0.1 may be any value in (0, 0.15)) gives z on the same side of 1.645. Only decidable tests can disagree with Census because of a calculation error; agreement is asserted on them and reported for all tests. Failures list decidable disagreements first, then undecidable ones.
@@ -1438,28 +1440,28 @@ Failures / disagreements (first 25):
 
 | cp_release | GEOID | item | label | estimate_late | moe_late | estimate_early | moe_early | z | ours_significant | census_significant | agree | z_range_under_rounding | decidable |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 2019 | 56 | CP03_2019_034 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction | 8.2 | 0.4 | 7.6 | 0.4 | 1.7448 | True | False | False | [1.292, 2.326] | False |
-| 2023 | 56 | CP03_2023_036 | 2014-2018 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 1.7 | 0.2 | 2 | 0.2 | 1.7448 | True | False | False | [0.931, 3.102] | False |
-| 2023 | 17 | CP03_2023_097 | 2014-2018 Estimates!!HEALTH INSURANCE COVERAGE!!Civilian noninstitutionalized population!!With health insurance coverage!!With private health insurance | 69.7 | 0.2 | 70 | 0.2 | 1.7448 | True | False | False | [0.931, 3.102] | False |
+| 2019 | 56 | CP03_2019_034 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction | 8.2 | 0.4 | 7.6 | 0.4 | 1.7448 | True | False | False | [np.float64(1.292), np.float64(2.326)] | False |
+| 2023 | 56 | CP03_2023_036 | 2014-2018 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 1.7 | 0.2 | 2 | 0.2 | 1.7448 | True | False | False | [np.float64(0.931), np.float64(3.102)] | False |
+| 2023 | 17 | CP03_2023_097 | 2014-2018 Estimates!!HEALTH INSURANCE COVERAGE!!Civilian noninstitutionalized population!!With health insurance coverage!!With private health insurance | 69.7 | 0.2 | 70 | 0.2 | 1.7448 | True | False | False | [np.float64(0.931), np.float64(3.102)] | False |
 | 2019 | 06 | CP03_2019_002 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force | 63.7 | 0.1 | 63.8 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 06 | CP03_2019_003 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force | 63.3 | 0.1 | 63.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
+| 2019 | 06 | CP03_2019_003 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force | 63.3 | 0.1 | 63.4 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 48 | CP03_2019_006 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.4 | 0.1 | 0.5 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2019 | 06 | CP03_2019_007 | 2010-2014 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!Not in labor force | 36.3 | 0.1 | 36.2 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 06 | CP03_2019_021 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Public transportation (excluding taxicab) | 5.1 | 0.1 | 5.2 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 06 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 2.6 | 0.1 | 2.7 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 17 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 3 | 0.1 | 3.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 48 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 1.5 | 0.1 | 1.6 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 06 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2.6 | 0.1 | 2.5 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 36 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2 | 0.1 | 1.9 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 36 | CP03_2019_034 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction | 5.7 | 0.1 | 5.6 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 48 | CP03_2019_036 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 2.9 | 0.1 | 3 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 48 | CP03_2019_039 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Information | 1.7 | 0.1 | 1.8 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
+| 2019 | 06 | CP03_2019_021 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Public transportation (excluding taxicab) | 5.1 | 0.1 | 5.2 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 06 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 2.6 | 0.1 | 2.7 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 17 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 3 | 0.1 | 3.1 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 48 | CP03_2019_022 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Walked | 1.5 | 0.1 | 1.6 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 06 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2.6 | 0.1 | 2.5 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 36 | CP03_2019_023 | 2010-2014 Estimates!!COMMUTING TO WORK!!Workers 16 years and over!!Other means | 2 | 0.1 | 1.9 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 36 | CP03_2019_034 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Construction | 5.7 | 0.1 | 5.6 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 48 | CP03_2019_036 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Wholesale trade | 2.9 | 0.1 | 3 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2019 | 48 | CP03_2019_039 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Information | 1.7 | 0.1 | 1.8 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 36 | CP03_2019_040 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Finance and insurance, and real estate and rental and leasing | 8 | 0.1 | 8.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2019 | 17 | CP03_2019_044 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Other services, except public administration | 4.7 | 0.1 | 4.8 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2019 | 36 | CP03_2019_045 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Public administration | 4.6 | 0.1 | 4.7 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
+| 2019 | 36 | CP03_2019_045 | 2010-2014 Estimates!!INDUSTRY!!Civilian employed population 16 years and over!!Public administration | 4.6 | 0.1 | 4.7 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2019 | 17 | CP03_2019_050 | 2010-2014 Estimates!!CLASS OF WORKER!!Civilian employed population 16 years and over!!Unpaid family workers | 0.2 | 0.1 | 0.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2023 | 06 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 4.1 | 0.1 | 4.2 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
-| 2023 | 36 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 3.9 | 0.1 | 3.8 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
+| 2023 | 06 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 4.1 | 0.1 | 4.2 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
+| 2023 | 36 | CP03_2023_005 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Civilian labor force!!Unemployed | 3.9 | 0.1 | 3.8 | 0.1 | 1.1632 | False | True | False | [np.float64(0.0), inf] | False |
 | 2023 | 06 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.5 | 0.1 | 0.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2023 | 36 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.2 | 0.1 | 0.1 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
 | 2023 | 48 | CP03_2023_006 | 2014-2018 Estimates!!EMPLOYMENT STATUS!!Population 16 years and over!!In labor force!!Armed Forces | 0.5 | 0.1 | 0.4 | 0.1 | 1.1632 | False | True | False | [0.0, inf] | False |
@@ -1475,7 +1477,7 @@ Sources:
 Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56, releases 2019, 2023.
 
 - Tolerance: estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted
-- Compared: 110; failed: 0; max abs error: 0; max rel error: -; time: 1.77 s
+- Compared: 110; failed: 0; max abs error: 0; max rel error: -; time: 2.28 s
 - B01003_001 is controlled (published MOE '*****') at county and state level, so no MOE ratio is formed for it. The approximate sum MOE ignores covariance between counties (Handbook 2020 ch. 8), so the ratio scatters around 1; it is reported, not asserted, as the plan specifies.
 
 <details><summary>Details</summary>
@@ -1598,7 +1600,7 @@ Sources:
 Round 6 national continuity check (census.continuity) for every multi-vintage concept of the F1 extraction (B01001, 2019, 2023).
 
 - Tolerance: as Round 6: no concept flagged as both significantly (z-test, 90%) and implausibly (>25% relative or >10 points) different at the national level
-- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 3.56 s
+- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 3.03 s
 - A pass shows no national value jumps implausibly between vintages; it does not prove the codes measure the same thing (census/continuity.py docstring).
 - Informational (not asserted): the Round 6 check flags concepts of  for 2019-2023 although every concept keeps its code and label. The flagged series show real change over four years (income brackets in nominal dollars, poverty and insurance by age as the population ages). census/continuity.py's thresholds (25% relative, 10 points) are documented for adjacent, overlapping releases but are applied to any requested pair, so such extractions block in the default concordance mode. A false positive of the Round 6 check, reported for the module owner; it is not a calculation error.
 
@@ -1650,7 +1652,7 @@ Sources:
 ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56.
 
 - Tolerance: exact (numeric equality of every estimate and MOE cell)
-- Compared: 960; failed: 0; max abs error: 0; max rel error: -; time: 9.09 s
+- Compared: 960; failed: 0; max abs error: 0; max rel error: -; time: 9.12 s
 - Only the first bytes of each national per-table file are requested (HTTP Range); its rows are sorted by GEO_ID, so the nation and state rows precede the county, tract and block-group rows. The table-based Summary File exists from the 2021 releases on (summary_file/2021/table-based-SF/); summary_file/2019/ holds only data/ (the sequence-based files, one archive per state holding every table), documentation/ and prototype/ (checked 2026-11-02), so 2019 is not compared here.
 
 <details><summary>Details</summary>
