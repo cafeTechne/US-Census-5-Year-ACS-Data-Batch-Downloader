@@ -32,6 +32,19 @@ Release studies:
   spatial_fay_herriot) has no gated row. Info rows never fail the gate.
   `--fast` is the CI-size configuration (prints only); `--studies NAME ...`
   limits the run, and then only the selected required studies are required.
+- Fast smoke gate in CI (PLAN_ROUND_13 C1, owner decision D13-5):
+  `scripts/inference_validation.py --fast --gate` runs on pull requests to
+  `defaultBranch` only (ubuntu-latest, Python 3.12; job
+  `fast-inference-gate`, about 1 min). With 20-300 repetitions a correct
+  method falls outside 88-92% by chance, so in this mode a gated row fails
+  only when its coverage is more than 3 Monte Carlo SEs outside the band
+  (SE `sqrt(0.9 * 0.1 / reps)` at nominal, or the row's own `mc_se` if
+  larger, for rows that pool areas or terms sharing one fit). Missing
+  required studies and non-finite coverage still fail. The output is
+  labelled `gate (fast smoke, band widened by 3 MC SE at nominal)`. This
+  only catches gross regressions (a broken interval, a crash, a study that
+  stops producing rows); it is not release evidence. The full-configuration
+  band and verdict are unchanged and remain the release gate.
 - Multilevel and DiD studies are not run by the script. Run them with
   `census.simulation.run_study(designs_config(fast=False), studies=list(DESIGN_STUDIES))`
   and, for DiD serial correlation,

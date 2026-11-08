@@ -71,14 +71,57 @@ class TestGate(unittest.TestCase):
         self.assertTrue(set(iv.REQUIRED_STUDIES) <= set(STUDIES))
 
 
+class TestFastSmokeGate(unittest.TestCase):
+    """--fast --gate (PLAN_ROUND_13 C1): band widened by 3 MC SE at nominal; full gate unchanged."""
+
+    # reps=100: MC SE at nominal = sqrt(0.9 * 0.1 / 100) = 0.03
+    def _one(self, coverage, status="FAIL", mc_se=0.03, reps=100):
+        r = _row("alpha", status)
+        r.update(coverage=coverage, mc_se=mc_se, reps=reps)
+        return _df(r, _row("beta", "pass"))
+
+    def test_two_se_outside_passes_fast_fails_full(self):
+        for cov in (0.92 + 2 * 0.03, 0.88 - 2 * 0.03):
+            df = self._one(cov)
+            self.assertTrue(iv.gate(df, REQ, fast=True)[0], cov)
+            self.assertFalse(iv.gate(df, REQ)[0], cov)
+
+    def test_four_se_outside_fails_both(self):
+        df = self._one(0.88 - 4 * 0.03)
+        ok, problems = iv.gate(df, REQ, fast=True)
+        self.assertFalse(ok)
+        self.assertIn("fast-smoke band", problems[0])
+        self.assertFalse(iv.gate(df, REQ)[0])
+
+    def test_missing_study_fails_both(self):
+        for fast in (True, False):
+            ok, problems = iv.gate(_df(_row("alpha", "pass")), REQ, fast=fast)
+            self.assertFalse(ok)
+            self.assertIn("beta: required study missing", problems[0])
+
+    def test_non_finite_coverage_fails_fast(self):
+        for cov in (float("nan"), float("inf")):
+            self.assertFalse(iv.gate(self._one(cov, status="pass"), REQ, fast=True)[0])
+
+    def test_larger_reported_mc_se_is_used(self):
+        # pooled rows (areas or terms sharing a fit): row reps overstate the information
+        df = self._one(0.80, mc_se=0.04, reps=2400)
+        self.assertTrue(iv.gate(df, REQ, fast=True)[0])
+        self.assertFalse(iv.gate(self._one(0.80, mc_se=0.0, reps=2400), REQ, fast=True)[0])
+
+
 class TestExitCodes(unittest.TestCase):
     """main(): report-only by default (exit 0 even on FAIL), --gate exits 1."""
 
-    def _main(self, argv, df):
+    def _main(self, argv, df, fast=True):
+        out = []
         with mock.patch.object(iv, "run_study", return_value=df), \
-                mock.patch.object(sys, "argv", ["inference_validation.py", "--fast", *argv]), \
-                mock.patch("builtins.print"):
-            return iv.main()
+                mock.patch.object(sys, "argv", ["inference_validation.py", *(["--fast"] if fast else []), *argv]), \
+                mock.patch.object(iv, "OUT_MD", None), \
+                mock.patch("builtins.print", side_effect=lambda *a, **k: out.append(" ".join(map(str, a)))):
+            code = iv.main()
+        self.printed = "\n".join(out)
+        return code
 
     def _all_pass(self):
         return _df(*[_row(s, "pass") for s in iv.REQUIRED_STUDIES])
@@ -88,10 +131,21 @@ class TestExitCodes(unittest.TestCase):
 
     def test_gate_mode(self):
         self.assertEqual(self._main(["--gate"], self._all_pass()), 0)
+        self.assertIn("gate (fast smoke, band widened by 3 MC SE at nominal): PASS", self.printed)
+        self.assertIn("not release evidence", self.printed)
         failing = self._all_pass()
-        failing.loc[0, "status"] = "FAIL"
+        failing.loc[0, ["status", "coverage"]] = ["FAIL", 0.5]
         self.assertEqual(self._main(["--gate"], failing), 1)
+        self.assertIn("gate (fast smoke", self.printed)
         self.assertEqual(self._main(["--gate"], self._all_pass().iloc[1:]), 1)  # one required study missing
+
+    def test_full_gate_label_and_strict_band(self):
+        near = self._all_pass()
+        near.loc[0, ["status", "coverage"]] = ["FAIL", 0.93]  # inside the fast tolerance, outside the band
+        self.assertEqual(self._main(["--gate"], near, fast=False), 1)  # OUT_MD patched to None: no files
+        self.assertIn("gate: FAIL", self.printed)
+        self.assertNotIn("fast smoke", self.printed)
+        self.assertEqual(self._main(["--gate"], near), 0)
 
 
 if __name__ == "__main__":
