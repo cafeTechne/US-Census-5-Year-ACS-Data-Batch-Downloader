@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-08T04:40:37+00:00",
+  "generated_at": "2026-11-08T16:08:40+00:00",
   "mode": "live",
   "command": "python scripts/validate_against_census.py --live",
   "summary": {
@@ -13,7 +13,8 @@
       "F7",
       "F8",
       "F9",
-      "F10"
+      "F10",
+      "F11"
     ],
     "passed": [
       "F1",
@@ -25,7 +26,8 @@
       "F7",
       "F8",
       "F9",
-      "F10"
+      "F10",
+      "F11"
     ],
     "failed": [],
     "errors": [],
@@ -83,7 +85,7 @@
         ]
       },
       "mode": "live",
-      "seconds": 11.6
+      "seconds": 13.01
     },
     {
       "check_id": "F2",
@@ -686,7 +688,7 @@
         ]
       },
       "mode": "live",
-      "seconds": 8.49
+      "seconds": 16.15
     },
     {
       "check_id": "F3",
@@ -962,7 +964,7 @@
         "api_cell_mismatches": 0
       },
       "mode": "live",
-      "seconds": 9.5
+      "seconds": 48.09
     },
     {
       "check_id": "F4",
@@ -1124,7 +1126,7 @@
         "pairings": "same constructions and Census definitions as F2 (bachelors_or_higher excluded: B15003 has no VRE file)"
       },
       "mode": "live",
-      "seconds": 0.74
+      "seconds": 1.94
     },
     {
       "check_id": "F5",
@@ -1340,7 +1342,7 @@
         }
       },
       "mode": "live",
-      "seconds": 3.0
+      "seconds": 3.92
     },
     {
       "check_id": "F6",
@@ -1484,7 +1486,7 @@
         "median_items_outside_tolerance_not_asserted": 3
       },
       "mode": "live",
-      "seconds": 7.06
+      "seconds": 7.95
     },
     {
       "check_id": "F7",
@@ -2029,7 +2031,7 @@
         "census_flag_encoding": "'*' = statistically significant at 90%; null/empty = not significant (variable label 'Statistical Significance!!...', predicateType string)"
       },
       "mode": "live",
-      "seconds": 2.99
+      "seconds": 1.97
     },
     {
       "check_id": "F8",
@@ -2153,7 +2155,7 @@
         }
       },
       "mode": "live",
-      "seconds": 2.51
+      "seconds": 2.85
     },
     {
       "check_id": "F9",
@@ -2206,7 +2208,7 @@
         }
       },
       "mode": "live",
-      "seconds": 2.44
+      "seconds": 3.59
     },
     {
       "check_id": "F10",
@@ -2258,7 +2260,71 @@
         }
       },
       "mode": "live",
-      "seconds": 9.25
+      "seconds": 9.14
+    },
+    {
+      "check_id": "F11",
+      "description": "2020 Census invariants and hierarchy (census.decennial; dec/pl and dec/dhc through the toolkit's API layer), states 26,36,56: (a) state total population in P.L. 94-171 and DHC vs the resident population published in the 2020 Apportionment Results (Table 2); (b) block housing units (H1_001N, a block invariant) summed to tracts and counties vs published tract and county totals, counties 26083, 36041, 56001, and P.L. 94-171 vs DHC block by block; (c) DHC vs P.L. 94-171 for the items both publish (total population, housing units (block invariant), housing units, DHC occupancy-status table, occupied housing units, vacant housing units) at every county of the states and every tract of those counties.",
+      "n_compared": 5492,
+      "n_failed": 0,
+      "max_abs_error": 0.0,
+      "max_rel_error": null,
+      "tolerance": "exact (integer equality); these are published counts with no sampling error",
+      "failures": [],
+      "census_source": [
+        "https://www.census.gov/data/tables/2020/dec/2020-apportionment-data.html",
+        "https://www.census.gov/programs-surveys/decennial-census/decade/2020/planning-management/process/disclosure-avoidance/2020-das-updates/2020-11-25.html",
+        "https://www.census.gov/data/tables/2024/dec/2020-census-ppmf.html",
+        "https://api.census.gov/data/2020/dec/pl",
+        "https://api.census.gov/data/2020/dec/dhc"
+      ],
+      "passed": true,
+      "notes": [
+        "Invariants (published without disclosure-avoidance noise): state total population, block total housing units and occupied group-quarters facilities by type (Census DAS update 2020-11-25, https://www.census.gov/programs-surveys/decennial-census/decade/2020/planning-management/process/disclosure-avoidance/2020-das-updates/2020-11-25.html; fact sheet https://www.census.gov/content/dam/Census/library/factsheets/2021/protecting-the-confidentiality-of-the-2020-census-redistricting-data.pdf). Part (a) compares against an independent publication (the April 2021 apportionment release), part (b) tests the block invariant and the tabulation hierarchy.",
+        "Part (c) items other than housing units are not invariants: they agree because every 2020 product is tabulated from the same privacy-protected microdata (\"Tabulations from the PPMF are entirely consistent with tables from these data products\", https://www.census.gov/data/tables/2024/dec/2020-census-ppmf.html). Agreement shows the toolkit reads both files consistently; it does not show the counts are free of disclosure-avoidance noise.",
+        "There is no sampling error to compare: decennial counts have no MOE, so the check asserts exact equality only."
+      ],
+      "status": "passed",
+      "details": {
+        "parts": {
+          "a_state_population": {
+            "compared": 6,
+            "failed": 0
+          },
+          "c_county_dhc_vs_pl": {
+            "compared": 840,
+            "failed": 0
+          },
+          "c_tract_dhc_vs_pl": {
+            "compared": 90,
+            "failed": 0
+          },
+          "b_block_pl_vs_dhc": {
+            "compared": 4514,
+            "failed": 0
+          },
+          "b_blocks_to_tracts": {
+            "compared": 36,
+            "failed": 0
+          },
+          "b_blocks_to_county": {
+            "compared": 6,
+            "failed": 0
+          }
+        },
+        "blocks_per_county": {
+          "26083": 496,
+          "36041": 912,
+          "56001": 3106
+        },
+        "published_state_population": {
+          "26": 10077331,
+          "36": 20201249,
+          "56": 576851
+        }
+      },
+      "mode": "live",
+      "seconds": 22.95
     }
   ]
 }

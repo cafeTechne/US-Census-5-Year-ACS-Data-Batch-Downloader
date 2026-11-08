@@ -1,12 +1,12 @@
 # Validation against Census-published values
 
-Generated: 2026-11-08T04:40:37+00:00  
+Generated: 2026-11-08T16:08:40+00:00  
 Mode: live  
 Command: `python scripts/validate_against_census.py --live`  
 
 Each check recomputes a number the Census Bureau computed independently and compares (PLAN_ROUND_7.md section 8). Tolerances and their reasons are stated per check; a widened tolerance is a visible decision.
 
-**Overall: PASS** (passed 10, failed 0, errors 0, skipped 0)
+**Overall: PASS** (passed 11, failed 0, errors 0, skipped 0)
 
 | Check | Status | Compared | Failed | Max abs error | Max rel error | Tolerance |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -20,6 +20,7 @@ Each check recomputes a number the Census Bureau computed independently and comp
 | F8 | PASSED | 132 | 0 | 0 | - | estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted |
 | F9 | PASSED | 48 | 0 | - | - | as Round 6: no concept flagged as both significantly (z-test, 90%) and implausibly (>25% relative or >10 points) different at the national level |
 | F10 | PASSED | 1120 | 0 | 0 | - | exact (numeric equality of every estimate and MOE cell) |
+| F11 | PASSED | 5492 | 0 | 0 | - | exact (integer equality); these are published counts with no sampling error |
 
 ### Known findings
 
@@ -34,7 +35,7 @@ Each check recomputes a number the Census Bureau computed independently and comp
 Every cell of run_batch output (B01001, county level, releases 2019, 2023, concordance on; tidy CSV panel and Parquet) equals the raw API cell for the same GEOID, year and source code (Census sentinels -> missing, except controlled MOEs -> 0 with <base>_CONTROLLED = True).
 
 - Tolerance: exact (float equality); sentinel codes and non-numeric cells must be missing in the output; a controlled MOE (-555555555) must be 0 and flagged in its <base>_CONTROLLED column
-- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 11.6 s
+- Compared: 9800; failed: 0; max abs error: 0; max rel error: -; time: 13.01 s
 - Responses pass through run_batch unchanged via a client whose _get_json is served by the same source as the comparison, so the check isolates parsing, sentinel cleaning, concordance renaming, panel stacking, slug renaming and file export.
 
 <details><summary>Details</summary>
@@ -85,7 +86,7 @@ Sources:
 Data Profile percentages and percent MOEs rebuilt from detailed-table counts with derived.derive_columns (sum_estimates + proportion, Handbook 2020 ch. 8 formulas 1 and 6), states 06,36,48,17,56,26 and all their counties, releases 2019, 2023.
 
 - Tolerance: estimate: |ours - DP| <= 0.1 percentage point (DP is rounded to 0.1). MOE: our approximate MOE must equal an independent evaluation of the Handbook formulas (1e-9); for single-cell numerators (simple subset proportions) it must also be within max(0.2 point, 25%) of the DP MOE, unless the exact replicate MOE for the same geography reproduces the DP MOE within 0.1 point (then the gap is the approximation's ignored covariance and is counted as explained); for multi-cell numerators the ratio ours/DP is reported, not asserted
-- Compared: 5880; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 8.49 s
+- Compared: 5880; failed: 0; max abs error: 0.05; max rel error: 0.04712; time: 16.15 s
 - Census computes Data Profile MOEs from replicate weights, which capture the covariance between numerator and denominator; the Handbook approximation ignores it, so it can over- or understate the MOE (ACS General Handbook 2020, ch. 8). Where the approximate MOE misses the band, the exact replicate MOE for the same geography is computed: if it reproduces the published MOE, the toolkit's formula is right and the gap is the documented approximation error.
 
 <details><summary>Details</summary>
@@ -687,7 +688,7 @@ Sources:
 MOEs recomputed from the 80 variance replicates (replicate.verify_published_moe, variance.replicate_moe) vs the MOE published in the same VRE file; VRE estimates and MOEs vs API estimates and MOEs for the same cells. Tables B17001, B27010, B25003, B01001, B01003, B11001, B19001, B25063, state level, releases 2019, 2023, plus the committed county/state VRE fixtures.
 
 - Tolerance: replicate MOE within 0.5 of the published (integer) MOE, i.e. one rounding unit; VRE cell == API cell exactly (an API MOE of -555555555 matches a controlled VRE row)
-- Compared: 30496; failed: 0; max abs error: 0.5; max rel error: -; time: 9.5 s
+- Compared: 30496; failed: 0; max abs error: 0.5; max rel error: -; time: 48.09 s
 - Controlled rows (CME '*****', published MOE 0) and model-based rows (all 80 replicates equal the estimate, published MOE from the VRE documentation's eqs. 3-5) cannot be reproduced from replicates and are counted separately, as the VRE documentation prescribes.
 
 <details><summary>Details</summary>
@@ -962,7 +963,7 @@ Sources:
 Exact replicate proportions (replicate.replicate_proportion on VRE files) vs Data Profile percents and percent MOEs: states 06,36,48,17,56,26 for every construction with a VRE table, plus all their counties for owner_occupied; releases 2019, 2023.
 
 - Tolerance: |ours - DP| <= 0.1 percentage point for both the estimate and the MOE (DP rounded to 0.1)
-- Compared: 1212; failed: 0; max abs error: 0.09838; max rel error: -; time: 0.74 s
+- Compared: 1212; failed: 0; max abs error: 0.09838; max rel error: -; time: 1.94 s
 - published_moe_at_display_floor counts rows where the DP shows a percent MOE of 0.1 while the exact replicate MOE is below 0.05 (it would round to 0.0). This occurs for the 65+ share at the state level, which is nearly controlled to the population estimates by age; Census does not display a 0.0 percent MOE for an uncontrolled item, so 0.1 acts as a floor. These rows pass only because the tolerance is 0.1; they are listed so the margin is visible.
 
 <details><summary>Details</summary>
@@ -1123,7 +1124,7 @@ Sources:
 Medians interpolated from published distribution tables (medians.median_for_rows, linear interpolation) vs published medians, all counties of states 06,36,48,17,56,26, releases 2019, 2023.
 
 - Tolerance: gross rent: every county within max($1, 0.1%) of B25064. Household income: median |relative error| < 1% and >= 98% of counties within the published B19013 MOE (share within 2% reported, not asserted: B19001 is coarser than the distribution Census interpolates)
-- Compared: 2315; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 3.0 s
+- Compared: 2315; failed: 0; max abs error: 1.623e+04; max rel error: 0.1985; time: 3.92 s
 - n_failed counts gross-rent counties outside the per-county bound plus household-income releases whose distribution criterion is not met (median relative error < 1% and >= 98% of counties within the published MOE; counties outside 2% are listed as counties_outside_2pct). Published medians at a top or bottom coding bound and medians we top/bottom-code are excluded.
 
 <details><summary>Details</summary>
@@ -1262,7 +1263,7 @@ Sources:
 Comparison Profile (CP03) earlier-period dollar values, which Census publishes in current-period dollars, vs the earlier release's DP03 value adjusted with inflation.adjust_inflation (R-CPI-U-RS, the default), states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: |ours - CP| <= max($1, 0.5% of CP), asserted for every item Census converts with a single factor (means, aggregates, per-capita); medians reported (see notes)
-- Compared: 150; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 7.06 s
+- Compared: 150; failed: 0; max abs error: 275.6; max rel error: 0.005741; time: 7.95 s
 - Asserted: means, aggregates and per-capita values, which Census converts with a single factor (implied factor constant to 5 digits across items and states). Median items are compared and reported but not asserted: in the 2019 Comparison Profile their implied factors scatter (1.0747-1.0838 against 1.08097 for means), showing that Census re-derived those medians from inflation-adjusted distributions rather than scaling the published median, which no deflator can reproduce from published data; in the 2023 CP medians scale with the same constant factor and all pass. Median misses are listed with asserted=false.
 - Round 6 acceptance criterion 6: the Census-implied factor (median over mean/aggregate/per-capita items) is compared with our R-CPI-U-RS factor in details.factors.*.implied_minus_ours_percent.
 
@@ -1379,7 +1380,7 @@ Sources:
 Comparison Profile significance flags (CP03 '..._SS' variables: '*' = the two periods differ at the 90% level, empty = not significant) vs stats.z_test on the CP estimates with the Data Profile MOEs of each release, states 06,36,48,17,56,26, CP releases 2019 (vs 2014), 2023 (vs 2018).
 
 - Tolerance: agreement on >= 98% of tests that are decidable from the published (rounded) values; every disagreement listed with its z statistic and its z range under rounding
-- Compared: 522; failed: 0; max abs error: -; max rel error: -; time: 2.99 s
+- Compared: 522; failed: 0; max abs error: -; max rel error: -; time: 1.97 s
 - The API's cprofile endpoint publishes estimates (E), annotations (EA) and significance (SS) only, no MOEs; MOEs come from each release's Data Profile (PM for percent items, M for others). For dollar items the earlier MOE is scaled by the same R-CPI-U-RS factor as the estimate.
 - Census tests unrounded estimates and standard errors; we test the published (rounded) values, so disagreements are expected only for z close to the 1.645 critical value.
 - A test is 'decidable' when every combination of unrounded values consistent with the published rounding (estimates and MOEs +/- half a unit; a published percent MOE of 0.1 may be any value in (0, 0.15)) gives z on the same side of 1.645. Only decidable tests can disagree with Census because of a calculation error; agreement is asserted on them and reported for all tests. Failures list decidable disagreements first, then undecidable ones.
@@ -1477,7 +1478,7 @@ Sources:
 Sum of all counties (aggregate.aggregate_geographies, approximate MOE) vs the published state estimate for additive counts (B01003_001, B25001_001, B11001_001, B11001_002, B11001_003, B11001_004, B11001_005, B11001_006, B11001_007, B11001_008, B11001_009), states 06,36,48,17,56,26, releases 2019, 2023.
 
 - Tolerance: estimate exact; MOE ratio (approximate sum MOE / published state MOE) reported, not asserted
-- Compared: 132; failed: 0; max abs error: 0; max rel error: -; time: 2.51 s
+- Compared: 132; failed: 0; max abs error: 0; max rel error: -; time: 2.85 s
 - B01003_001 is controlled (published MOE '*****') at county and state level, so no MOE ratio is formed for it. The approximate sum MOE ignores covariance between counties (Handbook 2020 ch. 8), so the ratio scatters around 1; it is reported, not asserted, as the plan specifies.
 
 <details><summary>Details</summary>
@@ -1600,7 +1601,7 @@ Sources:
 Round 6 national continuity check (census.continuity) for every multi-vintage concept of the F1 extraction (B01001, 2019, 2023).
 
 - Tolerance: as Round 6: no concept flagged as both significantly (z-test, 90%) and implausibly (>25% relative or >10 points) different at the national level
-- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 2.44 s
+- Compared: 48; failed: 0; max abs error: -; max rel error: -; time: 3.59 s
 - A pass shows no national value jumps implausibly between vintages; it does not prove the codes measure the same thing (census/continuity.py docstring).
 - Informational (not asserted): the Round 6 check flags concepts of  for 2019-2023 although every concept keeps its code and label. The flagged series show real change over four years (income brackets in nominal dollars, poverty and insurance by age as the population ages). census/continuity.py's thresholds (25% relative, 10 points) are documented for adjacent, overlapping releases but are applied to any requested pair, so such extractions block in the default concordance mode. A false positive of the Round 6 check, reported for the module owner; it is not a calculation error.
 
@@ -1652,7 +1653,7 @@ Sources:
 ACS 2019-2023 table-based Summary File cells (bulk delivery on www2.census.gov) vs API cells for tables B01003, B25003, B17001, B19001, the nation and states 06,36,48,17,56,26.
 
 - Tolerance: exact (numeric equality of every estimate and MOE cell)
-- Compared: 1120; failed: 0; max abs error: 0; max rel error: -; time: 9.25 s
+- Compared: 1120; failed: 0; max abs error: 0; max rel error: -; time: 9.14 s
 - Only the first bytes of each national per-table file are requested (HTTP Range); its rows are sorted by GEO_ID, so the nation and state rows precede the county, tract and block-group rows. The table-based Summary File exists from the 2021 releases on (summary_file/2021/table-based-SF/); summary_file/2019/ holds only data/ (the sequence-based files, one archive per state holding every table), documentation/ and prototype/ (checked 2026-11-02), so 2019 is not compared here.
 
 <details><summary>Details</summary>
@@ -1697,3 +1698,66 @@ Sources:
 - https://www2.census.gov/programs-surveys/acs/summary_file/2023/table-based-SF/data/5YRData/acsdt5y2023-b25003.dat
 - https://www2.census.gov/programs-surveys/acs/summary_file/2023/table-based-SF/data/5YRData/acsdt5y2023-b17001.dat
 - https://www2.census.gov/programs-surveys/acs/summary_file/2023/table-based-SF/data/5YRData/acsdt5y2023-b19001.dat
+
+## F11: PASSED
+
+2020 Census invariants and hierarchy (census.decennial; dec/pl and dec/dhc through the toolkit's API layer), states 26,36,56: (a) state total population in P.L. 94-171 and DHC vs the resident population published in the 2020 Apportionment Results (Table 2); (b) block housing units (H1_001N, a block invariant) summed to tracts and counties vs published tract and county totals, counties 26083, 36041, 56001, and P.L. 94-171 vs DHC block by block; (c) DHC vs P.L. 94-171 for the items both publish (total population, housing units (block invariant), housing units, DHC occupancy-status table, occupied housing units, vacant housing units) at every county of the states and every tract of those counties.
+
+- Tolerance: exact (integer equality); these are published counts with no sampling error
+- Compared: 5492; failed: 0; max abs error: 0; max rel error: -; time: 22.95 s
+- Invariants (published without disclosure-avoidance noise): state total population, block total housing units and occupied group-quarters facilities by type (Census DAS update 2020-11-25, https://www.census.gov/programs-surveys/decennial-census/decade/2020/planning-management/process/disclosure-avoidance/2020-das-updates/2020-11-25.html; fact sheet https://www.census.gov/content/dam/Census/library/factsheets/2021/protecting-the-confidentiality-of-the-2020-census-redistricting-data.pdf). Part (a) compares against an independent publication (the April 2021 apportionment release), part (b) tests the block invariant and the tabulation hierarchy.
+- Part (c) items other than housing units are not invariants: they agree because every 2020 product is tabulated from the same privacy-protected microdata ("Tabulations from the PPMF are entirely consistent with tables from these data products", https://www.census.gov/data/tables/2024/dec/2020-census-ppmf.html). Agreement shows the toolkit reads both files consistently; it does not show the counts are free of disclosure-avoidance noise.
+- There is no sampling error to compare: decennial counts have no MOE, so the check asserts exact equality only.
+
+<details><summary>Details</summary>
+
+```json
+{
+  "parts": {
+    "a_state_population": {
+      "compared": 6,
+      "failed": 0
+    },
+    "c_county_dhc_vs_pl": {
+      "compared": 840,
+      "failed": 0
+    },
+    "c_tract_dhc_vs_pl": {
+      "compared": 90,
+      "failed": 0
+    },
+    "b_block_pl_vs_dhc": {
+      "compared": 4514,
+      "failed": 0
+    },
+    "b_blocks_to_tracts": {
+      "compared": 36,
+      "failed": 0
+    },
+    "b_blocks_to_county": {
+      "compared": 6,
+      "failed": 0
+    }
+  },
+  "blocks_per_county": {
+    "26083": 496,
+    "36041": 912,
+    "56001": 3106
+  },
+  "published_state_population": {
+    "26": 10077331,
+    "36": 20201249,
+    "56": 576851
+  }
+}
+```
+
+</details>
+
+Sources:
+
+- https://www.census.gov/data/tables/2020/dec/2020-apportionment-data.html
+- https://www.census.gov/programs-surveys/decennial-census/decade/2020/planning-management/process/disclosure-avoidance/2020-das-updates/2020-11-25.html
+- https://www.census.gov/data/tables/2024/dec/2020-census-ppmf.html
+- https://api.census.gov/data/2020/dec/pl
+- https://api.census.gov/data/2020/dec/dhc
