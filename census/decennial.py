@@ -97,11 +97,13 @@ MIXED_NOTE = (
     "April 1, 2020)."
 )
 
-_PRODUCT_ALIASES = ("decennial", "dec", "decennial census", "census", "2020 census") + DECENNIAL_DATASETS
+# Explicit names only: generic words such as "census" or "dec" are not taken to mean the 2020 Census.
+_PRODUCT_ALIASES = (PRODUCT_DECENNIAL, "decennial census", "2020 census") + DECENNIAL_DATASETS
 
 
 def is_decennial(value: Optional[Any]) -> bool:
-    """True for a decennial dataset key ('dec/pl', 'dec/dhc') or the 'decennial' product."""
+    """True for a decennial dataset key ('dec/pl', 'dec/dhc'), the 'decennial' product, or its
+    spelled-out names ('decennial census', '2020 census')."""
     if value is None:
         return False
     return str(value).strip().lower() in _PRODUCT_ALIASES

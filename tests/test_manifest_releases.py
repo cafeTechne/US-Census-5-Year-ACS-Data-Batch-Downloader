@@ -233,9 +233,10 @@ class TestValidation(unittest.TestCase):
         bad["analyses"][0]["args"] = {"target": "these_areas"}
         self.check(bad, "cannot use target 'these_areas'")
         bad = copy.deepcopy(ok)
-        bad["analyses"][0]["formula"] = "hh ~ income"  # outcome hh has VRE replicates
-        bad["hypotheses"][0]["term"] = "income"
-        self.check(bad, "has published Census VRE replicates")
+        listed = copy.deepcopy(ok)
+        listed["analyses"][0]["formula"] = "hh ~ income"  # outcome hh is on the VRE list: allowed, noted
+        listed["hypotheses"][0]["term"] = "income"
+        self.assertEqual(validate_manifest(listed, resolve=False), [])
         bad = copy.deepcopy(ok)
         bad["analyses"] = [{"id": "m1", "method": "correlation_matrix", "variables": ["income", "hh"],
                             "replicate_scope": "covariates_only"}]

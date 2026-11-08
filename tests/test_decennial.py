@@ -249,6 +249,7 @@ class TestSignificanceSemantics(unittest.TestCase):
     def test_analysis_frame_counts_have_undefined_se(self):
         df = pd.DataFrame({"GEOID": ["56001", "56003"], "Year": [2020, 2020],
                            "total_count": [37066, 11521], "total_male_count": [19137, 5865]})
+        df.attrs.update(product="decennial", dataset="dec/dhc")  # as the decennial extraction sets them
         f = analysis_frame(df, variables=["total_count", "total_male_count"])
         self.assertTrue(f["total_count_se"].isna().all())
         self.assertTrue(f["total_count_cv"].isna().all())

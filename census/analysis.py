@@ -22,8 +22,11 @@ each derivation re-evaluated on every replicate. Undefined replicate ratios
 (zero replicate denominator) are set to 0 as in VRE documentation Example 7.
 """
 
+import glob
+import json
 import os
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -59,18 +62,75 @@ def _read(source: Union[str, pd.DataFrame]) -> pd.DataFrame:
     path = str(source)
     ext = os.path.splitext(path)[1].lower()
     if ext == ".parquet":
-        return pd.read_parquet(path)
-    if ext in (".xlsx", ".xls"):
-        return pd.read_excel(path, dtype={"GEOID": str, "GEO_ID": str})
-    return pd.read_csv(path, dtype={"GEOID": str, "GEO_ID": str}, low_memory=False)
+        df = pd.read_parquet(path)  # keeps the attrs written by the extraction (decennial evidence)
+    elif ext in (".xlsx", ".xls"):
+        df = pd.read_excel(path, dtype={"GEOID": str, "GEO_ID": str})
+    else:
+        df = pd.read_csv(path, dtype={"GEOID": str, "GEO_ID": str}, low_memory=False)
+    if not _attrs_decennial(df.attrs):
+        df.attrs.update(_extraction_attrs(path))
+    return df
+
+
+def _attrs_decennial(attrs: Mapping[str, Any]) -> bool:
+    """True when frame attrs say the data are 2020 Census counts (set by the decennial extraction)."""
+    from .decennial import DECENNIAL_DATASETS, PRODUCT_DECENNIAL
+    return bool(attrs.get("decennial") is True or attrs.get("product") == PRODUCT_DECENNIAL
+                or attrs.get("dataset") in DECENNIAL_DATASETS)
+
+
+def _extraction_attrs(path: str) -> Dict[str, Any]:
+    """Decennial attrs for a file written by a decennial run_batch: its ``*_extraction_metadata.json``
+    (in the file's folder or the one above) lists the file among its outputs and names a decennial
+    product; the codebook maps the panel slugs to their codes. Empty for anything else."""
+    from .decennial import DECENNIAL_DATASETS, PRODUCT_DECENNIAL
+    target = os.path.abspath(path)
+    folder = os.path.dirname(target)
+    for d in (folder, os.path.dirname(folder)):
+        for meta_path in sorted(glob.glob(os.path.join(glob.escape(d), "*_extraction_metadata.json"))):
+            try:
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (OSError, ValueError):
+                continue
+            rel = os.path.relpath(target, d).replace(os.sep, "/")
+            if not isinstance(meta, dict) or rel not in (meta.get("output_files") or {}):
+                continue
+            if meta.get("product") != PRODUCT_DECENNIAL and meta.get("dataset") not in DECENNIAL_DATASETS:
+                return {}
+            out: Dict[str, Any] = {"product": PRODUCT_DECENNIAL, "dataset": meta.get("dataset")}
+            book = os.path.join(d, os.path.basename(str((meta.get("outputs") or {}).get("codebook") or "")))
+            if os.path.isfile(book):
+                try:
+                    cb = pd.read_csv(book, dtype=str)
+                    out["variable_codes"] = {s: c for s, c in zip(cb["Variable_Slug"], cb["Variable_Code"])
+                                             if isinstance(s, str) and isinstance(c, str)
+                                             and (parse_variable_code(c) or ("", ""))[1] == "N"}
+                except (OSError, ValueError, KeyError):
+                    pass
+            return out
+    return {}
 
 
 def load_source(source: Source) -> pd.DataFrame:
-    """Read one or more wide/panel files or frames and stack them."""
+    """Read one or more wide/panel files or frames and stack them.
+
+    ``attrs["decennial_columns"]`` lists the columns that came from 2020 Census
+    sources (frames or files carrying the decennial extraction's attrs or
+    metadata) and ``attrs["decennial_codes"]`` maps such columns to their
+    variable codes (``total_count`` -> ``P1_001N``)."""
     items = [source] if isinstance(source, (str, pd.DataFrame)) else list(source)
     if not items:
         raise ValueError("no source given")
-    df = pd.concat([_read(s) for s in items], ignore_index=True, sort=False)
+    frames = [_read(s) for s in items]
+    dec_columns: List[str] = []
+    dec_codes: Dict[str, str] = {}
+    for f in frames:
+        if _attrs_decennial(f.attrs):
+            dec_columns += [str(c) for c in f.columns if str(c) not in dec_columns]
+            dec_codes.update({str(k): str(v) for k, v in (f.attrs.get("variable_codes") or {}).items()})
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    df.attrs = {"decennial_columns": dec_columns, "decennial_codes": dec_codes}
     if "GEOID" not in df.columns:
         if "GEO_ID" in df.columns:
             df["GEOID"] = df["GEO_ID"]
@@ -82,13 +142,16 @@ def load_source(source: Source) -> pd.DataFrame:
     return df
 
 
-def _resolve(df: pd.DataFrame, ref: Any) -> Tuple[str, Optional[str]]:
+def _resolve(df: pd.DataFrame, ref: Any, decennial: Optional[bool] = None) -> Tuple[str, Optional[str]]:
     """(estimate column, MOE column or None) for a variable reference.
 
     Accepts a code (``B17001_002E``/``..PE``), a base (``B17001_002``), a
     slugged panel stem (``<stem>`` with ``<stem>_est``/``<stem>_moe`` or
     ``<stem>_pct``/``<stem>_pct_moe``), or an explicit ``(est, moe)`` pair
-    (``moe`` may be None for a variable without sampling error).
+    (``moe`` may be None for a variable without sampling error). In a frame
+    identified as decennial (:func:`is_decennial_count`) a base such as
+    ``P1_001`` also resolves to its count column ``P1_001N`` or that column's
+    panel slug (``total_count``).
     """
     if isinstance(ref, (tuple, list)):
         est, moe = ref
@@ -103,6 +166,13 @@ def _resolve(df: pd.DataFrame, ref: Any) -> Tuple[str, Optional[str]]:
             return e, m
     if ref in df.columns:
         return ref, None
+    if decennial is not False:
+        if f"{ref}N" in df.columns and is_decennial_count(f"{ref}N", df, decennial):
+            return f"{ref}N", None
+        codes = (getattr(df, "attrs", None) or {}).get("decennial_codes") or {}
+        for col, code in codes.items():
+            if code in (ref, f"{ref}N") and col in df.columns and is_decennial_count(col, df, decennial):
+                return col, None
     raise KeyError(f"no estimate/MOE columns found for {ref!r}")
 
 
@@ -117,7 +187,7 @@ def _default_name(ref: Any) -> str:
     return str(ref)
 
 
-def _default_variables(df: pd.DataFrame) -> Dict[str, Any]:
+def _default_variables(df: pd.DataFrame, decennial: Optional[bool] = None) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for key, est, moe in pair_estimates_and_moes(df.columns):
         out[key] = (est, moe)
@@ -129,18 +199,57 @@ def _default_variables(df: pd.DataFrame) -> Dict[str, Any]:
         moe = f"{stem}_moe" if col.endswith("_est") else f"{stem}_pct_moe"
         if moe in df.columns:
             out[stem if col.endswith("_est") else f"{stem}_pct"] = (col, moe)
+    for col in df.columns:  # 2020 Census counts (no MOE), in frames identified as decennial
+        col = str(col)
+        if col in ID_COLUMNS or not is_decennial_count(col, df, decennial):
+            continue
+        parsed = parse_variable_code(col)
+        out.setdefault(parsed[0] if parsed else col, (col, None))
     return out
 
 
 METHOD_NOT_SAMPLE_BASED = "not_sample_based"
 
 
-def is_decennial_count(column: str) -> bool:
-    """True for a 2020 Census count column: raw code ``<base>N`` or panel slug ``*_count``."""
-    parsed = parse_variable_code(str(column))
-    if parsed:
-        return parsed[1] == "N"
-    return str(column).endswith("_count")
+@lru_cache(maxsize=1)
+def _decennial_archive_codes() -> frozenset:
+    """Count codes (``P1_001N``) of the archived 2020 dec/pl and dec/dhc metadata (offline)."""
+    from .decennial import DECENNIAL_DATASETS, DECENNIAL_YEAR
+    from .metadata import archived_vintages, vintage_variables
+    codes: set = set()
+    for ds in DECENNIAL_DATASETS:
+        try:
+            if DECENNIAL_YEAR in archived_vintages(ds):
+                codes |= {str(c) for c in vintage_variables(ds, DECENNIAL_YEAR)[0] if str(c).endswith("N")}
+        except Exception:  # noqa: BLE001 - an unreadable archive gives no code evidence
+            continue
+    return frozenset(codes)
+
+
+def is_decennial_count(column: str, frame: Optional[pd.DataFrame] = None,
+                       decennial: Optional[bool] = None) -> bool:
+    """True for a 2020 Census count column, on explicit evidence only.
+
+    A raw code ``<base>N`` found in the archived 2020 dec/pl or dec/dhc metadata
+    is decennial. Other ``<base>N`` codes and panel slugs ``*_count`` are
+    decennial only when ``decennial`` is True or ``frame`` comes from a decennial
+    extraction (its attrs: ``product``/``dataset`` set by run_batch, or
+    ``decennial_columns`` from :func:`load_source`). ``decennial=False`` turns
+    detection off. An ordinary column such as ``crime_count`` is therefore not a
+    census count."""
+    if decennial is False:
+        return False
+    col = str(column)
+    parsed = parse_variable_code(col)
+    is_n = bool(parsed and parsed[1] == "N")
+    if is_n and col in _decennial_archive_codes():
+        return True
+    if not (is_n or (parsed is None and col.endswith("_count"))):
+        return False
+    if decennial:
+        return True
+    attrs = getattr(frame, "attrs", None) or {}
+    return col in (attrs.get("decennial_columns") or ()) or _attrs_decennial(attrs)
 
 
 def _clean(est: pd.Series, moe: Optional[pd.Series]) -> Tuple[np.ndarray, np.ndarray]:
@@ -181,6 +290,7 @@ def analysis_frame(
     keep_columns: Sequence[str] = (),
     concept_ids: Optional[Mapping[str, str]] = None,
     release: Optional[str] = None,
+    decennial: Optional[bool] = None,
 ) -> pd.DataFrame:
     """Build a model-ready frame (one row per GEOID, or per GEOID and Year).
 
@@ -195,15 +305,22 @@ def analysis_frame(
     the ``release`` argument), and ``frame.attrs["variables"]`` recording each
     variable's source columns, method and concept ID.
 
-    2020 Census counts (``<base>N`` codes, ``*_count`` slugs) are not
-    sample-based: their ``_se`` and ``_cv`` are NaN (undefined, never 0) and
-    their method is ``not_sample_based``; release is ``dec_<Year>``, or
-    ``acs5_<Year>+dec_2020`` with a note in ``frame.attrs["notes"]`` when ACS
-    and decennial variables are mixed.
+    2020 Census counts are not sample-based: their ``_se`` and ``_cv`` are NaN
+    (undefined, never 0) and their method is ``not_sample_based``; release is
+    ``dec_2020``, or ``acs5_<Year>+dec_2020`` with a note in
+    ``frame.attrs["notes"]`` when ACS and decennial variables are mixed. Counts
+    are recognized only from explicit evidence (:func:`is_decennial_count`):
+    archived 2020 Census codes (``P1_001N``), sources from a decennial
+    extraction (frame attrs, Parquet attrs, or the extraction metadata next to a
+    file, with their ``*_count`` slugs), or ``decennial=True``;
+    ``decennial=False`` turns recognition off. Other columns without an MOE
+    (e.g. ``crime_count``) get SE 0 and method ``no_sampling_error``. In
+    decennial frames counts are default variables and resolve by base code
+    (``P1_001``).
     """
     df = load_source(source)
     if variables is None:
-        var_map: Dict[str, Any] = _default_variables(df)
+        var_map: Dict[str, Any] = _default_variables(df, decennial)
     elif isinstance(variables, Mapping):
         var_map = dict(variables)
     else:
@@ -218,10 +335,10 @@ def analysis_frame(
     work = df.copy()
     n_decennial = 0
     for name, ref in var_map.items():
-        est_col, moe_col = _resolve(df, ref)
+        est_col, moe_col = _resolve(df, ref, decennial)
         e, se = _clean(df[est_col], df[moe_col] if moe_col else None)
         method = METHOD_PUBLISHED if moe_col else "no_sampling_error"
-        if moe_col is None and is_decennial_count(est_col):
+        if moe_col is None and is_decennial_count(est_col, df, decennial):
             se = np.full_like(e, np.nan)  # census count: sampling SE undefined, never 0
             method = METHOD_NOT_SAMPLE_BASED
             n_decennial += 1
@@ -252,11 +369,14 @@ def analysis_frame(
         from .decennial import MIXED_NOTE
 
         notes.append(MIXED_NOTE)
-    if "Year" in out.columns or release:
-        if "Year" not in out.columns:
-            label: Any = release
-        elif n_decennial == len(var_map) and n_decennial:
-            label = "dec_" + out["Year"].astype(str)
+    decennial_only = bool(n_decennial) and n_decennial == len(var_map)
+    if "Year" in out.columns or release or decennial_only:
+        from .decennial import DECENNIAL_YEAR
+
+        if decennial_only and ("Year" in out.columns or not release):
+            label: Any = f"dec_{DECENNIAL_YEAR}"  # the 2020 Census, whatever the Year column holds
+        elif "Year" not in out.columns:
+            label = release
         else:
             label = "acs5_" + out["Year"].astype(str) + ("+dec_2020" if n_decennial else "")
         out.insert(len([c for c in ID_COLUMNS if c in out.columns]), "release", label)
