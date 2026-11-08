@@ -31,6 +31,7 @@ _LABEL_PREFIX_RE = re.compile(
 
 SLUG_SUFFIXES: Dict[str, str] = {
     "E": "est",
+    "N": "count",
     "M": "moe",
     "PE": "pct",
     "PM": "pct_moe",
@@ -53,7 +54,8 @@ Metadata = Mapping[str, Mapping[str, str]]
 def classify_column(col: str) -> Optional[Tuple[str, str, bool]]:
     """Return (variable_base, kind, is_percent) for a value/derived column.
 
-    kind is one of E, M, PE, PM, ANN, SE, CV, RELIABILITY, CONTROLLED, NOTE(:<inner kind>).
+    kind is one of E, N (2020 Census count), M, PE, PM, ANN, SE, CV, RELIABILITY,
+    CONTROLLED, NOTE(:<inner kind>).
     """
     if col.endswith("_NOTE"):
         inner = classify_column(col[: -len("_NOTE")])
@@ -80,8 +82,10 @@ def _label_of(code: str, metadata: Metadata) -> str:
         return ""
     # Labels come from a single metadata vintage; the year in "(in 2021
     # inflation-adjusted dollars)" would be wrong for other periods. The
-    # codebook Unit column records the actual dollar basis.
-    return _DOLLAR_IN_LABEL_RE.sub(" (inflation-adjusted dollars)", str(entry.get("label", "")))
+    # codebook Unit column records the actual dollar basis. 2020 Census
+    # labels start with an empty part (" !!Total:"); it is dropped.
+    label = re.sub(r"^\s*!!", "", str(entry.get("label", "")))
+    return _DOLLAR_IN_LABEL_RE.sub(" (inflation-adjusted dollars)", label)
 
 
 def base_label(base: str, is_percent: bool, metadata: Metadata) -> str:
@@ -92,6 +96,7 @@ def base_label(base: str, is_percent: bool, metadata: Metadata) -> str:
         _label_of(f"{base}E", metadata)
         or _label_of(f"{base}PE", metadata)
         or _label_of(f"{base}SS", metadata)
+        or _label_of(f"{base}N", metadata)
     )
 
 
@@ -107,7 +112,7 @@ def describe_column(col: str, metadata: Metadata) -> str:
         return ""
     base, kind, pct = info
     found = base_label(base, pct, metadata)
-    if not found and kind in ("E", "PE"):
+    if not found and kind in ("E", "PE", "N"):
         return ""  # no label known: keep the raw code rather than invent one
     label = found or f"{base}{'PE' if pct else 'E'}"
     stripped = _LABEL_PREFIX_RE.sub("", label)
@@ -116,6 +121,7 @@ def describe_column(col: str, metadata: Metadata) -> str:
         return f"Census footnote for {inner}"
     return {
         "E": label,
+        "N": label,
         "PE": label,
         "M": f"Margin of Error (90%)!!{stripped}",
         "PM": f"Percent Margin of Error (90%)!!{stripped}",
@@ -136,6 +142,7 @@ def _annotation_kind(col: str) -> str:
         "MA": "Margin of Error",
         "PEA": "Percent Estimate",
         "PMA": "Percent Margin of Error",
+        "NA": "Count",
     }.get(suffix, "")
 
 
@@ -160,6 +167,7 @@ def measurement_type(col: str) -> str:
         return "Annotation"
     return {
         "E": "Estimate",
+        "N": "Count (not sample-based)",
         "M": "Margin of Error",
         "PE": "Percentage",
         "PM": "Margin of Error",
@@ -189,7 +197,7 @@ def infer_unit(
     if kind == "CV" or pct:
         return "Percent"
     label = base_label(base, pct, metadata)
-    entry = metadata.get(f"{base}E") or {}
+    entry = metadata.get(f"{base}E") or metadata.get(f"{base}N") or {}
     if is_dollar_variable(str(entry.get("label", "")), str(entry.get("concept", ""))):
         if inflation_base_year:
             return f"Dollars (constant {inflation_base_year} dollars, {price_index})"
@@ -334,13 +342,19 @@ def generate_codebook(
     slug_style: str = "label",
     price_index: str = "R-CPI-U-RS",
     concordance: Optional[Any] = None,
+    decennial: bool = False,
 ) -> pd.DataFrame:
     """Build a data dictionary for the given output columns.
 
     With a ``census.concordance.Concordance`` whose representative bases name
     the columns, adds Concept_ID, Years_Available, Source_Codes_By_Year and
-    Concordance_Status.
+    Concordance_Status. ``decennial`` (2020 Census datasets) adds an
+    ``Uncertainty`` column stating that counts are not sample-based (MOE
+    undefined) and carry disclosure-avoidance noise, and describes ``Year``
+    as the census year.
     """
+    from census.decennial import codebook_uncertainty  # local: keep panel light
+
     rep_to_cid: Dict[str, str] = {}
     if concordance is not None:
         rep_to_cid = {b: cid for cid, b in concordance.representative_bases().items()}
@@ -354,7 +368,8 @@ def generate_codebook(
             concept = _DOLLAR_IN_LABEL_RE.sub(
                 " (INFLATION-ADJUSTED DOLLARS)",
                 str(
-                    (metadata.get(f"{info[0]}E") or metadata.get(f"{info[0]}PE") or {}).get(
+                    (metadata.get(f"{info[0]}E") or metadata.get(f"{info[0]}PE")
+                     or metadata.get(f"{info[0]}N") or {}).get(
                         "concept", ""
                     )
                 ),
@@ -370,6 +385,10 @@ def generate_codebook(
                 "Unit": infer_unit(col, metadata, inflation_base_year, price_index),
             }
         )
+        if decennial:
+            if col == "Year":
+                rows[-1]["Full_Description"] = "Census year (2020 Census; counts as of April 1, 2020)"
+            rows[-1]["Uncertainty"] = codebook_uncertainty(info[1]) if info else ""
         if concordance is not None:
             cid = rep_to_cid.get(info[0], "") if info else ""
             c = concordance.concepts.get(cid) if cid else None
@@ -381,7 +400,8 @@ def generate_codebook(
                     "Concordance_Status": ";".join(c.statuses) if c else "",
                 }
             )
-    cols = CODEBOOK_COLUMNS + (CONCORDANCE_CODEBOOK_COLUMNS if concordance is not None else [])
+    cols = (CODEBOOK_COLUMNS + (["Uncertainty"] if decennial else [])
+            + (CONCORDANCE_CODEBOOK_COLUMNS if concordance is not None else []))
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -430,7 +450,7 @@ def build_tidy_panel(
     panel = combined[id_cols + value_cols].copy()
     for col in value_cols:
         kind = classify_column(str(col))[1]  # type: ignore[index]
-        if kind in ("E", "M", "PE", "PM", "SE", "CV"):
+        if kind in ("E", "N", "M", "PE", "PM", "SE", "CV"):
             panel[col] = pd.to_numeric(panel[col], errors="coerce")
         else:
             panel[col] = panel[col].fillna("").astype(str)

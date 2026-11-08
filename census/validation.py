@@ -19,6 +19,10 @@ F7      stats.z_test vs Comparison Profile significance flags
 F8      sum of counties (aggregate.aggregate_geographies) vs state totals
 F9      Round 6 national continuity check (from the F1 extraction)
 F10     table-based Summary File cells (www2.census.gov) == API cells
+F11     2020 Census invariants and hierarchy: state population (P.L. 94-171,
+        DHC) == published apportionment-release state totals; block housing
+        units sum exactly to tract and county totals; DHC == P.L. 94-171 for
+        the items both publish (tract, county)
 ======  ==================================================================
 
 Data come from a :class:`CensusSource`. Offline (the default) it reads frozen
@@ -36,6 +40,7 @@ Entry points: :func:`run_battery` (returns ``ValidationResult`` objects),
 import datetime as _dt
 import gzip
 import hashlib
+import io
 import json
 import math
 import os
@@ -56,6 +61,7 @@ from census import inflation as _inflation
 from census import medians as _medians
 from census import metadata as _md
 from census import replicate as _replicate
+from census import decennial as _dec
 from census.api import BASE_URL, DATASETS, CensusAPIClient
 from census.stats import CENSUS_SENTINELS, acs5_overlap_years, parse_variable_code, z_test
 
@@ -64,7 +70,7 @@ DEFAULT_FIXTURE_DIR = os.path.join(REPO_ROOT, "tests", "fixtures", "validation")
 DEFAULT_REPORT_DIR = os.path.join(REPO_ROOT, "docs", "audits")
 REPORT_BASENAME = "validation_report"
 
-CHECK_IDS: Tuple[str, ...] = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10")
+CHECK_IDS: Tuple[str, ...] = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11")
 
 # Census API: at most 50 variables per request (NAME counts).
 MAX_GET_VARIABLES = 48
@@ -88,6 +94,11 @@ SUBJECT_DEFINITIONS_2023 = (
     "2023_ACSSubjectDefinitions.pdf"
 )
 CP_USER_NOTES = "https://www.census.gov/programs-surveys/acs/guidance/comparing-acs-data.html"
+# 2020 Census Apportionment Results, Table 2: resident population of the 50 states,
+# DC and Puerto Rico (released 2021-04-26, before the P.L. 94-171 and DHC files).
+APPORTIONMENT_TABLE2_URL = (
+    "https://www2.census.gov/programs-surveys/decennial/2020/data/apportionment/apportionment-2020-table02.xlsx"
+)
 CPI_GUIDANCE = (
     "https://www.census.gov/topics/income-poverty/income/guidance/current-vs-constant-dollars.html"
 )
@@ -127,6 +138,10 @@ class Battery:
     f4_county_constructions: Tuple[str, ...] = ("owner_occupied",)
     sf_release: int = 2023
     sf_tables: Tuple[str, ...] = ("B01003", "B25003", "B17001", "B19001")
+    # F11 (2020 Census): Michigan, New York, Wyoming; blocks and tracts in one
+    # county each (Keweenaw MI, Hamilton NY, Albany WY) to keep fixtures small.
+    f11_states: Tuple[str, ...] = ("26", "36", "56")
+    f11_block_counties: Tuple[Tuple[str, str], ...] = (("26", "083"), ("36", "041"), ("56", "001"))
 
     def state_list(self) -> str:
         return ",".join(self.states)
@@ -656,6 +671,26 @@ class CensusSource:
             )
         self._memo[key] = frame
         return frame
+
+    def www2_file(self, name: str, url: str, kind: str) -> bytes:
+        """A small census.gov file, byte for byte (fixture ``name`` offline; recorded whole)."""
+        if url not in self.urls:
+            self.urls.append(url)
+        if not self.live:
+            return self.read_fixture(name)
+        import requests  # local: keeps the module importable offline without network deps
+
+        self._www2_wait()
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=120)
+        body = resp.content or b""
+        if b"Request Rejected" in body[:2000]:
+            raise SourceError(f"census.gov rejected the request for {url} (firewall page); retry later.")
+        if resp.status_code != 200:
+            raise SourceError(f"HTTP {resp.status_code} for {url}")
+        if self.record:
+            self.write_fixture(name, body, {"kind": kind, "source_url": url,
+                                            "transformation": "none (file stored byte for byte)"})
+        return body
 
     def summary_file_rows(self, year: int, table: str, geo_ids: Sequence[str]) -> Dict[str, Any]:
         """Header and rows (by GEO_ID) of a table-based Summary File, read by byte range.
@@ -2065,6 +2100,159 @@ def check_f10_summary_file(
 
 
 # ---------------------------------------------------------------------------
+# F11: 2020 Census invariants and hierarchy
+# ---------------------------------------------------------------------------
+
+# Items both 2020 Census files publish: (P.L. 94-171 variable, DHC variable, item).
+F11_SHARED_ITEMS: Tuple[Tuple[str, str, str], ...] = (
+    ("P1_001N", "P1_001N", "total population"),
+    ("H1_001N", "H1_001N", "housing units (block invariant)"),
+    ("H1_001N", "H3_001N", "housing units, DHC occupancy-status table"),
+    ("H1_002N", "H3_002N", "occupied housing units"),
+    ("H1_003N", "H3_003N", "vacant housing units"),
+)
+
+
+def _apportionment_state_totals(raw: bytes) -> Dict[str, int]:
+    """State FIPS -> resident population from 2020 Apportionment Results Table 2 (xlsx)."""
+    from census.geo import STATE_MAPPING
+
+    by_name = {v.lower(): k for k, v in STATE_MAPPING.items()}
+    table = pd.read_excel(io.BytesIO(raw), header=None, dtype=object)
+    out: Dict[str, int] = {}
+    for _, row in table.iterrows():
+        name, value = str(row.iloc[0]).strip().lower(), row.iloc[1]
+        if name in by_name and isinstance(value, (int, float, np.integer)) and not pd.isna(value):
+            out[by_name[name]] = int(value)
+    return out
+
+
+def _f11_frame(source: CensusSource, dataset: str, variables: Sequence[str], geo: Mapping[str, str]) -> pd.DataFrame:
+    frame = source.api_frame(_dec.DECENNIAL_YEAR, dataset, variables, geo)
+    for v in variables:
+        frame[v] = pd.to_numeric(frame[v], errors="coerce")
+    return frame.set_index("GEOID")
+
+
+def _f11_blocks(source: CensusSource, dataset: str, state: str, county: str) -> pd.DataFrame:
+    """Block housing units (``get=H1_001N`` only, no NAME: the smallest response)."""
+    endpoint = f"{BASE_URL}/{_dec.DECENNIAL_YEAR}/{DATASETS[dataset]}"
+    payload = source.get_json(endpoint, {"get": "H1_001N", "for": "block:*", "in": f"state:{state} county:{county}"})
+    df = pd.DataFrame(payload[1:], columns=payload[0])
+    df["H1_001N"] = pd.to_numeric(df["H1_001N"], errors="coerce")
+    df["tract_geoid"] = df["state"] + df["county"] + df["tract"]
+    df["GEOID"] = df["tract_geoid"] + df["block"]
+    return df
+
+
+def check_f11_decennial_invariants(
+    source: CensusSource, battery: Battery = DEFAULT_BATTERY, ctx: Optional[Dict[str, Any]] = None
+) -> ValidationResult:
+    b = battery
+    states = ",".join(b.f11_states)
+    counties = ", ".join(f"{s}{c}" for s, c in b.f11_block_counties)
+    res = ValidationResult(
+        "F11",
+        "2020 Census invariants and hierarchy (census.decennial; dec/pl and dec/dhc through the toolkit's "
+        f"API layer), states {states}: (a) state total population in P.L. 94-171 and DHC vs the resident "
+        "population published in the 2020 Apportionment Results (Table 2); (b) block housing units (H1_001N, "
+        f"a block invariant) summed to tracts and counties vs published tract and county totals, counties "
+        f"{counties}, and P.L. 94-171 vs DHC block by block; (c) DHC vs P.L. 94-171 for the items both "
+        f"publish ({', '.join(i[2] for i in F11_SHARED_ITEMS)}) at every county of the states and every "
+        "tract of those counties.",
+        tolerance="exact (integer equality); these are published counts with no sampling error",
+    )
+    res.census_source += [_dec.APPORTIONMENT_URL, _dec.INVARIANTS_URL, _dec.PPMF_URL,
+                          f"{BASE_URL}/2020/dec/pl", f"{BASE_URL}/2020/dec/dhc"]
+    failures: List[Dict[str, Any]] = []
+    parts: Dict[str, Dict[str, int]] = {}
+    abs_e: List[float] = []
+
+    def compare(part: str, ours: float, ref: float, **where: Any) -> None:
+        stats = parts.setdefault(part, {"compared": 0, "failed": 0})
+        stats["compared"] += 1
+        diff = abs(float(ours) - float(ref)) if np.isfinite(ours) and np.isfinite(ref) else math.inf
+        abs_e.append(diff)
+        if diff != 0:
+            stats["failed"] += 1
+            if len(failures) < MAX_FAILURE_SAMPLES:
+                failures.append({"part": part, **where, "value": ours, "reference": ref})
+
+    # (a) state totals vs the apportionment release
+    published = _apportionment_state_totals(
+        source.www2_file("dec2020_apportionment_table02.xlsx", APPORTIONMENT_TABLE2_URL, "apportionment_table")
+    )
+    pl_vars = sorted({i[0] for i in F11_SHARED_ITEMS})
+    dhc_vars = sorted({i[1] for i in F11_SHARED_ITEMS})
+    pl_states = _f11_frame(source, _dec.DECENNIAL_PL, pl_vars, {"for": f"state:{states}"})
+    dhc_states = _f11_frame(source, _dec.DECENNIAL_DHC, dhc_vars, {"for": f"state:{states}"})
+    for st in b.f11_states:
+        ref = float(published.get(st, math.nan))
+        compare("a_state_population", float(pl_states.at[st, "P1_001N"]), ref, geography=st, dataset="dec/pl")
+        compare("a_state_population", float(dhc_states.at[st, "P1_001N"]), ref, geography=st, dataset="dec/dhc")
+
+    # (c) DHC vs P.L. 94-171, counties of the states and tracts of the block counties
+    geos = [("county", {"for": "county:*", "in": f"state:{states}"})] + [
+        ("tract", {"for": "tract:*", "in": f"state:{s} county:{c}"}) for s, c in b.f11_block_counties
+    ]
+    tract_totals: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
+    county_totals: Optional[Tuple[pd.DataFrame, pd.DataFrame]] = None
+    for level, geo in geos:
+        pl = _f11_frame(source, _dec.DECENNIAL_PL, pl_vars, geo)
+        dhc = _f11_frame(source, _dec.DECENNIAL_DHC, dhc_vars, geo)
+        if sorted(pl.index) != sorted(dhc.index):
+            compare(f"c_{level}_geographies", len(pl.index), len(dhc.index), geography=geo.get("in", ""))
+        for g in pl.index.intersection(dhc.index):
+            for pv, dv, item in F11_SHARED_ITEMS:
+                compare(f"c_{level}_dhc_vs_pl", float(dhc.at[g, dv]), float(pl.at[g, pv]),
+                        geography=g, item=f"{dv} vs {pv} ({item})")
+        if level == "county":
+            county_totals = (pl, dhc)
+        else:
+            tract_totals[geo["in"]] = (pl, dhc)
+
+    # (b) block housing units -> tract and county totals; P.L. 94-171 vs DHC per block
+    block_counts: Dict[str, int] = {}
+    for st, co in b.f11_block_counties:
+        pl_blocks = _f11_blocks(source, _dec.DECENNIAL_PL, st, co)
+        dhc_blocks = _f11_blocks(source, _dec.DECENNIAL_DHC, st, co).set_index("GEOID")
+        block_counts[st + co] = len(pl_blocks)
+        for g, value in pl_blocks.set_index("GEOID")["H1_001N"].items():
+            compare("b_block_pl_vs_dhc", float(dhc_blocks["H1_001N"].get(g, math.nan)), float(value), geography=g)
+        sums = pl_blocks.groupby("tract_geoid")["H1_001N"].sum()
+        pl_tracts, dhc_tracts = tract_totals[f"state:{st} county:{co}"]
+        for frame, ds in ((pl_tracts, "dec/pl"), (dhc_tracts, "dec/dhc")):
+            for g in frame.index.union(sums.index):
+                compare("b_blocks_to_tracts", float(sums.get(g, math.nan)),
+                        float(frame["H1_001N"].get(g, math.nan)), geography=g, dataset=ds)
+        assert county_totals is not None
+        for frame, ds in zip(county_totals, ("dec/pl", "dec/dhc")):
+            compare("b_blocks_to_county", float(pl_blocks["H1_001N"].sum()),
+                    float(frame.at[st + co, "H1_001N"]), geography=st + co, dataset=ds)
+
+    res.n_compared = sum(p["compared"] for p in parts.values())
+    res.n_failed = sum(p["failed"] for p in parts.values())
+    res.max_abs_error = _max(abs_e)
+    res.failures = failures
+    res.details = {"parts": parts, "blocks_per_county": block_counts,
+                   "published_state_population": {st: published.get(st) for st in b.f11_states}}
+    res.notes += [
+        "Invariants (published without disclosure-avoidance noise): state total population, block total "
+        "housing units and occupied group-quarters facilities by type (Census DAS update 2020-11-25, "
+        f"{_dec.INVARIANTS_URL}; fact sheet {_dec.DAS_FACT_SHEET_URL}). Part (a) compares against an "
+        "independent publication (the April 2021 apportionment release), part (b) tests the block invariant "
+        "and the tabulation hierarchy.",
+        "Part (c) items other than housing units are not invariants: they agree because every 2020 product "
+        "is tabulated from the same privacy-protected microdata (\"Tabulations from the PPMF are entirely "
+        f"consistent with tables from these data products\", {_dec.PPMF_URL}). Agreement shows the toolkit "
+        "reads both files consistently; it does not show the counts are free of disclosure-avoidance noise.",
+        "There is no sampling error to compare: decennial counts have no MOE, so the check asserts exact "
+        "equality only.",
+    ]
+    return res.finish(res.n_failed == 0 and res.n_compared > 0)
+
+
+# ---------------------------------------------------------------------------
 # Battery and reports
 # ---------------------------------------------------------------------------
 
@@ -2079,6 +2267,7 @@ CHECKS: Dict[str, Callable[..., ValidationResult]] = {
     "F8": check_f8_county_sums,
     "F9": check_f9_continuity,
     "F10": check_f10_summary_file,
+    "F11": check_f11_decennial_invariants,
 }
 
 

@@ -1,5 +1,5 @@
 {
-  "description": "Per-vintage Census API metadata for ACS 5-year and 1-year datasets. Paths are <dataset>/<year>/<file>.gz; sha256 and bytes refer to the raw (uncompressed) API response.",
+  "description": "Per-vintage Census API metadata for ACS 5-year and 1-year datasets and the 2020 Decennial Census (dec/pl, dec/dhc). Paths are <dataset>/<year>/<file>.gz; sha256 and bytes refer to the raw (uncompressed) API response.",
   "files": {
     "acs1/2005/groups.json.gz": {
       "url": "https://api.census.gov/data/2005/acs/acs1/groups.json",
@@ -1153,6 +1153,30 @@
       "bytes": 490033,
       "sha256": "2ef6cfc2f82415cefff5931f6742c4f006e95f2d760f082e58f662380f143544"
     },
+    "dec/dhc/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/dec/dhc/groups.json",
+      "retrieved_at": "2026-11-08T15:50:37+00:00",
+      "bytes": 71485,
+      "sha256": "68ba7390233d0507103120af8b49890085c45708c4bd8ea5355c8b63f4386907"
+    },
+    "dec/dhc/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/dec/dhc/variables.json",
+      "retrieved_at": "2026-11-08T15:50:36+00:00",
+      "bytes": 2689500,
+      "sha256": "8e14e443ea2b9049d46964db2f20630d05ffac229ffb09193bf0ad646da617c6"
+    },
+    "dec/pl/2020/groups.json.gz": {
+      "url": "https://api.census.gov/data/2020/dec/pl/groups.json",
+      "retrieved_at": "2026-11-08T15:50:36+00:00",
+      "bytes": 1292,
+      "sha256": "400a68d5b1b702b19e47b5c0afe6e4d7aa1509dc26d1d6ac4a8f5d68b3cd6d92"
+    },
+    "dec/pl/2020/variables.json.gz": {
+      "url": "https://api.census.gov/data/2020/dec/pl/variables.json",
+      "retrieved_at": "2026-11-08T15:50:36+00:00",
+      "bytes": 108496,
+      "sha256": "45798ba51fe0e6d97c3efdec6b04af455ff01a4d948843576c41a5d15d0db07a"
+    },
     "profile/2009/groups.json.gz": {
       "url": "https://api.census.gov/data/2009/acs/acs5/profile/groups.json",
       "retrieved_at": "2026-11-02T02:38:43+00:00",
@@ -1670,6 +1694,12 @@
       2023,
       2024,
       2025
+    ],
+    "dec/pl": [
+      2020
+    ],
+    "dec/dhc": [
+      2020
     ]
   }
 }

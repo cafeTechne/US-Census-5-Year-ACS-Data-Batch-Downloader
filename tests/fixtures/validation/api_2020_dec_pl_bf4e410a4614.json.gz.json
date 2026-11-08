@@ -1,0 +1,9 @@
+{
+  "kind": "census_api_response",
+  "note": "Parsed API JSON re-serialized compactly (content identical) and gzip-compressed with mtime=0. The API key is not part of the URL.",
+  "retrieved": "2026-11-08",
+  "sha256": "5f8a6b5cbef515a1feaa149bf1cf5aa6f17ca08803cf078809e53e6ea53e37d4",
+  "size_bytes": 327,
+  "source_url": "https://api.census.gov/data/2020/dec/pl?for=tract%3A%2A&get=NAME%2CH1_001N%2CH1_002N%2CH1_003N%2CP1_001N&in=state%3A56+county%3A001",
+  "uncompressed_sha256": "48834065f35300c5c57754057e63473dea5da48fcc9c9d3725fd26f97c163daf"
+}

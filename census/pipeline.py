@@ -54,6 +54,19 @@ from census.concordance import (
 )
 from census.continuity import continuity_check
 from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+from census.decennial import (
+    BLOCK_ADVISORY,
+    DECENNIAL_DATASETS,
+    DECENNIAL_DHC,
+    DECENNIAL_GEO_LEVELS,
+    DECENNIAL_PL,
+    DECENNIAL_YEARS,
+    DHC_BLOCK_TABLES,
+    DISCLOSURE_AVOIDANCE_ADVISORY,
+    PRODUCT_DECENNIAL,
+    is_decennial,
+    uncertainty_record,
+)
 from census.export import (
     process_data_and_save,
     sanitize_filename,
@@ -99,7 +112,7 @@ LEGACY_FORMATS = ("both", "wide_only", "melted_only", "excel")
 PANEL_FORMATS = ("panel", "parquet")
 OUTPUT_FORMATS = LEGACY_FORMATS + PANEL_FORMATS
 
-GEO_LEVEL_NAMES = ("us", "state", "county", "tract", "block group", "place", "zcta", "msa")
+GEO_LEVEL_NAMES = ("us", "state", "county", "tract", "block group", "block", "place", "zcta", "msa")
 # Release whose county list enumerates block-group requests when no counties
 # are given (one API request per county).
 BLOCK_GROUP_COUNTY_LIST_YEAR = 2023
@@ -159,7 +172,9 @@ class ResearchOptions:
     continuity_check: bool = True
     allow_unverified_concordance: bool = False
     # ACS product: "5-year" (default) or "1-year" (acs1 datasets; areas of
-    # 65,000+ only; 1-year and 5-year estimates are never compared).
+    # 65,000+ only; 1-year and 5-year estimates are never compared), or
+    # "decennial" (2020 Census, dec/dhc by default or dataset='dec/pl'; counts
+    # that are not sample-based, census.decennial).
     product: str = PRODUCT_5YR
     # 1-year only: the 2020 1-year release is unavailable (Census published only
     # experimental estimates, outside the API). True drops 2020 from the request
@@ -314,6 +329,8 @@ def _nationwide_entities(
     5-year vintage; ``state:*`` would also return Puerto Rico. Tracts cannot use
     a state wildcard, so they are one request per state, sharing one group.
     """
+    if geo_level == "block":
+        raise ValueError("Census blocks are requested one state at a time; give a state_code (and county codes).")
     states = expand_states(NATIONWIDE, include_pr)
     joined = ",".join(states)
     label = NATIONWIDE_LABEL + ("_and_PR" if include_pr else "")
@@ -365,6 +382,8 @@ def build_entities(
         block group (aliases block_group, bg, 150) -> county FIPS codes; one
                   request per county (default: every county, listed with
                   ``client``); GEOIDs are 12 digits
+        block  -> 2020 Census only: county FIPS codes (one request each;
+                  default one state-wide request); GEOIDs are 15 digits
         zcta   -> 5-digit ZCTAs (default: ZIPs in state via zip2fips.json, or
                   all ZCTAs nationally when no state is given)
         msa    -> CBSA codes (default: all metro/micro areas)
@@ -393,6 +412,23 @@ def build_entities(
         for st in bg_states:
             bg.extend(_block_group_entities(st, codes, names, client, years=years))
         return bg
+    if geo_level == "block":
+        # 2020 Census only: one request per county given, else one per state (county:*).
+        blk_states = expand_states(state_code)
+        if len(blk_states) > 1 and codes:
+            raise ValueError("block county codes need a single state_code.")
+        blocks: List[Entity] = []
+        for st in blk_states:
+            st_name = STATE_MAPPING.get(st, f"State_{st}")
+            if not codes:
+                blocks.append(Entity(f"{st_name}_All_Blocks", "block", st, county_code="*"))
+                continue
+            blocks.extend(
+                Entity(f"{names.get(c, st_name + '_County_' + c)}_Blocks", "block", st,
+                       county_code=str(c).strip().zfill(3), group=f"{st_name}_Blocks")
+                for c in codes
+            )
+        return blocks
 
     if geo_level == "place":
         if not codes:
@@ -595,6 +631,43 @@ def _errata_summary(table_code: str, years: Sequence[int]) -> Any:
         return {"error": f"errata lookup unavailable: {exc}"}
 
 
+def _decennial_plan_error(
+    table_code: str, dataset: str, years: Sequence[int], entities: Sequence[Entity], options: ResearchOptions
+) -> Optional[Dict[str, Any]]:
+    """Refusals specific to the 2020 Census datasets (None when the request is valid)."""
+    other = [y for y in years if y not in DECENNIAL_YEARS]
+    if other:
+        return errors.error_result(
+            errors.VINTAGE_UNAVAILABLE,
+            f"The decennial datasets here cover the 2020 Census only ({dataset} {list(DECENNIAL_YEARS)}); "
+            f"not available for {other}. Request years=[2020].",
+            unavailable_years=other,
+        )
+    level = normalize_geo_level(entities[0].geo_level)
+    if level not in DECENNIAL_GEO_LEVELS:
+        return errors.error_result(
+            errors.INVALID_GEO_LEVEL,
+            f"2020 Census extractions support {list(DECENNIAL_GEO_LEVELS)}; not '{level}'.",
+        )
+    if level == "block" and dataset != DECENNIAL_PL and table_code not in DHC_BLOCK_TABLES:
+        return errors.error_result(
+            errors.INVALID_GEO_LEVEL,
+            f"Blocks are offered for P.L. 94-171 tables (dataset='{DECENNIAL_PL}') and for the invariant "
+            f"housing-unit count (DHC {list(DHC_BLOCK_TABLES)}), not {dataset} {table_code}: block-level "
+            "characteristics are dominated by disclosure-avoidance noise. Request block groups or tracts.",
+        )
+    if options.harmonize_tracts_to is not None:
+        return errors.error_result(
+            errors.INVALID_INPUT,
+            "harmonize_tracts_to does not apply to the 2020 Census (it is tabulated on 2020 tracts).",
+        )
+    if options.inflation_base_year:
+        return errors.error_result(
+            errors.INVALID_INPUT, "The 2020 Census P.L. 94-171 and DHC files publish no dollar values."
+        )
+    return None
+
+
 def plan_extraction(
     table_code: str,
     entities: Sequence[Entity],
@@ -608,8 +681,8 @@ def plan_extraction(
 ) -> Dict[str, Any]:
     """Dry run: validate, build the concordance, check continuity, count calls.
 
-    ``product`` ('5-year' default, or '1-year'; overrides ``options.product``)
-    selects the ACS release family; a generic ``dataset`` ('acs5', 'profile',
+    ``product`` ('5-year' default, '1-year', or 'decennial' for the 2020
+    Census; overrides ``options.product``) selects the release family; a generic ``dataset`` ('acs5', 'profile',
     ...) is mapped to the product's endpoint, and an explicit 1-year dataset
     ('acs1', 'acs1/subject', ...) implies '1-year'. 1-year plans probe which
     requested areas each release publishes (one cached listing call per year
@@ -633,11 +706,32 @@ def plan_extraction(
     if not entities:
         return errors.error_result(errors.INVALID_INPUT, "No geographic entities requested.")
     explicit_product = product is not None or options.product != PRODUCT_5YR
-    try:
-        product = normalize_product(product if product is not None else options.product)
-    except ValueError as exc:
-        return errors.error_result(errors.INVALID_INPUT, str(exc))
-    if dataset and dataset in DATASETS:
+    requested_product = product if product is not None else options.product
+    decennial = is_decennial(dataset) or is_decennial(requested_product)
+    if decennial:
+        if dataset and dataset not in DECENNIAL_DATASETS:
+            return errors.error_result(
+                errors.INVALID_DATASET,
+                f"Dataset '{dataset}' is an ACS dataset but product='decennial' was requested; use "
+                f"dataset {list(DECENNIAL_DATASETS)} for the 2020 Census.",
+            )
+        if explicit_product and not is_decennial(requested_product):
+            return errors.error_result(
+                errors.INVALID_DATASET,
+                f"Dataset '{dataset}' is the 2020 Census but product='{requested_product}' was requested. "
+                "Decennial counts and ACS estimates are separate products.",
+            )
+        product = PRODUCT_DECENNIAL
+        dataset = dataset if dataset in DECENNIAL_DATASETS else DECENNIAL_DHC
+        decennial_error = _decennial_plan_error(table_code, dataset, years, entities, options)
+        if decennial_error:
+            return decennial_error
+    else:
+        try:
+            product = normalize_product(requested_product)
+        except ValueError as exc:
+            return errors.error_result(errors.INVALID_INPUT, str(exc))
+    if dataset and dataset in DATASETS and not decennial:
         ds_product = dataset_product(dataset)
         if ds_product != product:
             if not explicit_product:
@@ -666,6 +760,12 @@ def plan_extraction(
         client = CensusAPIClient(cache=get_default_cache() if options.use_cache else None)
 
     geo_level = entities[0].geo_level
+    if geo_level == "block" and not decennial:
+        return errors.error_result(
+            errors.INVALID_GEO_LEVEL,
+            "Census blocks are published only in the 2020 Census datasets (dataset='dec/pl', or "
+            "'dec/dhc' for H1 housing units), not in the ACS.",
+        )
     excluded_years: List[int] = []
     acs1_advisories: List[str] = []
     if product == PRODUCT_1YR:
@@ -723,7 +823,7 @@ def plan_extraction(
                 f"harmonize_tracts_to requires a panel output format {sorted(PANEL_FORMATS)}.",
             )
 
-    if geo_level == BLOCK_GROUP:
+    if geo_level == BLOCK_GROUP and not decennial:
         if dataset != "acs5":
             return errors.error_result(
                 errors.INVALID_GEO_LEVEL,
@@ -795,6 +895,20 @@ def plan_extraction(
         )
 
     advisories.extend(acs1_advisories)
+    if decennial:
+        advisories.append(DISCLOSURE_AVOIDANCE_ADVISORY)
+        if geo_level == "block":
+            advisories.append(BLOCK_ADVISORY)
+        advisories.append(
+            "Single census release: cross-release concordance and continuity checks do not apply; the "
+            "concordance file only maps this release's codes to labels. Do not splice 2020 Census counts "
+            "into an ACS series as if they were ACS estimates."
+        )
+        if options.compute_reliability:
+            advisories.append(
+                "compute_reliability: no SE, CV or reliability columns are added for 2020 Census counts "
+                "(not sample-based; sampling MOE undefined, never 0)."
+            )
     geography_availability: Dict[str, Any] = {}
     if product == PRODUCT_1YR:
         geography_availability = probe_acs1_geographies(client, dataset, years, entities)
@@ -817,7 +931,7 @@ def plan_extraction(
             )
 
     block_group_availability: Dict[str, Any] = {}
-    if geo_level == BLOCK_GROUP:
+    if geo_level == BLOCK_GROUP and not decennial:
         block_group_availability = probe_block_group_availability(client, table_code, years, entities)
         missing = block_group_availability["unpublished_years"]
         if missing:
@@ -887,7 +1001,8 @@ def plan_extraction(
         "would_block": would_block,
         "block_reason": block_reason,
         "advisories": advisories,
-        "errata": _errata_summary(table_code, years),
+        "uncertainty": uncertainty_record(geo_level) if decennial else None,
+        "errata": [] if decennial else _errata_summary(table_code, years),
         "overrides": override_report,
         "continuity": {
             "checked_concepts": len(continuity_report),
@@ -1343,6 +1458,7 @@ def run_batch(
             slug_style=options.slug_style,
             price_index=INDEX_DISPLAY.get(options.price_index, options.price_index),
             concordance=conc if use_concordance else None,
+            decennial=is_decennial(dataset),
         )
         codebook_path = os.path.join(output_dir, f"{table_code}_codebook.csv")
         codebook.to_csv(codebook_path, index=False, encoding="utf-8")
@@ -1404,7 +1520,9 @@ def run_batch(
             "rules_applied": getattr(conc, "rules_applied", []),
             "metadata_vintages": _vintage_provenance(conc),
         },
-        "moe_confidence_level": 0.90,
+        # 2020 Census counts are not sample-based: no MOE confidence level (never 0 MOEs).
+        "moe_confidence_level": None if is_decennial(dataset) else 0.90,
+        "uncertainty": plan.get("uncertainty"),
         "advisories": plan["advisories"],
         "successful_calls": successful_calls,
         "failed_calls": failed_calls,

@@ -155,7 +155,7 @@ Every derived result carries `estimate`, `moe` (90%), `se`, `cv_percent`, `metho
 
 ## 11. Validation against Census-published values
 
-`run_validation` (CLI: `validate`; script: `scripts/validate_against_census.py`) recomputes values the Census Bureau publishes independently and compares: pipeline cells against raw API cells, Data Profile percentages from detailed tables, replicate MOEs against published MOEs, medians from distributions, Comparison Profile inflation adjustments and significance flags, and county sums against states. Offline checks run against frozen fixtures in every test run; CI runs the live battery weekly. If your analysis relies on a calculation path, check that the corresponding validation check passes in `docs/audits/validation_report.md`.
+`run_validation` (CLI: `validate`; script: `scripts/validate_against_census.py`) recomputes values the Census Bureau publishes independently and compares: pipeline cells against raw API cells, Data Profile percentages from detailed tables, replicate MOEs against published MOEs, medians from distributions, Comparison Profile inflation adjustments and significance flags, county sums against states, and (F11) 2020 Census counts against the Census Bureau's invariants and hierarchy. Offline checks run against frozen fixtures in every test run; CI runs the live battery weekly. If your analysis relies on a calculation path, check that the corresponding validation check passes in `docs/audits/validation_report.md`.
 
 ## 12. Inference (models, small areas, correlations, figures)
 
@@ -193,3 +193,9 @@ Validated in `docs/audits/inference_validation.md` by simulation with known trut
 - **Multilevel models and difference-in-differences** (`multilevel_model`, `difference_in_differences`): pass the outcome's SE column so sampling error is included. DiD needs non-overlapping releases and a pre-treatment reference period; with three or more pre-periods, report the parallel-trends test.
 - **Cost of living** (`adjust_for_place`): only on request; say in results that regional price parities were applied and that they carry their own error.
 
+## 15. 2020 Decennial Census (P.L. 94-171, DHC)
+
+- **Access:** the same tools as the ACS with `dataset="dec/dhc"` (DHC: `P1` total population, `P12` sex by age, `H1` housing units, `H3` occupancy status) or `dataset="dec/pl"` (P.L. 94-171; its `P1` is race), or `product="decennial"`; `years=[2020]` only. Levels: `us`, `state`, `county`, `tract`, `block group`, `place`, and `block` (P.L. 94-171, or DHC `H1`). Variable codes end in `N` (count). Recipe: `get_recipe(name="decennial_counts")`.
+- **Uncertainty:** counts are not sample-based: MOE, SE and CV are undefined, never 0, and no such columns are written. They are not error-free: coverage and processing error, and TopDown differential-privacy noise on everything except state population, block housing units and occupied group-quarters facilities. Read the plan's `uncertainty` record and advisories, aggregate blocks and small areas before computing rates, and say in write-ups that 2020 Census figures carry disclosure-avoidance noise.
+- **Tests:** never run a significance test between two census counts (tools refuse `product="decennial"`). Testing an ACS estimate against a census count (`calculate_significance(..., product="5-year", product2="decennial")`) measures ACS sampling error only; report the note it returns. `derive_estimate(..., product="decennial")` gives point estimates only.
+- **Do not** splice 2020 Census counts into an ACS series, or treat a DHC table code as the same table in P.L. 94-171.
