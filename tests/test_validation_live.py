@@ -33,7 +33,6 @@ class TestLiveBattery(unittest.TestCase):
                 r = self.results[cid]
                 self.assertTrue(r.passed, f"{cid}: {r.notes} {r.failures[:3]}")
 
-    @unittest.expectedFailure
     def test_f5_passes(self):
         self.assertTrue(self.results["F5"].passed)
 

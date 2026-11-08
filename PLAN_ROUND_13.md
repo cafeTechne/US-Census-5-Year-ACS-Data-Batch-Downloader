@@ -12,7 +12,7 @@ Items in this section come first in the work order. Each one is either fixed in 
 | ID | Source | Finding | Disposition |
 | :--- | :--- | :--- | :--- |
 | G0 | v0.11.0 full `--gate` run, 2026-11-07 | **PASS.** All 10 required studies are present and every gated row is inside the band. Wall time is **106 min**: `spatial_fay_herriot` takes 56 min (53%) and `regression_calibration` 18 min; the four default design studies add about 11 min combined | No defects. Runtime goes to C3, which targets `spatial_fay_herriot` first |
-| G1 | GitHub Actions API, 2026-11-07 | The weekly `live-validation` job has **zero scheduled runs**. The Census-published comparison, which the owner called the ultimate test, has never run in CI | Workstream A1 |
+| G1 | GitHub Actions API, 2026-11-07 | The weekly `live-validation` job has zero scheduled runs. **Cause verified: it is not yet due, not a defect.** The cron was pushed on Monday 2026-11-02 after that day's 06:00 UTC slot, so the first scheduled run is Monday 2026-11-09. The `CENSUS_API_KEY` secret exists and the workflow is active. A first run was started via `workflow_dispatch` on 2026-11-08 UTC | Workstream A1: triage that run; confirm the 2026-11-09 scheduled run |
 | G2 | `.github/workflows/*.yml` | CI never runs `scripts/inference_validation.py`, not even `--fast`. A coverage regression would show up only at release time | Workstream C1 |
 | G3 | PLAN_ROUND_12 sec. 12 | Deferred: CLI and MCP `run_manifest` cannot take replicates. There is no CLI command to load frozen responses into the cache | Workstream B1, B2 |
 | G4 | PLAN_ROUND_11 F4 | The DiD coverage studies use independent shocks only. Serial correlation is untested | Workstream C2 |
