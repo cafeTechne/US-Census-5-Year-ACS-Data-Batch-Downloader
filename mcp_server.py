@@ -947,6 +947,8 @@ def adjust_inflation(
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
     table = load_price_index(index, allow_provisional=allow_provisional)
+    info = price_index_info(index)
+    custom = {"custom_table": info["custom_table"]} if "custom_table" in info else {}
     return {
         "advisory": provisional_advisory(index, [from_year, to_year]) if allow_provisional else None,
         "success": True,
@@ -957,7 +959,8 @@ def adjust_inflation(
         "index_from": table[from_year],
         "index_to": table[to_year],
         "adjusted_value": adjusted,
-        "source": price_index_info(index).get("source", ""),
+        "source": info.get("source", ""),
+        **custom,
     }
 
 

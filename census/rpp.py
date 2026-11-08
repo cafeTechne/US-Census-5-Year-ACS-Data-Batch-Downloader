@@ -16,7 +16,8 @@ across places and years are::
     real = nominal * 100 / RPP(area, year) * INDEX(base_year) / INDEX(year)
 
 Coverage (data/price_parities/rpp.csv, from scripts/update_price_parities.py,
-checksummed in rpp.json): states, state metropolitan and nonmetropolitan
+checksummed in rpp.json; verified at load when read from the package's own
+data directory, see census.data_integrity): states, state metropolitan and nonmetropolitan
 portions, MSAs (OMB 2023 delineation), and the U.S. nonmetropolitan portion,
 2008 onward. Areas outside an MSA use the state nonmetropolitan RPP (which
 BEA builds from micropolitan and rural counties); counties, tracts and places
@@ -35,6 +36,7 @@ unscaled per-area value.
 """
 
 import csv
+import io
 import json
 import os
 import re
@@ -43,6 +45,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
+from census.data_integrity import clear_verification_cache, read_table_bytes, same_directory
 from census.geo import get_resource_path
 from census.inflation import DEFAULT_PRICE_INDEX, INDEX_DISPLAY, inflation_factor
 
@@ -58,28 +61,16 @@ class RPPUnavailable(KeyError):
     """No RPP for the requested area or year."""
 
 
+def bundled_price_parity_dir() -> str:
+    """The package's own price parity directory (the only one whose CSVs are checksum-verified)."""
+    return get_resource_path(os.path.join("data", "price_parities"))
+
+
 def price_parity_dir() -> str:
-    return os.getenv("CENSUS_PRICE_PARITY_DIR") or get_resource_path(os.path.join("data", "price_parities"))
+    return os.getenv("CENSUS_PRICE_PARITY_DIR") or bundled_price_parity_dir()
 
 
-@lru_cache(maxsize=None)
-def _load() -> Tuple[Dict[Tuple[str, int], Dict[str, Any]], Dict[str, Tuple[str, str]]]:
-    path = os.path.join(price_parity_dir(), "rpp.csv")
-    if not os.path.exists(path):
-        return {}, {}
-    table: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    names: Dict[str, Tuple[str, str]] = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            rec = {k: (float(v) if k.startswith("rpp_") and v != "" else (None if k.startswith("rpp_") else v))
-                   for k, v in r.items()}
-            table[(r["geo_fips"], int(r["year"]))] = rec
-            names[r["geo_fips"]] = (r["geo_name"], r["geo_type"])
-    return table, names
-
-
-@lru_cache(maxsize=None)
-def price_parity_info() -> Dict[str, Any]:
+def _sidecar() -> Dict[str, Any]:
     path = os.path.join(price_parity_dir(), "rpp.json")
     if not os.path.exists(path):
         return {}
@@ -87,18 +78,64 @@ def price_parity_info() -> Dict[str, Any]:
         return json.load(f)
 
 
+@lru_cache(maxsize=None)
+def _read_table(name: str) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dict[str, Any]]]:
+    """(rows of ``name``, custom-table record); rows None when missing, record None for bundled data."""
+    directory = price_parity_dir()
+    path = os.path.join(directory, name)
+    if not os.path.exists(path):
+        return None, None
+    bundled = same_directory(directory, bundled_price_parity_dir())
+    expected = (_sidecar().get("csv_sha256") or {}).get(name) if bundled else None
+    raw, digest = read_table_bytes(path, bundled, expected, os.path.join(directory, "rpp.json"),
+                                   "scripts/update_price_parities.py")
+    rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8"), newline="")))
+    custom = None if bundled else {"path": os.path.abspath(path), "sha256": digest, "verified": False}
+    return rows, custom
+
+
+@lru_cache(maxsize=None)
+def _load() -> Tuple[Dict[Tuple[str, int], Dict[str, Any]], Dict[str, Tuple[str, str]]]:
+    rows, _ = _read_table("rpp.csv")
+    if rows is None:
+        return {}, {}
+    table: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    names: Dict[str, Tuple[str, str]] = {}
+    for r in rows:
+        rec = {k: (float(v) if k.startswith("rpp_") and v != "" else (None if k.startswith("rpp_") else v))
+               for k, v in r.items()}
+        table[(r["geo_fips"], int(r["year"]))] = rec
+        names[r["geo_fips"]] = (r["geo_name"], r["geo_type"])
+    return table, names
+
+
+@lru_cache(maxsize=None)
+def price_parity_info() -> Dict[str, Any]:
+    """Sidecar metadata (rpp.json), or {} when missing.
+
+    With a custom CENSUS_PRICE_PARITY_DIR, ``custom_tables`` maps each CSV
+    present to its path and SHA-256 (``verified: False``: nothing was checked).
+    """
+    info = _sidecar()
+    custom = {n: c for n in ("rpp.csv", "pce_price_index.csv") for c in [_read_table(n)[1]] if c is not None}
+    if custom:
+        info = {**info, "custom_tables": custom}
+    return info
+
+
 def load_pce_price_index() -> Dict[int, float]:
     """National PCE price index (2017=100), same BEA vintage as the RPPs."""
-    path = os.path.join(price_parity_dir(), "pce_price_index.csv")
-    if not os.path.exists(path):
+    rows, _ = _read_table("pce_price_index.csv")
+    if rows is None:
         return {}
-    with open(path, newline="", encoding="utf-8") as f:
-        return {int(r["year"]): float(r["value"]) for r in csv.DictReader(f)}
+    return {int(r["year"]): float(r["value"]) for r in rows}
 
 
 def clear_cache() -> None:
+    _read_table.cache_clear()
     _load.cache_clear()
     price_parity_info.cache_clear()
+    clear_verification_cache()
 
 
 def load_price_parities() -> pd.DataFrame:
@@ -187,11 +224,15 @@ def place_parity(geography: Any, year: int, state: Optional[str] = None, portion
         raise RPPUnavailable(f"no RPP for {names[key][0]} in {year}; BEA RPPs cover {ys[0]}-{ys[-1]} "
                              "(some MSAs start later)")
     info = price_parity_info()
-    return {"rpp": float(rec[f"rpp_{component}"]), "component": component, "geo_fips": key,
-            "geo_name": names[key][0], "geo_type": names[key][1], "year": int(year), "advisories": advisories,
-            "source": "BEA Regional Price Parities (SARPP/PARPP/MARPP); " + "; ".join(
-                n for n in ((info.get("sources") or {}).get("SARPP") or {}).get("bea_notes", [])
-                if "updated" in n.lower())}
+    out = {"rpp": float(rec[f"rpp_{component}"]), "component": component, "geo_fips": key,
+           "geo_name": names[key][0], "geo_type": names[key][1], "year": int(year), "advisories": advisories,
+           "source": "BEA Regional Price Parities (SARPP/PARPP/MARPP); " + "; ".join(
+               n for n in ((info.get("sources") or {}).get("SARPP") or {}).get("bea_notes", [])
+               if "updated" in n.lower())}
+    custom = (info.get("custom_tables") or {}).get("rpp.csv")
+    if custom is not None:
+        out["custom_table"] = custom
+    return out
 
 
 def adjust_for_place(value: float, geography: Any, year: int, state: Optional[str] = None,
@@ -229,6 +270,9 @@ def describe_place_adjustment(geography: Any, year: int, state: Optional[str] = 
         notes.append(f"ACS {acs_period_years}-year dollars are in end-year ({year}) dollars; the end-year RPP is "
                      "applied to the whole period.")
     notes += p["advisories"]
+    if p.get("custom_table"):
+        notes.append(f"CUSTOM RPP TABLE: {p['custom_table']['path']} (SHA-256 {p['custom_table']['sha256']}), "
+                     "supplied through CENSUS_PRICE_PARITY_DIR and not checked against the bundled checksums.")
     notes.append(RPP_ESTIMATION_ERROR_NOTE)
     return {**p, "notes": notes, "applied_by_default": False}
 
