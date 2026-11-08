@@ -1047,6 +1047,7 @@ for _tool in (
     workflows.record_rule_review,
     workflows.run_validation,
     workflows.download_table,
+    workflows.cache_import,
     workflows_inference.build_analysis_frame,
     workflows_inference.fit_model,
     workflows_inference.small_area_estimates,
@@ -1088,6 +1089,7 @@ draft_rule_override = workflows.draft_rule_override
 record_rule_review = workflows.record_rule_review
 run_validation = workflows.run_validation
 download_table = workflows.download_table
+cache_import = workflows.cache_import
 build_analysis_frame = workflows_inference.build_analysis_frame
 fit_model = workflows_inference.fit_model
 small_area_estimates = workflows_inference.small_area_estimates
