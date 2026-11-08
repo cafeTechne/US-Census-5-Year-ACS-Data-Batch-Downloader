@@ -70,6 +70,14 @@ class TestGate(unittest.TestCase):
         from census.simulation import STUDIES
         self.assertTrue(set(iv.REQUIRED_STUDIES) <= set(STUDIES))
 
+    def test_did_ar1_sensitivity_runs_only_on_demand(self):
+        # D13-3: registered and runnable with --studies, never gated or run by default
+        from census.simulation import DESIGN_STUDIES, STUDIES
+        self.assertIn("did_ar1_sensitivity", DESIGN_STUDIES)
+        self.assertIn("did_ar1_sensitivity", STUDIES)
+        self.assertNotIn("did_ar1_sensitivity", iv.DEFAULT_DESIGN_STUDIES)
+        self.assertNotIn("did_ar1_sensitivity", iv.REQUIRED_STUDIES)
+
 
 class TestFastSmokeGate(unittest.TestCase):
     """--fast --gate (PLAN_ROUND_13 C1): band widened by 3 MC SE at nominal; full gate unchanged."""
