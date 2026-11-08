@@ -430,11 +430,21 @@ def lattice_weights(side: int, ids: Optional[Sequence[str]] = None):
     return w
 
 
-def sar_field(W: np.ndarray, rho: float, sd: float, rng: np.random.Generator, size: Optional[int] = None) -> np.ndarray:
-    """Draws of u = (I - rho W)^-1 eps, eps ~ N(0, sd^2 I); shape (m,) or (size, m)."""
+def sar_inverse(W: np.ndarray, rho: float) -> np.ndarray:
+    """(I - rho W)^-1, the SAR(1) filter; compute once per lattice and pass to sar_field."""
     from scipy import linalg as sla
 
-    Binv = sla.inv(np.eye(W.shape[0]) - rho * W)
+    return sla.inv(np.eye(W.shape[0]) - rho * W)
+
+
+def sar_field(W: np.ndarray, rho: float, sd: float, rng: np.random.Generator, size: Optional[int] = None,
+              Binv: Optional[np.ndarray] = None) -> np.ndarray:
+    """Draws of u = (I - rho W)^-1 eps, eps ~ N(0, sd^2 I); shape (m,) or (size, m).
+
+    ``Binv``: precomputed sar_inverse(W, rho) (same values; avoids an inversion per draw).
+    """
+    if Binv is None:
+        Binv = sar_inverse(W, rho)
     out = (sd * rng.standard_normal((size or 1, W.shape[0]))) @ Binv.T
     return out[0] if size is None else out
 
@@ -454,8 +464,9 @@ def study_spatial_fay_herriot(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]
     covered = np.zeros((reps, m), bool)
     fh_cov = np.zeros((reps, m), bool)
     sq, est_mse, fh_sq, rhos = np.zeros((reps, m)), np.zeros((reps, m)), np.zeros((reps, m)), []
+    Binv = sar_inverse(W, SAR_RHO)  # fixed lattice: invert once, not per replication
     for r in range(reps):
-        theta = beta0 + beta1 * x + sar_field(W, SAR_RHO, math.sqrt(A), rng)
+        theta = beta0 + beta1 * x + sar_field(W, SAR_RHO, math.sqrt(A), rng, Binv=Binv)
         y = theta + np.sqrt(D) * rng.standard_normal(m)
         frame = pd.DataFrame({"GEOID": g, "y": y, "y_se": np.sqrt(D), "x": x})
         res = spatial_fay_herriot("y ~ x", frame, "y_se", W, confidence_level=NOMINAL)
@@ -825,6 +836,29 @@ def designs_config(fast: bool = True, **overrides: Any) -> SimConfig:
     reps = {k: 0 for k in base.reps}
     reps.update(DESIGN_REPS_FAST if fast else DESIGN_REPS_FULL)
     return replace(base, reps=reps, **overrides)
+
+
+def group_config(group: str, fast: bool) -> SimConfig:
+    """Configuration of a study group: "main" (FULL/FAST), "spatial" or "designs"."""
+    if group == "spatial":
+        return spatial_config(fast=fast)
+    if group == "designs":
+        return designs_config(fast=fast)
+    if group != "main":
+        raise ValueError(f"unknown study group {group!r}")
+    return FAST if fast else FULL
+
+
+def run_study_job(job) -> tuple:
+    """Process-pool worker: job = (group, study, fast) -> (frame, log lines).
+
+    One study in its group's configuration. Each study seeds its own
+    generator from cfg.seed, so the rows do not depend on the process or the
+    order in which studies run.
+    """
+    group, name, fast = job
+    lines: List[str] = []
+    return run_study(group_config(group, fast), studies=[name], log=lines.append), lines
 
 
 # ---------------------------------------------------------------------------

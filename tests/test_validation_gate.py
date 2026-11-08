@@ -174,3 +174,15 @@ def test_default_design_studies_are_required_and_registered():
     assert set(iv.DEFAULT_DESIGN_STUDIES) <= set(iv.REQUIRED_STUDIES)
     assert set(iv.DEFAULT_DESIGN_STUDIES) <= set(DESIGN_STUDIES)
     assert "did_replicate" not in iv.REQUIRED_STUDIES and "multilevel_replicate" not in iv.REQUIRED_STUDIES
+
+
+class TestParallelJobs(unittest.TestCase):
+    """--jobs (PLAN_ROUND_13 C3): worker processes reproduce the serial frames exactly."""
+
+    def test_parallel_matches_serial(self):
+        groups = [("main", ["linear_trend", "correlation"]), ("designs", ["did_event"])]
+        serial = iv._run_groups(groups, True, 1, lambda m: None)
+        par = iv._run_groups(groups, True, 2, lambda m: None)
+        a = pd.concat(serial, ignore_index=True).drop(columns="seconds")
+        b = pd.concat(par, ignore_index=True).drop(columns="seconds")
+        self.assertEqual(a.to_csv(index=False), b.to_csv(index=False))

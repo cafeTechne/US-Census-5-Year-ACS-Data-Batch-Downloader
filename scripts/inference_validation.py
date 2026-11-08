@@ -8,9 +8,18 @@ supported interval method; writes
     docs/audits/inference_validation.csv   one row per (method, target)
 
 Usage:
-    python scripts/inference_validation.py          # full configuration (~105 min; spatial FH ~55)
-    python scripts/inference_validation.py --fast   # the CI configuration
+    python scripts/inference_validation.py          # full configuration, serial (~80 min)
+    python scripts/inference_validation.py --jobs 0 # same results, one process per CPU (~22 min)
+    python scripts/inference_validation.py --fast   # the CI configuration (~1 min)
     python scripts/inference_validation.py --gate   # also exit 1 on a failed/missing required study
+
+Runtime (measured 2026-11-07, 16 cores shared with other jobs, Python 3.14):
+full --gate --jobs 0 took 21.7 min wall; the floor is the longest study,
+regression_calibration (~22 min). Summed per-study times are ~83 min, the
+serial estimate. spatial_fay_herriot takes ~3.5 min for 1000 reps (was 56
+min in v0.11.0, when BLAS ran multithreaded on its 100 x 100 matrices).
+--fast --gate takes ~50 s serial. --jobs output is identical to the serial
+output at the same seed except the "seconds" column (wall time per study).
 
 Report versus gate (PLAN_ROUND_12 decision P12-3): by default the command is a
 report generator and always exits 0. With --gate it exits 1 when any gated
@@ -39,12 +48,25 @@ import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+# One BLAS/OpenMP thread per process, set before numpy is imported (PLAN_ROUND_13
+# C3). The studies fit many small (<= 400 x 400) matrices, where a multithreaded
+# BLAS is far slower (spatial_fay_herriot: 3361 s -> 199 s for 1000 reps on a
+# 16-core machine) and its reduction order, hence the last bits of results such
+# as rho_mean, depends on the machine's thread count. Pinned, the CSV depends
+# only on the seed. Applies when run as a script and in --jobs worker processes
+# ("__mp_main__"), not when this module is imported.
+BLAS_THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "BLIS_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS")
+if __name__ in ("__main__", "__mp_main__"):
+    for _v in BLAS_THREAD_VARS:
+        os.environ[_v] = "1"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from census.simulation import (BAND, CV_PROFILES, DESIGN_STUDIES, FAST, FULL, NOMINAL, SPATIAL_STUDIES,  # noqa: E402
-                               STUDIES, designs_config, run_study, spatial_config)
+                               STUDIES, group_config, run_study, run_study_job)
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
@@ -108,6 +130,37 @@ def gate(df, required=REQUIRED_STUDIES, fast=False):
     present = set(gated["study"]) if len(gated) else set()
     problems += [f"{s}: required study missing (no gated rows in results)" for s in required if s not in present]
     return not problems, problems
+
+
+def _run_groups(groups, fast: bool, jobs: int, log):
+    """Result frames for [(group, studies)] in the serial order, serially or in ``jobs`` processes.
+
+    Each study draws from its own seed (cfg.seed + a per-study offset), so a
+    study's rows do not depend on which process runs it or when; frames are
+    reassembled in the serial (group, study) order. Workers inherit the
+    pinned BLAS thread variables through the environment.
+    """
+    if jobs <= 1:
+        return [run_study(group_config(g, fast), studies=names, log=log) for g, names in groups]
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    tasks = []
+    for g, names in groups:
+        cfg = group_config(g, fast)
+        for n in (names if names is not None else list(STUDIES)):
+            if int(cfg.reps.get(n, 0)) > 0:  # run_study skips studies with no reps
+                tasks.append((g, n, fast))
+    results = [None] * len(tasks)
+    with ProcessPoolExecutor(max_workers=min(jobs, max(len(tasks), 1)),
+                             mp_context=multiprocessing.get_context("spawn")) as ex:
+        futs = {ex.submit(run_study_job, t): i for i, t in enumerate(tasks)}
+        for fut in as_completed(futs):
+            df, lines = fut.result()
+            results[futs[fut]] = df
+            for line in lines:
+                log(line)
+    return results
 
 
 def _f(x, d=3):
@@ -188,7 +241,11 @@ def main() -> int:
     ap.add_argument("--gate", action="store_true",
                     help="exit 1 if a required study fails or is missing (default: report only, exit 0); "
                          "with --studies only the selected required studies are required")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="run studies in this many worker processes (0 = one per CPU); the results are "
+                         "identical to a serial run")
     args = ap.parse_args()
+    jobs = (os.cpu_count() or 1) if args.jobs == 0 else max(args.jobs, 1)
     cfg, label = (FAST, "fast") if args.fast else (FULL, "full")
     out = args.out or (None if args.fast else OUT_MD)
     t0 = datetime.now()
@@ -199,17 +256,18 @@ def main() -> int:
         ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
     main_studies = None if args.studies is None else [
         s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES]
-    frames = []
+    groups = []
     if main_studies is None or main_studies:
-        frames.append(run_study(cfg, studies=main_studies, log=lambda m: print(m, flush=True)))
+        groups.append(("main", main_studies))
     spatial = [s for s in SPATIAL_STUDIES if args.studies is None or s in args.studies]
     if spatial:  # Round 9 spatial studies (own lattice configuration)
-        frames.append(run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True)))
+        groups.append(("spatial", spatial))
     designs = (list(DEFAULT_DESIGN_STUDIES) if args.studies is None
                else [s for s in args.studies if s in DESIGN_STUDIES])
     if designs:  # Round 10 multilevel and DiD studies (own configuration)
-        frames.append(run_study(designs_config(fast=args.fast), studies=designs, log=lambda m: print(m, flush=True)))
-    frames = [f for f in frames if len(f)]
+        groups.append(("designs", designs))
+    frames = _run_groups(groups, args.fast, jobs, lambda m: print(m, flush=True))
+    frames = [f for f in frames if f is not None and len(f)]
     df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(
         columns=["study", "method", "target", "reps", "nominal", "coverage", "mc_se", "status"])
     secs = (datetime.now() - t0).total_seconds()
