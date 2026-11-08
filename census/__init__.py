@@ -60,6 +60,7 @@ from census.stats import (
     standard_error,
     z_test,
 )
+from census.data_integrity import BundledDataIntegrityError
 from census.inflation import (
     CPI_U_ANNUAL,
     DEFAULT_PRICE_INDEX,
@@ -263,6 +264,7 @@ __all__ = [
     "DEFAULT_PRICE_INDEX",
     "PRICE_INDEXES",
     "PriceIndexUnavailable",
+    "BundledDataIntegrityError",
     "load_price_index",
     "price_index_info",
     # metadata
