@@ -88,7 +88,7 @@ class TestOfflineBattery(unittest.TestCase):
             self.assertLess(inc["median_rel_error"], 0.01)
             self.assertGreaterEqual(inc["share_within_published_moe"], 0.98)
         # Reported, not asserted: B19001 is coarser than Census's internal distribution.
-        self.assertAlmostEqual(inc23["share_within_2pct"], 0.8414, places=3)
+        self.assertAlmostEqual(inc23["share_within_2pct"], 0.8589, places=3)
         self.assertEqual(r.n_failed, 0)
 
     def test_f6_cp_inflation(self):
