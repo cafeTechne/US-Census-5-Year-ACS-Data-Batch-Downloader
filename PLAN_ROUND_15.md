@@ -1,7 +1,7 @@
 # Round 15: Studies Across Releases, Spatial Coverage, 2020 Census
 
 **Date:** 2026-11-08
-**Status:** Authorized (owner and planner decisions, 2026-11-08); implementation in progress
+**Status:** Implemented (section 6); released as v0.14.0
 **Baseline:** v0.13.0
 **Companions:** [PLAN_ROUND_14.md](PLAN_ROUND_14.md), [docs/remote_access_decisions.md](docs/remote_access_decisions.md)
 
@@ -73,3 +73,17 @@ v0.14.0 with a Zenodo DOI: code review (`/code-review high`), fixes, full gate (
 | D15-1 | New spatial studies start as `info`. Promotion to gated is an owner decision after the evidence is in |
 | D15-2 | Multi-release dollar conversion: CPI to the declared dollar year first, then the RPP of each release's own year |
 | D15-3 | Decennial geography levels: nation, state, county, tract, block group, block (block only for P.L. 94-171 and invariant counts), place |
+
+---
+
+## 6. Implementation status (2026-11-08)
+
+| Slice | Result |
+| :--- | :--- |
+| A releases | Multi-release adjustments (CPI to dollar year, then per-release RPP) and `census_vre` replicate retrieval. Live MI/NY change study: +3,110.80 (90% CI [2,708.93, 3,512.67]), no deviations; hand recomputation from raw VRE files agrees to about 1e-12 |
+| B spatial coverage | Info studies added to the full report. Lag ML rho coverage collapses under outcome sampling error (0.48, 0.003); GMM 0.89-0.90. LISA folded p-values doubled the false-positive rate. **Owner decisions:** lag default GMM; LISA two-sided, 9999 permutations. Error-model lambda attenuation and patterned-noise false clusters remain caveats |
+| C 2020 Census | `dec/pl`, `dec/dhc` through the existing pipeline; MOE undefined, never 0; disclosure-avoidance advisory; sampling tests refuse; F11 passes live and offline |
+| Review | `/code-review high`: 10 findings fixed with tests (`tests/test_review_fixes_r15.py`), including overlap refusal for every replicate source and explicit-evidence decennial detection |
+| Gate | Full `--gate --jobs 0`: PASS, 19 min; existing coverage rows unchanged; new spatial rows are info |
+
+**Deferred:** 1-year releases and decennial data in manifests; aggregation with adjustment or `census_vre`; `covariates_only` beyond `fit_replicate`; a fix for error-model lambda attenuation and for patterned sampling error in LISA (no tested method yet). **Next:** minimum SSH remote access per `docs/remote_access_decisions.md`.

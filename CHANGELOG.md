@@ -5,6 +5,32 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.14.0 (Round 15): studies across releases, spatial coverage, 2020 Census
+
+- Confirmatory studies across releases: CPI conversion to a declared `dollar_year`, then
+  each release's own RPP (`rpp_years`); `"replicates": {"source": "census_vre"}` fetches
+  Census VRE tables (URLs and SHA-256 recorded). Overlapping releases are refused for any
+  replicate source; `replicate_scope: "covariates_only"` is an explicit, hashed exception
+  for outcomes without replicates. Example: MI/NY change in CPI- and RPP-adjusted mean
+  household income, 2015-2019 to 2020-2024: +$3,111 per county, 90% CI [2,709, 3,513].
+- Spatial coverage studies (info): `spatial_regression_coverage`, `local_morans_size`.
+  **Default changes (owner decisions):** the spatial lag model now defaults to GMM (ML rho
+  coverage under ACS sampling error was 0.48 at rho 0.3 and 0.003 at 0.6; GMM 0.89-0.90);
+  local Moran's I now reads p-values two-sided with 9999 permutations (per-area false
+  positive rate 0.20 to 0.10). Previous behaviour: `method="ml"`;
+  `sided="folded", permutations=999`. Caveats with measured numbers in both tools'
+  outputs (error-model lambda attenuation; false clusters under spatially patterned
+  sampling error).
+- spreg's per-fit stdout print is suppressed at its source, so it can no longer corrupt
+  the MCP stdio stream.
+- 2020 Decennial Census: P.L. 94-171 (`dec/pl`) and DHC (`dec/dhc`) through the existing
+  pipeline. Counts are "not sample-based (MOE undefined)", never MOE 0, with a
+  disclosure-avoidance advisory; sampling tests refuse decennial-only input; ACS vs
+  census comparisons treat the count as a fixed reference. New live check F11
+  (invariants and block-to-tract/county hierarchy, 5,492 values); 11/11 checks pass live.
+- Remote access decisions recorded (`docs/remote_access_decisions.md`); no networking
+  changes in this release.
+
 ## 0.13.0 (Round 14): confirmatory multi-state analyses
 
 - Pre-registered manifests take several states (`geography.states`, 2-digit FIPS; not
