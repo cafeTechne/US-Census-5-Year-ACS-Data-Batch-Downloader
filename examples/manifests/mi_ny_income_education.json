@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "title": "Price-adjusted county median household income and bachelor's degree attainment, Michigan and New York, ACS 2020-2024",
+  "authors": ["human:example-researcher", "agent:claude"],
+  "created": "2026-11-08T00:00:00Z",
+  "releases": [2024],
+  "geography": {"level": "county", "states": ["26", "36"]},
+  "variables": [
+    {"name": "median_hh_income", "ref": "2024:B19013_001"},
+    {"name": "ed_total", "ref": "2024:B15002_001"},
+    {"name": "ba_male", "ref": "2024:B15002_015"},
+    {"name": "ma_male", "ref": "2024:B15002_016"},
+    {"name": "prof_male", "ref": "2024:B15002_017"},
+    {"name": "phd_male", "ref": "2024:B15002_018"},
+    {"name": "ba_female", "ref": "2024:B15002_032"},
+    {"name": "ma_female", "ref": "2024:B15002_033"},
+    {"name": "prof_female", "ref": "2024:B15002_034"},
+    {"name": "phd_female", "ref": "2024:B15002_035"}
+  ],
+  "derivations": [
+    {"name": "pct_bachelors", "op": "proportion", "as_percent": true,
+     "num": ["ba_male", "ma_male", "prof_male", "phd_male", "ba_female", "ma_female", "prof_female", "phd_female"],
+     "den": "ed_total"}
+  ],
+  "adjustments": [
+    {"type": "rpp", "variables": ["median_hh_income"], "rpp_year": 2024, "areas": "county_metro"}
+  ],
+  "exclusions": [
+    {"rule": "cv_screen", "threshold": 30, "variables": ["median_hh_income", "pct_bachelors"], "action": "flag"}
+  ],
+  "missing": "complete_case",
+  "confidence_level": 0.90,
+  "correction": {"method": "holm", "family": "all"},
+  "analyses": [
+    {"id": "m1", "method": "fit_replicate", "formula": "median_hh_income ~ pct_bachelors + C(GEOID.str[:2])",
+     "args": {"model": "ols", "target": "population"}}
+  ],
+  "hypotheses": [
+    {"id": "H1", "statement": "Across Michigan and New York counties, a higher share of adults 25+ with a bachelor's degree or higher is associated with higher RPP-adjusted median household income, holding the state level fixed.",
+     "analysis": "m1", "statistic": "coefficient", "term": "pct_bachelors", "direction": "greater"}
+  ]
+}
