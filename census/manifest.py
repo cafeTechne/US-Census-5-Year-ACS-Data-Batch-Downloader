@@ -18,7 +18,7 @@ pulled. Schema (``schema_version`` 1)::
       ],
       "aggregation": {"mapping": {"<GEOID>": "<group>"}},    # optional
       "derivations": [{"name": "rate", "op": "proportion", "num": "a", "den": "b"}],
-      "adjustments": [{"type": "rpp", "variables": ["income"],   # optional; after derivations
+      "adjustments": [{"type": "rpp", "variables": ["income"],   # optional; after exclusions
                        "rpp_year": 2019, "areas": "county_metro" | "state"}],
       "exclusions": [{"rule": "cv_screen", "threshold": 30, "variables": ["income"],
                       "action": "flag" | "exclude"},
@@ -42,21 +42,28 @@ allowed (county codes are per state). Pooled models get no automatic state
 term: a cross-state formula states it explicitly, e.g. ``C(GEOID.str[:2])``.
 
 ``adjustments`` (optional) are pre-registered transformations applied to the
-analysis frame after derivations and before exclusions. ``"rpp"`` divides
+analysis frame after derivations and exclusions (so a pre-registered exclusion
+can remove a unit without an RPP area; a remaining unit without one is a
+blocking ``adjustment_failed``). ``"rpp"`` divides
 dollar variables (``variables``: manifest variable or derivation names), their
 SEs and any supplied replicates by the BEA Regional Price Parity / 100 of each
 row's area (``areas``: ``"county_metro"``, the default for county geographies,
 or ``"state"``), with the same code as the ``place_adjust_frame`` tool
-(:func:`census.workflows_microdata.place_adjust`). ``rpp_year`` defaults to the
-latest year in the RPP table; the year used, its source, every RPP area and the
-RPP table's SHA-256 (bundled checksum, or the custom table's path and hash) are
+(:func:`census.workflows_microdata.place_adjust`). ``rpp_year`` is required so the
+manifest hash fixes the price year (:func:`create_manifest` fills in the latest
+year in the RPP table when it is omitted, before hashing); the year used, every
+RPP area and the RPP table's SHA-256 (bundled checksum, or the custom table's path and hash) are
 recorded in ``run.json`` and ``bundle.json`` (``adjustments``). An RPP year
 other than the release end year is a note, not a deviation. One release only.
 
 When replicates are supplied and the manifest has derivations, each
 derivation absent from the replicate frame is evaluated on the replicates of
 its inputs (replicate rows named by manifest variable name or ACS code), and
-its SE becomes the exact replicate SE.
+its SE becomes the exact replicate SE where its inputs have replicates.
+``replicates.derived_on_replicates`` lists only derivations that received a
+replicate SE, with per-derivation counts (``derived_on_replicates_rows``:
+rows_replicate of rows in the analysed frame); a failure of that step is a
+blocking ``replicates_incomplete`` deviation.
 
 ``data_source`` (optional) *declares* where the input data come from. The
 labels follow where the data actually came from (:func:`observed_data_source`):
@@ -136,8 +143,10 @@ STATISTICS = ("coefficient", "correlation", "trend_slope", "z_difference")
 EXCLUSION_RULES = ("cv_screen", "geoid_exclude")
 ADJUSTMENT_TYPES = ("rpp",)
 RPP_ADJUSTMENT_KEYS = ("type", "variables", "rpp_year", "areas")
-# geography levels whose GEOIDs start with the state FIPS (state RPP areas)
+# geography levels whose GEOIDs start with the state FIPS (state RPP areas; usable with
+# geography.states). ZCTA GEOIDs are not state-prefixed and ZCTAs can cross state lines.
 _STATE_PREFIXED_LEVELS = ("state", "county", "tract", "block group", "place")
+FIPS2_RE = re.compile(r"^\d{2}$")
 FORMULA_FUNCTIONS = {"C", "I", "np", "log", "exp", "sqrt", "center", "standardize", "scale", "Q"}
 
 REFERENCES = {
@@ -220,6 +229,13 @@ def _check_geography(geo: Mapping[str, Any], errors: List[str]) -> None:
     if not isinstance(geo, Mapping) or not geo.get("level"):
         errors.append("geography.level is required")
         return
+    state = geo.get("state")
+    if isinstance(state, str) and not is_nationwide(state):
+        bad = [p for p in state.split(",") if not FIPS2_RE.match(p.strip())]
+        if bad:
+            errors.append(f"geography.state: {bad[0]!r} must be a state FIPS code of exactly 2 digits "
+                          "(e.g. \"06\", not \"6\"), or \"all\"")
+            return
     states = geo.get("states")
     if states is not None:
         if "state" in geo:
@@ -229,19 +245,23 @@ def _check_geography(geo: Mapping[str, Any], errors: List[str]) -> None:
             errors.append("geography.states must be a non-empty list of 2-digit state FIPS strings, "
                           "e.g. [\"26\", \"36\"]")
             return
-        if len(set(states)) != len(states):
-            errors.append("geography.states lists a state more than once")
-            return
         for s in states:
             if is_nationwide(s) or "," in s:
                 errors.append(f"geography.states: {s!r} must be one 2-digit state FIPS code (for every "
                               "state use \"state\": \"all\")")
+                return
+            if not FIPS2_RE.match(s):
+                errors.append(f"geography.states: {s!r} must be a state FIPS code of exactly 2 digits "
+                              "(e.g. \"06\", not \"6\")")
                 return
             try:
                 expand_states(s)
             except ValueError as exc:
                 errors.append(f"geography.states: {exc}")
                 return
+        if len(set(states)) != len(states):
+            errors.append("geography.states lists a state more than once")
+            return
         if geo.get("codes"):
             errors.append("geography: 'codes' cannot be combined with 'states' (codes are per state); "
                           "list GEOIDs in a geoid_exclude exclusion or use one state per manifest")
@@ -250,7 +270,11 @@ def _check_geography(geo: Mapping[str, Any], errors: List[str]) -> None:
             level = normalize_geo_level(geo["level"])
         except Exception:  # noqa: BLE001 - reported by build_entities below
             level = geo["level"]
-        if level not in _STATE_PREFIXED_LEVELS + ("zcta",):
+        if level == "zcta":
+            errors.append("geography.states does not apply to level 'zcta': ZCTA GEOIDs are not state-prefixed "
+                          "and ZCTAs can cross state lines, so they cannot be extracted per state and stacked")
+            return
+        if level not in _STATE_PREFIXED_LEVELS:
             errors.append(f"geography.states does not apply to level {geo['level']!r} (national geography)")
             return
     try:
@@ -259,8 +283,14 @@ def _check_geography(geo: Mapping[str, Any], errors: List[str]) -> None:
         errors.append(f"geography: {exc}")
 
 
+def default_rpp_areas(level: Optional[str]) -> str:
+    """Default RPP ``areas`` of an adjustment for a (normalized) geography level: the
+    county's metro/nonmetro area for counties, else the state (validation and runs)."""
+    return "county_metro" if level == "county" else "state"
+
+
 def latest_rpp_year() -> Optional[int]:
-    """Latest year in the active RPP table (the default ``rpp_year``), or None without RPP data."""
+    """Latest year in the active RPP table (filled in by create_manifest when ``rpp_year`` is omitted), or None."""
     from . import rpp
     years = rpp._years()
     return years[-1] if years else None
@@ -303,7 +333,7 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
             elif str(v) in adjusted:
                 errors.append(f"adjustments[{i}]: {v!r} is adjusted twice")
             adjusted.append(str(v))
-        areas = adj.get("areas", "county_metro" if level == "county" else "state")
+        areas = adj.get("areas", default_rpp_areas(level))
         if areas not in ("county_metro", "state"):
             errors.append(f"adjustments[{i}]: areas must be 'county_metro' or 'state'")
         elif areas == "county_metro" and level != "county":
@@ -320,7 +350,11 @@ def _check_adjustments(manifest: Mapping[str, Any], names: List[str], errors: Li
             continue
         if not years:
             errors.append(f"adjustments[{i}]: no RPP data available")
-        elif year is not None and (not isinstance(year, int) or isinstance(year, bool) or year not in years):
+        elif year is None:
+            errors.append(f"adjustments[{i}]: rpp_year is required (it fixes the price level in the "
+                          f"pre-registration); the latest year in the RPP table is {years[-1]}. "
+                          "create_manifest fills it in when omitted")
+        elif not isinstance(year, int) or isinstance(year, bool) or year not in years:
             errors.append(f"adjustments[{i}]: rpp_year must be an integer year in the RPP table "
                           f"({years[0]}-{years[-1]})")
 
@@ -568,16 +602,45 @@ def create_manifest(
     When valid and ``path`` is given (or the input was a dict and ``path``
     is given) the manifest is written there as pretty JSON. Commit the file
     to the repository to fix the pre-registration (PLAN_ROUND_8 decision 3).
-    Returns ``{"hash", "path", "errors", "valid"}``.
+
+    An RPP adjustment without ``rpp_year`` gets the latest year in the active RPP
+    table before validation and hashing, so the hash fixes the applied year; the
+    result says so (``filled``, ``notes``) and the completed manifest is written to
+    ``path``, or back to the input file when no ``path`` is given (a dict input
+    without ``path`` gets it in ``manifest``).
+    Returns ``{"hash", "path", "errors", "valid", "notes", "filled"}`` (and
+    ``"manifest"`` when something was filled in).
     """
     manifest = load_manifest(path_or_dict)
+    filled: List[Dict[str, Any]] = []
+    adjustments = manifest.get("adjustments")
+    if isinstance(adjustments, list):
+        year = None
+        for i, adj in enumerate(adjustments):
+            if isinstance(adj, dict) and adj.get("type") == "rpp" and adj.get("rpp_year") is None:
+                try:
+                    year = year or latest_rpp_year()
+                except Exception:  # noqa: BLE001 - an unreadable RPP table is reported by validation
+                    year = None
+                if year is not None:
+                    adj["rpp_year"] = int(year)
+                    filled.append({"adjustment": i, "rpp_year": int(year)})
     errors = validate_manifest(manifest, resolve=resolve, client=client)
     out_path = str(path) if path else (str(path_or_dict) if not isinstance(path_or_dict, Mapping) else None)
-    if not errors and path:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-                              encoding="utf-8", newline="\n")
-    return {"hash": manifest_hash(manifest), "path": out_path, "errors": errors, "valid": not errors}
+    write_to = path or (out_path if filled else None)
+    if not errors and write_to:
+        Path(write_to).parent.mkdir(parents=True, exist_ok=True)
+        Path(write_to).write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+                                  encoding="utf-8", newline="\n")
+    notes = [f"adjustments[{f['adjustment']}]: rpp_year was omitted; filled in with {f['rpp_year']}, the latest "
+             "year in the RPP table, before hashing" + (f" (written to {write_to})" if write_to and not errors
+                                                         else "; commit the completed manifest")
+             for f in filled]
+    out = {"hash": manifest_hash(manifest), "path": out_path, "errors": errors, "valid": not errors,
+           "notes": notes, "filled": filled}
+    if filled:
+        out["manifest"] = manifest
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +803,7 @@ def run_manifest(
     replicates: Any = None, use_cache: bool = True, replicates_synthetic: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Execute a manifest exactly: plan -> extraction -> analysis frame ->
-    exclusions -> analyses -> hypothesis tests with the pre-registered
+    derivations on replicates -> exclusions -> adjustments -> analyses -> hypothesis tests with the pre-registered
     correction -> results bundle (tables, figures, methods.md).
 
     ``replicates``: optional pre-fetched replicate long frame (from
@@ -860,19 +923,20 @@ def run_manifest(
             except Exception as exc:
                 deviations.append({"kind": "analysis_frame_failed", "detail": str(exc)})
 
-    # 3b. derivations on supplied replicates, then pre-registered adjustments
+    # 3b. derivations on supplied replicates
     work_reps = replicates
-    derived_on_replicates: List[str] = []
+    derived_on_replicates: Dict[str, Dict[str, int]] = {}
     if frame is not None and replicates is not None and m.get("derivations"):
-        frame, work_reps, derived_on_replicates = _derive_replicates(frame, replicates, m)
-    adjustment_log: List[Dict[str, Any]] = []
-    if frame is not None and m.get("adjustments"):
-        frame, work_reps, adjustment_log, failure = _apply_adjustments(frame, work_reps, m, releases[0])
-        if failure:
-            deviations.append({"kind": "adjustment_failed", "detail": failure})
-            frame = None
+        try:
+            frame, work_reps, derived_on_replicates = _derive_replicates(frame, replicates, m)
+        except Exception as exc:  # noqa: BLE001 - data problems are deviations; run_manifest never raises on them
+            # replicate SEs of the derivations are unavailable: blocking, as when a strict replicate
+            # analysis meets them; the analyses run on the published SEs and record their own outcome
+            deviations.append({"kind": "replicates_incomplete", "detail": "derivations on replicates failed: "
+                               f"{type(exc).__name__}: {exc}"})
 
-    # 4. exclusions
+    # 4. exclusions (before adjustments: a pre-registered exclusion can remove a unit without an
+    # RPP area; the CV screen gives the same rows either way, since the RPP factor leaves CVs unchanged)
     exclusion_log: List[Dict[str, Any]] = []
     if frame is not None:
         from .models import reliability_screen
@@ -895,6 +959,17 @@ def run_manifest(
                     entry["rows_excluded"] = int((~keep).sum())
                     frame = frame[keep].reset_index(drop=True)
                 exclusion_log.append(entry)
+
+    # 4b. pre-registered adjustments (a unit still without an RPP area blocks: adjustment_failed)
+    adjustment_log: List[Dict[str, Any]] = []
+    if frame is not None and m.get("adjustments"):
+        frame, work_reps, adjustment_log, failure = _apply_adjustments(frame, work_reps, m, releases[0])
+        if failure:
+            deviations.append({"kind": "adjustment_failed", "detail": failure})
+            frame = None
+    if frame is not None:  # replicate-SE coverage of the units analysed
+        counts = {name: _replicate_rows(frame, name) for name in derived_on_replicates}
+        derived_on_replicates = {k: v for k, v in counts.items() if v["rows_replicate"]}
 
     # 5. analyses
     available = set(columns) | {str(d["name"]) for d in m.get("derivations") or []}
@@ -965,7 +1040,8 @@ def run_manifest(
         if digest is None:
             rep_info["sha256_unavailable"] = reason
         if derived_on_replicates:
-            rep_info["derived_on_replicates"] = derived_on_replicates
+            rep_info["derived_on_replicates"] = list(derived_on_replicates)
+            rep_info["derived_on_replicates_rows"] = derived_on_replicates
         scaled = [v for a in adjustment_log for v in a["variables"]]
         if scaled:
             rep_info["scaled_by_adjustments"] = scaled
@@ -989,18 +1065,28 @@ def run_manifest(
     return out_res
 
 
+def _replicate_rows(frame: pd.DataFrame, name: str) -> Dict[str, int]:
+    """{"rows_replicate": rows whose ``name`` SE is a replicate SE, "rows": all rows}."""
+    col = frame.get(f"{name}_method")
+    k = 0 if col is None else int((col.astype(str) == "replicate").sum())
+    return {"rows_replicate": k, "rows": int(len(frame))}
+
+
 def _derive_replicates(frame: pd.DataFrame, replicates: Any,
-                       m: Mapping[str, Any]) -> Tuple[pd.DataFrame, Any, List[str]]:
+                       m: Mapping[str, Any]) -> Tuple[pd.DataFrame, Any, Dict[str, Dict[str, int]]]:
     """Evaluate manifest derivations missing from the supplied replicate frame on the
     replicates of their inputs (:func:`census.analysis.attach_replicates`, the same
     evaluation as build_analysis_frame). Inputs are found by manifest variable name or
     by ACS code (``B15002_015``). The derived variables' SEs become exact replicate SEs;
     other variables keep theirs. Derivations whose inputs lack replicates are left
-    out (a replicate analysis using them then stops as replicates_incomplete)."""
+    out (a replicate analysis using them then stops as replicates_incomplete).
+    Returns (frame, replicates, {derivation: _replicate_rows counts}) listing only
+    derivations that received a replicate SE for at least one row. Raises on
+    malformed replicates (run_manifest records that as a deviation)."""
     from .analysis import _default_name, attach_replicates
     reps = replicates if isinstance(replicates, pd.DataFrame) else pd.DataFrame(replicates)
     if "variable" not in reps.columns:
-        return frame, replicates, []
+        return frame, replicates, {}
     have = {_default_name(v) for v in reps["variable"].astype(str)}
 
     def refs_of(d: Mapping[str, Any]) -> List[str]:
@@ -1012,8 +1098,8 @@ def _derive_replicates(frame: pd.DataFrame, replicates: Any,
         name, mm = str(v["name"]), YEAR_CODE_RE.match(str(v.get("ref", "")))
         if name in have:
             var_map[name] = name
-        elif mm and mm.group(2) in have:
-            var_map[name] = mm.group(2)
+        elif mm and _default_name(mm.group(2)) in have:  # B19013_001E, DP04_0046PE as normalized
+            var_map[name] = _default_name(mm.group(2))
     todo: List[Dict[str, Any]] = []
     for d in m.get("derivations") or []:
         name, refs = str(d["name"]), refs_of(d)
@@ -1022,9 +1108,12 @@ def _derive_replicates(frame: pd.DataFrame, replicates: Any,
         elif refs and all(r in var_map or r in {str(t["name"]) for t in todo} for r in refs):
             todo.append(dict(d))
     if not todo:
-        return frame, replicates, []
+        return frame, replicates, {}
     new_frame, long = attach_replicates(frame, reps, variables=var_map, derive=todo, replace_se=True)
-    derived = [str(d["name"]) for d in todo]
+    counts = {str(d["name"]): _replicate_rows(new_frame, str(d["name"])) for d in todo}
+    derived = [name for name, c in counts.items() if c["rows_replicate"]]
+    if not derived:
+        return frame, replicates, {}
     out = frame.copy()
     for name in derived:  # only the derived variables take replicate SEs
         for suffix in ("_se", "_cv", "_method"):
@@ -1034,7 +1123,7 @@ def _derive_replicates(frame: pd.DataFrame, replicates: Any,
     added = long[long["variable"].isin(derived + [n for n, c in var_map.items() if c != n])]
     combined = pd.concat([reps, added], ignore_index=True)
     combined.attrs = dict(getattr(reps, "attrs", {}) or {})
-    return out, combined, derived
+    return out, combined, {name: counts[name] for name in derived}
 
 
 def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any],
@@ -1048,9 +1137,8 @@ def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any
     log: List[Dict[str, Any]] = []
     for i, adj in enumerate(m.get("adjustments") or []):
         variables = [str(v) for v in adj["variables"]]
-        areas = adj.get("areas", "county_metro" if level == "county" else "state")
-        declared = adj.get("rpp_year")
-        rpp_year = int(declared) if declared is not None else latest_rpp_year()
+        areas = adj.get("areas", default_rpp_areas(level))
+        rpp_year = int(adj["rpp_year"])  # required by validation, so the hash fixes it
         try:
             res = place_adjust(frame, variables, release, areas=areas, replicates=replicates, rpp_year=rpp_year)
         except Exception as exc:  # noqa: BLE001 - recorded as a blocking deviation, never substituted
@@ -1059,9 +1147,6 @@ def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any
         if replicates is not None:
             replicates = res["replicates"]
         notes = list(res["notes"])
-        if declared is None:
-            notes.insert(0, f"RPP YEAR DEFAULT: the manifest gives no rpp_year; the latest year in the RPP "
-                            f"table ({rpp_year}) was used. Declare rpp_year to fix it in the pre-registration.")
         info = rpp.price_parity_info()
         table: Dict[str, Any] = {"source": "custom" if res["custom_table"] else "bundled"}
         if res["custom_table"]:
@@ -1069,8 +1154,8 @@ def _apply_adjustments(frame: pd.DataFrame, replicates: Any, m: Mapping[str, Any
         else:
             table["sha256"] = (info.get("csv_sha256") or {}).get("rpp.csv")
         log.append({"type": adj["type"], "variables": variables, "areas": areas, "dollar_year": int(release),
-                    "rpp_year": res["rpp_year"], "rpp_year_source": "manifest" if declared is not None else
-                    "default_latest", "rpp_year_matches_release": res["rpp_year"] == int(release),
+                    "rpp_year": res["rpp_year"], "rpp_year_source": "manifest",
+                    "rpp_year_matches_release": res["rpp_year"] == int(release),
                     "rpp_areas": res["rpp_areas"], "boundary_source": res["boundary_source"],
                     "rpp_table": table, "rows": int(len(frame)), "notes": notes,
                     "advisories": res["advisories"], "applied_by_default": False})
@@ -1339,19 +1424,32 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
         cites.append("vre")
     lines += ["", "### Measures and uncertainty", "",
               "Standard errors of published estimates are MOE/1.645 (ACS MOEs are 90% margins)."]
+    rep_rows = (rep_info or {}).get("derived_on_replicates_rows") or {}
     for d in m.get("derivations") or []:
+        c = rep_rows.get(d["name"])
+        if c and c["rows_replicate"] >= c["rows"]:
+            se_text = f"; SE from the derivation evaluated on each replicate (all {c['rows']} units)"
+        elif c:
+            se_text = (f"; replicate SE for {c['rows_replicate']} of {c['rows']} units; approximate SE (ACS "
+                       "formulas, Handbook ch. 8) elsewhere")
+        else:
+            se_text = "; MOE by the ACS approximation formulas (Handbook ch. 8)"
         lines.append(f"- `{d['name']}` = {d.get('op', 'auto')} of {d.get('num')}"
-                     + (f" over {d['den']}" if d.get("den") is not None else "")
-                     + ("; SE from the derivation evaluated on each replicate"
-                        if d["name"] in (rep_info or {}).get("derived_on_replicates", [])
-                        else "; MOE by the ACS approximation formulas (Handbook ch. 8)") + ".")
+                     + (f" over {d['den']}" if d.get("den") is not None else "") + se_text + ".")
+    for ex in m.get("exclusions") or []:
+        if ex["rule"] == "cv_screen":
+            lines.append(f"Observations with CV > {ex.get('threshold', 30)}% on {', '.join(ex.get('variables', []))} "
+                         f"were {'excluded' if ex.get('action') == 'exclude' else 'kept and flagged'}.")
+        else:
+            lines.append(f"{len(ex.get('geoids', []))} pre-specified GEOIDs were excluded.")
     run_adj = {i: a for i, a in enumerate(run.get("adjustments") or [])}
     for i, adj in enumerate(m.get("adjustments") or []):
         done = run_adj.get(i)
         year = (done or {}).get("rpp_year") or adj.get("rpp_year")
         areas = (done or {}).get("areas") or adj.get("areas") or "default"
-        lines.append(f"- Price adjustment: {', '.join(adj.get('variables', []))} divided by the BEA Regional "
-                     f"Price Parity ({year if year else 'latest year in the RPP table'}, U.S. = 100) / 100 of each "
+        lines.append(f"- Price adjustment{' (after the exclusions)' if m.get('exclusions') else ''}: "
+                     f"{', '.join(adj.get('variables', []))} divided by the BEA Regional "
+                     f"Price Parity ({year}, U.S. = 100) / 100 of each "
                      "unit's area"
                      + (" (the county's metropolitan statistical area, else the state's nonmetropolitan portion; "
                         "CBSA membership from Census boundaries of the OMB 23-01 delineation)"
@@ -1363,18 +1461,10 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
             if not done.get("rpp_year_matches_release"):
                 lines.append(f"  Note: the {done['rpp_year']} RPP was applied to dollars of {done['dollar_year']} "
                              "(the release end year).")
-            if done.get("rpp_year_source") == "default_latest":
-                lines.append("  Note: the RPP year was not declared; the latest year in the RPP table was used.")
             lines.append(f"  {len(done.get('rpp_areas') or [])} RPP area(s) were used; RPP table "
                          + (f"custom {done['rpp_table'].get('path')} (SHA-256 {done['rpp_table'].get('sha256')}, "
                             "not verified)" if done["rpp_table"].get("source") == "custom"
                             else f"bundled (SHA-256 {done['rpp_table'].get('sha256')})") + ".")
-    for ex in m.get("exclusions") or []:
-        if ex["rule"] == "cv_screen":
-            lines.append(f"Observations with CV > {ex.get('threshold', 30)}% on {', '.join(ex.get('variables', []))} "
-                         f"were {'excluded' if ex.get('action') == 'exclude' else 'kept and flagged'}.")
-        else:
-            lines.append(f"{len(ex.get('geoids', []))} pre-specified GEOIDs were excluded.")
     lines.append("Rows with missing or undefined estimates were dropped analysis by analysis (complete cases).")
     lines += ["", "### Analyses", ""]
     for a in m.get("analyses", []):

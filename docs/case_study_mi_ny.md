@@ -93,9 +93,11 @@ The `adjustments` step uses the same code as the `place_adjust_frame` tool (sect
 each county gets its MSA's 2024 RPP, or the state's nonmetropolitan-portion RPP outside a
 metropolitan CBSA, and the estimate and SE are divided by RPP/100 (replicates too, when
 replicates are supplied). Multi-state manifests get no automatic state effect: the formula
-names the state term `C(GEOID.str[:2])` explicitly. Without `rpp_year` the latest year in
-the RPP table would be used and recorded; a year other than the release end year is
-recorded as a note, not a deviation.
+names the state term `C(GEOID.str[:2])` explicitly. `rpp_year` is required (when it is
+omitted, `create_manifest` fills in the latest year in the RPP table before hashing, so the
+hash fixes it); a year other than the release end year is recorded as a note, not a
+deviation. Exclusions run before the adjustment (the CV screen flags the same counties
+either way, since the RPP factor leaves CVs unchanged).
 
 Expected in the JSON output: `"analysis_status": "confirmatory"`, `"deviations": []`,
 `data_source` `{"synthetic": false, ...}`, and for H1:
