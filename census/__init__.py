@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Headless Census ACS data client and processing library."""
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
 from census.api import (
     DATASETS,
@@ -60,6 +60,7 @@ from census.stats import (
     standard_error,
     z_test,
 )
+from census.data_integrity import BundledDataIntegrityError
 from census.inflation import (
     CPI_U_ANNUAL,
     DEFAULT_PRICE_INDEX,
@@ -263,6 +264,7 @@ __all__ = [
     "DEFAULT_PRICE_INDEX",
     "PRICE_INDEXES",
     "PriceIndexUnavailable",
+    "BundledDataIntegrityError",
     "load_price_index",
     "price_index_info",
     # metadata

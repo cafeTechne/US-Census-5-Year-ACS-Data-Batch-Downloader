@@ -1,7 +1,7 @@
 # Round 13: Real Data, End to End
 
 **Date:** 2026-11-07
-**Status:** Decisions recorded (section 9); implementation follows the v0.11.0 release
+**Status:** Implemented (section 11); released as v0.12.0
 **Baseline:** v0.11.0 (Round 12 merged; default multilevel/DiD design studies added to the release gate)
 **Companions:** [PLAN_ROUND_11.md](PLAN_ROUND_11.md) (R1/R2/F4 risks), [PLAN_ROUND_12.md](PLAN_ROUND_12.md) (deferrals)
 
@@ -12,7 +12,7 @@ Items in this section come first in the work order. Each one is either fixed in 
 | ID | Source | Finding | Disposition |
 | :--- | :--- | :--- | :--- |
 | G0 | v0.11.0 full `--gate` run, 2026-11-07 | **PASS.** All 10 required studies are present and every gated row is inside the band. Wall time is **106 min**: `spatial_fay_herriot` takes 56 min (53%) and `regression_calibration` 18 min; the four default design studies add about 11 min combined | No defects. Runtime goes to C3, which targets `spatial_fay_herriot` first |
-| G1 | GitHub Actions API, 2026-11-07 | The weekly `live-validation` job has **zero scheduled runs**. The Census-published comparison, which the owner called the ultimate test, has never run in CI | Workstream A1 |
+| G1 | GitHub Actions API, 2026-11-07 | The weekly `live-validation` job has zero scheduled runs. **Cause verified: it is not yet due, not a defect.** The cron was pushed on Monday 2026-11-02 after that day's 06:00 UTC slot, so the first scheduled run is Monday 2026-11-09. The `CENSUS_API_KEY` secret exists and the workflow is active. A first run was started via `workflow_dispatch` on 2026-11-08 UTC | Workstream A1: triage that run; confirm the 2026-11-09 scheduled run |
 | G2 | `.github/workflows/*.yml` | CI never runs `scripts/inference_validation.py`, not even `--fast`. A coverage regression would show up only at release time | Workstream C1 |
 | G3 | PLAN_ROUND_12 sec. 12 | Deferred: CLI and MCP `run_manifest` cannot take replicates. There is no CLI command to load frozen responses into the cache | Workstream B1, B2 |
 | G4 | PLAN_ROUND_11 F4 | The DiD coverage studies use independent shocks only. Serial correlation is untested | Workstream C2 |
@@ -141,3 +141,22 @@ The round ends as **v0.12.0** with a Zenodo DOI, following the standing release 
 - One real-data workflow is reproduced by a second reader.
 - D1 and D2 are done or explicitly deferred.
 - v0.12.0 is released with a DOI.
+
+---
+
+## 11. Implementation status (2026-11-07)
+
+| Slice | Result |
+| :--- | :--- |
+| G0 / gate | v0.11.0 gate PASS (106 min). After C3 the full gate PASSES in 17.2 min (`--jobs 0`), with a coverage table identical to v0.11.0 |
+| A1 live CI | First dispatched run: 941 live tests passed; one failure was a stale `expectedFailure` on F5 (fixed 2026-11-02, marker never removed). Fixed, along with the F5 criterion text. Scheduled run due 2026-11-09 |
+| A2 live battery | 10/10 checks pass live (`docs/audits/validation_report.md`, 2026-11-08) |
+| B interfaces | `cache import` (atomic; synthetic into the default cache requires `--allow-default-cache`; `cache clear` removes the marker). Python, CLI and MCP `run_manifest` parity with `replicates_path`. The reference workflow is CLI only |
+| C validation | Fast smoke gate on PRs (band widened by 3 MC SE). `did_ar1_sensitivity` (info): coverage 0.88-0.91 for rho 0 to 0.9 in 4-5 period panels. Pinning BLAS to one thread plus `--jobs` cut spatial FH from 3361 s to about 200 s, and its results no longer depend on the machine's thread count |
+| D1 integrity | Bundled price tables are verified against their SHA-256 at load; R1 closed |
+| D2 PUMS memory | Not done; deferred (R2 stays documented with its static bound) |
+| E1 case study | Live MI/NY study (`docs/case_study_mi_ny.md`): pct_bachelors slope 811 RPP-adjusted dollars per point, 90% CI [684, 938] (population target); 10/10 spot-check counties identical to the API. New tools: `place_adjust_frame`, `make_results_bundle` |
+| Review | `/code-review high`: 10 findings, all fixed with regression tests (`tests/test_review_fixes_r13.py`) |
+| E2 second reader | Verdict "usable as-is": every command ran and every number matched. Clarity edits applied |
+
+**Deferred:** D2 (PUMS memory benchmark); multi-state `run_manifest` with a place-adjustment step (so the case study is exploratory, not pre-registered); no MCP route for `cache import`; adding Michigan to the validation battery's states (needs fixtures re-recorded).

@@ -5,6 +5,34 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.12.0 (Round 13): real data, end to end
+
+- Live verification: the full battery against Census-published values passes live (10/10
+  checks, `docs/audits/validation_report.md`); stale F5 expected-failure marker and
+  criterion text fixed (the first dispatched CI live run failed only on that marker).
+- Live case study for Michigan and New York counties (`docs/case_study_mi_ny.md`): RPP-adjusted
+  median household income, journal maps with an uncertainty layer, a regression with
+  replicate refits, a results bundle; CLI only. New tools `place_adjust_frame` (county RPP by
+  CBSA membership, applied to estimates, SEs, and replicates) and `make_results_bundle`;
+  `build_analysis_frame` takes several input and replicate files; `tool ... --save PATH`.
+- The Round 12 reference workflow runs entirely from the CLI: `python -m census cache import`
+  (atomic; a synthetic import into the default cache needs `--allow-default-cache`;
+  `cache clear` also removes the synthetic marker) and `run_manifest --arg replicates_path=...`
+  with Python/CLI/MCP parity tests.
+- Provenance: extraction metadata records the observed data source; bundles take it from
+  their inputs (`census_api`, `synthetic`, `mixed` with a warning, or `unknown`), not from
+  the cache present at bundle time. Failed saved results are refused.
+- Bundled price index and RPP tables are verified against their SHA-256 at load (risk R1
+  closed); custom tables are recorded with their hash and marked unverified. New error
+  code `BUNDLED_DATA_INTEGRITY`.
+- Validation: a fast smoke gate (band widened by 3 Monte Carlo SE) runs on pull requests;
+  the full gate is a release step and now runs in parallel (`--jobs`), with BLAS pinned to
+  one thread, which also makes its results independent of the machine's thread count.
+  New info-only study `did_ar1_sensitivity`: DiD coverage stays near nominal under AR(1)
+  errors up to rho 0.9 in 4-5 period panels.
+- Fixes: map legends stay inside journal-width figures and do not split identifiers;
+  `_load_frames` rejects missing GEOID/Year keys; pandas-3 integer replicate columns.
+
 ## 0.11.0 (Round 12): verifiable and reproducible workflows
 
 - Independent dense reference checks for the multilevel GLS layer and two-group DiD.

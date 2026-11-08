@@ -59,6 +59,24 @@ possible with non-overlapping 5-year ACS releases; possible with 1-year
 releases) are not validated: results then carry a "SERIAL CORRELATION NOT
 VALIDATED" note instead of the validation note.
 
+AR(1) sensitivity of the default intervals (PLAN_ROUND_13 C2; report only,
+owner decision D13-3; census.simulation.study_did_ar1_sensitivity, run with
+``scripts/inference_validation.py --studies did_ar1_sensitivity``). The
+did_two_group / did_event study designs (150 areas; 4 periods two_group, 5
+periods event with 2 leads and 2 lags; population target, 1000 repetitions
+per cell, MC SE about 0.01 two_group and 0.006 event) with stationary AR(1)
+u_it, 90% coverage:
+
+    design            rho=0.0  rho=0.3  rho=0.6  rho=0.9
+    two_group (4 p)   0.914    0.892    0.882    0.896
+    event (5 p)       0.890    0.913    0.899    0.896
+    PT test 1 - size  0.879    0.904    0.914    0.906
+
+No degradation with rho was observed in these short panels; the
+independence assumption is still the stated model scope (no clustered-SE
+option), and the 5-period event panel carries the "NOT VALIDATED" note above
+because that note counts periods, not this study.
+
 Parallel trends: with at least three pre-treatment periods the event-style
 leads (pre-period treated-control differences relative to the reference) are
 tested jointly (Wald chi-square); a non-rejection is not proof of parallel

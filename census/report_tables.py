@@ -35,11 +35,12 @@ _INTERCEPTS = ("intercept", "const", "(intercept)")
 
 
 def data_citation(releases: Union[str, Sequence[Any]] = (), tables: Sequence[str] = (),
-                  synthetic: bool = False, description: Optional[str] = None) -> str:
+                  synthetic: bool = False, description: Optional[str] = None, retrieved: bool = True) -> str:
     """Citation string for ACS 5-year data, e.g. releases ``[2023]``.
 
     ``synthetic=True``: the data only mimic the ACS layout; the citation says
     so (with ``description``) and does not claim Census Data API retrieval.
+    ``retrieved=False``: the source was not recorded; no retrieval is claimed.
     """
     rel = [releases] if isinstance(releases, (str, int)) else list(releases)
     text = ("SYNTHETIC data (not Census data) in the layout of U.S. Census Bureau American Community Survey "
@@ -50,6 +51,8 @@ def data_citation(releases: Union[str, Sequence[Any]] = (), tables: Sequence[str
         text += "; tables " + ", ".join(tables)
     if synthetic:
         return text + "." + (f" {description.rstrip('.')}." if description else "")
+    if not retrieved:
+        return text + ". Data source not recorded in the inputs (provenance unknown)."
     return text + ". Retrieved via the Census Data API (https://api.census.gov)."
 
 

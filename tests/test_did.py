@@ -156,6 +156,18 @@ class TestSimulationSmoke(unittest.TestCase):
         df = run_study(designs_config(fast=True), studies=["did_two_group"])
         self.assertGreater(float(df.iloc[0]["coverage"]), 0.75)
 
+    def test_ar1_sensitivity_is_info_only(self):
+        # PLAN_ROUND_13 C2 / D13-3: report only, never gated
+        from census.simulation import AR1_RHOS, study_did_ar1_sensitivity
+        self.assertEqual(AR1_RHOS, (0.0, 0.3, 0.6, 0.9))
+        rows = study_did_ar1_sensitivity(designs_config(fast=True, n_areas=40), 3, rhos=(0.0, 0.9))
+        self.assertEqual({r["status"] for r in rows}, {"info"})
+        self.assertEqual({(r["design"], r["rho"]) for r in rows},
+                         {(d, rho) for d in ("two_group", "event") for rho in (0.0, 0.9)})
+        self.assertTrue(all(r["reps"] == 3 for r in rows))
+        ev = [r for r in rows if r["design"] == "event" and "n_terms" in r]
+        self.assertEqual({r["n_terms"] for r in ev}, {4})  # 2 leads + 2 lags in the 5-period design
+
 
 if __name__ == "__main__":
     unittest.main()

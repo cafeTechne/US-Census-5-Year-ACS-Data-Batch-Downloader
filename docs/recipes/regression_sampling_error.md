@@ -2,7 +2,7 @@
 
 Goal: a regression whose standard errors include ACS sampling error, not only model error.
 
-1. Download the outcome and predictor tables for one release (`plan_extraction`, then `download_table`) for the same geographies (e.g. all counties in a state). Use detailed tables (B...) so replicates exist.
+1. Download the outcome and predictor tables for one release (`plan_extraction`, then `download_table`) for the same geographies (e.g. all counties in a state). Prefer detailed tables (B...): only tables on the Census Variance Replicate Estimates list for that release have replicates, and not every B table is on it (e.g. B19013 median household income has none for 2024). `build_analysis_frame` reports which variables lack replicates.
 2. `build_analysis_frame(input_path=<downloaded file>, use_replicates=true, table_code="B17001", year=2023)`. Keep `output_path` and `replicates_path` from the result.
 3. Check `coverage`: variables with many low-reliability rows (CV > 30%) are noisy; consider a larger geography.
 4. `fit_model(input_path=<output_path>, formula="poverty_rate ~ median_rent", method="replicate", replicates_path=<replicates_path>)`.

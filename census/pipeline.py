@@ -53,6 +53,7 @@ from census.concordance import (
     crosswalk_path,
 )
 from census.continuity import continuity_check
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
 from census.export import (
     process_data_and_save,
     sanitize_filename,
@@ -89,7 +90,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.11.0"
+PACKAGE_VERSION = "0.12.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
@@ -579,6 +580,8 @@ def _price_index_error(options: ResearchOptions, years: Sequence[int]) -> Option
             get_cpi(year, options.cpi_table, options.price_index, options.allow_provisional_index)
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
+    except BundledDataIntegrityError as exc:
+        return integrity_error_result(exc)
     return None
 
 
@@ -1187,7 +1190,7 @@ def run_batch(
     emit(
         f"Starting download: {len(entities)} request target(s) x {len(years)} year(s) "
         f"({total_calls} calls, {plan['cached_calls']} cached). Table {table_code} "
-        f"[{dataset}], format: {output_format}, concordance: {options.concordance_mode}."
+        f"[{dataset}], format: {output_format}, concordance policy: {options.concordance_mode}."
     )
 
     saved_entities: List[Dict[str, Any]] = []
@@ -1345,6 +1348,8 @@ def run_batch(
         codebook.to_csv(codebook_path, index=False, encoding="utf-8")
         emit(f"Codebook saved: {codebook_path} ({len(codebook)} variables)")
 
+    from census.manifest import data_source_record
+
     overrides_file = crosswalk_path(dataset, table_code) if conc.overrides_applied else None
     metadata_path = os.path.join(output_dir, f"{table_code}_extraction_metadata.json")
     metadata_doc = {
@@ -1359,6 +1364,8 @@ def run_batch(
         "excluded_years": plan.get("excluded_years") or [],
         "geography_availability": plan.get("geography_availability"),
         "endpoint": client.endpoint(years[0], dataset).replace(str(years[0]), "{year}", 1),
+        # observed at extraction time: a cache marked synthetic labels the extraction synthetic
+        "data_source": data_source_record(client),
         "years": years,
         "geo_level": geo_level,
         "entities": [asdict(e) for e in entities],

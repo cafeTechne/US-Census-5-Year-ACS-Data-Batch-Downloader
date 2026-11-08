@@ -130,6 +130,7 @@ def make_map(
     k: int = 5,
     output_dir: Optional[str] = None,
     data_source: str = "",
+    label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Journal-ready map (PDF, SVG, EPS, PNG + values CSV, caption, provenance).
 
@@ -144,6 +145,7 @@ def make_map(
         se_col or moe_col: Standard error or 90% MOE column for reliability.
         scheme: "quantiles" (default, research standard), "natural_breaks",
             "equal_interval", or "separability".
+        label: Readable variable name for the legend and caption (default: column).
     Example: make_map("frame.parquet", "poverty_rate", "tract", 2023, se_col="poverty_rate_se")
     """
     from census import maps
@@ -156,9 +158,10 @@ def make_map(
         gdf = _with_boundaries(df, level, year)
         common = {"out_dir": folder, "data_source": data_source}
         if kind == "estimate":
-            fig = maps.choropleth(gdf, column, se_col=se_col, moe_col=moe_col, scheme=scheme, k=k, **common)
+            fig = maps.choropleth(gdf, column, se_col=se_col, moe_col=moe_col, scheme=scheme, k=k,
+                                  legend_title=label, **common)
         elif kind == "uncertainty":
-            fig = maps.uncertainty_map(gdf, column, se_col=se_col, moe_col=moe_col, **common)
+            fig = maps.uncertainty_map(gdf, column, se_col=se_col, moe_col=moe_col, legend_title=label, **common)
         else:
             fig = maps.significance_map(gdf, df, **common)
     except _GEO_ERRORS as exc:

@@ -29,17 +29,20 @@ Examples:
     python -m census validate --offline --json
     python -m census tool fit_model '{"input_path": "frame.parquet", "formula": "y ~ x"}' --json
     python -m census cache stats
+    CENSUS_CACHE_PATH=/tmp/rw_cache.db python -m census cache import tests/fixtures/reference_workflow --json
+    python -m census cache clear   # every response and the synthetic marker
 """
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 from census import errors
 from census import workflows
 from census.api import CensusAPIClient, infer_dataset
-from census.cache import get_default_cache
+from census.cache import get_default_cache, import_frozen, read_frozen
 from census.concordance import BLOCKING_KINDS, apply_overrides, build_concordance, validate_all_crosswalks
 from census.metadata import available_vintages, describe_variable
 from census.pipeline import (
@@ -375,15 +378,41 @@ def cmd_tool(args: argparse.Namespace) -> int:
                                      error_type=type(exc).__name__)
         result["summary"] = f"{args.name} failed: {type(exc).__name__}: {exc}"
         result["next_step"] = "check the arguments (column names, formula, paths) and call again"
+    if getattr(args, "save", None):
+        # the same JSON as --json prints, kept as a file for later steps (e.g. results bundles)
+        workflows_inference.save_json(result, args.save)
     return _emit(result, args.json)
 
 
 def cmd_cache(args: argparse.Namespace) -> int:
     cache = get_default_cache()
     if cache is None:
+        if args.action == "import":
+            return _emit(errors.error_result(errors.INVALID_INPUT, "The query cache is disabled "
+                                             "(CENSUS_CACHE_DISABLED); nothing to import into."), args.json)
         return _emit({"success": True, "cache": "disabled"}, args.json)
     if args.action == "clear":
-        return _emit({"success": True, "cleared": cache.clear()}, args.json)
+        # responses and the synthetic marker: an empty cache has no synthetic data left to label
+        return _emit({"success": True, **cache.clear_all(), "path": cache.path}, args.json)
+    if args.action == "import":
+        if not args.source:
+            return _emit(errors.error_result(errors.INVALID_INPUT, "cache import needs a frozen file or directory"),
+                         args.json)
+        try:
+            frozen = read_frozen(args.source)  # every file validated before anything is written
+            if (any(f["synthetic"] is not None for f in frozen) and not os.getenv("CENSUS_CACHE_PATH")
+                    and not args.allow_default_cache):
+                return _emit(errors.error_result(
+                    errors.INVALID_INPUT,
+                    f"Refusing to import SYNTHETIC responses into the default query cache ({cache.path}): the "
+                    "marker would label every later result built from that cache synthetic, including real "
+                    "Census data. Set CENSUS_CACHE_PATH to a separate cache file (e.g. export "
+                    "CENSUS_CACHE_PATH=$PWD/synthetic_cache.db), or pass --allow-default-cache.",
+                    next_step="set CENSUS_CACHE_PATH and run cache import again"), args.json)
+            result = import_frozen(cache, frozen)
+        except (OSError, ValueError) as exc:
+            return _emit(errors.error_result(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}"), args.json)
+        return _emit({"success": True, **result, **cache.stats()}, args.json)
     return _emit({"success": True, **cache.stats()}, args.json)
 
 
@@ -538,11 +567,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--arg", action="append", metavar="KEY=VALUE",
                    help="one keyword argument (repeatable); VALUE is parsed as JSON when valid, else kept as a "
                         "string, so paths need no JSON escaping (portable to Windows backslash paths)")
+    p.add_argument("--save", metavar="PATH", help="also write the JSON result to PATH (written even on failure)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tool)
 
-    p = sub.add_parser("cache", help="query cache maintenance")
-    p.add_argument("action", choices=("stats", "clear"))
+    p = sub.add_parser("cache", help="query cache maintenance; import loads frozen API responses; clear deletes "
+                       "every response and the synthetic marker")
+    p.add_argument("action", choices=("stats", "clear", "import"))
+    p.add_argument("source", nargs="?", help="import: a frozen response JSON file or a directory of them; "
+                   "a synthetic source marks the cache synthetic (all files are validated first; on an "
+                   "error nothing is written)")
+    p.add_argument("--allow-default-cache", action="store_true",
+                   help="import: allow synthetic responses into the default cache (CENSUS_CACHE_PATH unset)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_cache)
     return parser

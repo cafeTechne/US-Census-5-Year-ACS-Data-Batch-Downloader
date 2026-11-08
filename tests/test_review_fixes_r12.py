@@ -355,7 +355,7 @@ class TestCliArgPortable(unittest.TestCase):
         with open(os.path.join(ROOT, "docs", "reference_workflow.md"), encoding="utf-8") as f:
             doc = f.read()
         self.assertNotIn('\\"output_dir\\": \\"$RW', doc)
-        self.assertIn('--arg "output_dir=$RW/cli_run"', doc)
+        self.assertIn('--arg "output_dir=$RW/run1"', doc)
 
 
 def _result(model_type="ols", method="replicate_refit", target="population", incomplete=False):

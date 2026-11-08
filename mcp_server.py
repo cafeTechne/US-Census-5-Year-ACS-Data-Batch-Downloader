@@ -56,6 +56,7 @@ from census import calculate_cv as _calculate_cv
 from census import describe_variable as _describe_variable
 from census import generate_codebook as _generate_codebook
 from census.concordance import BLOCKING_KINDS
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
 from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
@@ -946,7 +947,11 @@ def adjust_inflation(
         adjusted = _adjust_inflation(value, from_year, to_year, index=index, allow_provisional=allow_provisional)
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
+    except BundledDataIntegrityError as exc:
+        return integrity_error_result(exc)
     table = load_price_index(index, allow_provisional=allow_provisional)
+    info = price_index_info(index)
+    custom = {"custom_table": info["custom_table"]} if "custom_table" in info else {}
     return {
         "advisory": provisional_advisory(index, [from_year, to_year]) if allow_provisional else None,
         "success": True,
@@ -957,7 +962,8 @@ def adjust_inflation(
         "index_from": table[from_year],
         "index_to": table[to_year],
         "adjusted_value": adjusted,
-        "source": price_index_info(index).get("source", ""),
+        "source": info.get("source", ""),
+        **custom,
     }
 
 
@@ -1050,6 +1056,7 @@ for _tool in (
     workflows_inference.trend_test,
     workflows_inference.make_figure,
     workflows_inference.make_table,
+    workflows_inference.make_results_bundle,
     recipes.get_recipe,
     workflows_inference.create_manifest,
     workflows_inference.run_manifest,
@@ -1064,6 +1071,7 @@ for _tool in (
     workflows_microdata.multilevel_model,
     workflows_microdata.difference_in_differences,
     workflows_microdata.adjust_for_place,
+    workflows_microdata.place_adjust_frame,
     workflows_microdata.make_web_map,
 ):
     mcp.tool()(_tool)
@@ -1089,6 +1097,7 @@ reliability_profile = workflows_inference.reliability_profile
 trend_test = workflows_inference.trend_test
 make_figure = workflows_inference.make_figure
 make_table = workflows_inference.make_table
+make_results_bundle = workflows_inference.make_results_bundle
 create_manifest = workflows_inference.create_manifest
 run_manifest = workflows_inference.run_manifest
 get_boundaries = workflows_geo.get_boundaries
@@ -1102,6 +1111,7 @@ pums_regression = workflows_microdata.pums_regression
 multilevel_model = workflows_microdata.multilevel_model
 difference_in_differences = workflows_microdata.difference_in_differences
 adjust_for_place = workflows_microdata.adjust_for_place
+place_adjust_frame = workflows_microdata.place_adjust_frame
 make_web_map = workflows_microdata.make_web_map
 get_recipe = recipes.get_recipe
 

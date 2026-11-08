@@ -122,6 +122,29 @@ def test_choropleth_values_caption_provenance(tmp_path):
     assert any("CV > 30%" in t.get_text() for t in legend.get_texts())
 
 
+def test_long_legend_title_wrapped(tmp_path):
+    """A long label is wrapped, not clipped at the right edge of a journal-width map."""
+    label = "Median household income (RPP-adjusted 2024 $)"
+    out = M.choropleth(_grid(), "est", moe_col="moe", legend_title=label, out_dir=tmp_path, formats=("svg",))
+    lines = out.figure.axes[0].get_legend().get_title().get_text().split("\n")
+    assert all(len(line) <= M.LEGEND_TITLE_WIDTH for line in lines)
+    assert " ".join(lines).startswith(label)
+    assert label in out.caption
+    # an area shape whose legend tight_layout lets run past the right edge (as for New York
+    # counties): the legend stays inside the fixed-width figure
+    wide = _grid(12)
+    dx, dy = 0.5 * 4 / 3 / 4 * 1.3, 0.5 / 3
+    wide["geometry"] = [box(-100 + (i % 4) * dx, 40 + (i // 4) * dy, -100 + (i % 4 + 1) * dx, 40 + (i // 4 + 1) * dy)
+                        for i in range(12)]
+    out = M.choropleth(wide, "est", moe_col="moe", legend_title=label, out_dir=tmp_path, formats=("png",))
+    fig = out.figure
+    leg = fig.axes[0].get_legend().get_window_extent(fig._get_renderer())
+    assert leg.x1 <= fig.bbox.width
+    unc = M.uncertainty_map(_grid(), "est", moe_col="moe", legend_title="median household income",
+                            out_dir=tmp_path, formats=("svg",))
+    assert "median household income" in unc.caption
+
+
 def test_choropleth_separability_scheme_and_missing(tmp_path):
     g = _grid()
     g.loc[0, "est"] = np.nan

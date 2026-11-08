@@ -53,6 +53,7 @@ not a reimplementation of either paper's algorithm.
 """
 
 import math
+import re
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -335,8 +336,35 @@ def _ids(gdf) -> pd.DataFrame:
     return gdf[cols].reset_index(drop=True).astype(str) if cols else pd.DataFrame(index=range(len(gdf)))
 
 
+LEGEND_TITLE_WIDTH = 26
+
+
+def wrap_legend_title(title: str, width: int = LEGEND_TITLE_WIDTH) -> str:
+    """Wrap each line of ``title`` at ``width`` characters, breaking only at spaces,
+    after hyphens, or after underscores, so an identifier such as
+    ``median_hh_income_rpp_adjusted`` is never split inside one of its parts. A
+    single part longer than ``width`` is kept whole."""
+    out = []
+    for line in title.split("\n"):
+        rows: List[str] = []
+        cur = ""
+        for word in line.split():
+            for i, part in enumerate(p for p in re.split(r"(?<=[_-])", word) if p):
+                sep = " " if i == 0 and cur else ""
+                if cur and len(cur) + len(sep) + len(part) > width:
+                    rows.append(cur)
+                    cur = part
+                else:
+                    cur += sep + part
+        out.append("\n".join(rows + [cur]))
+    return "\n".join(out)
+
+
 def _legend(ax, handles, title: str) -> None:
-    """Legend outside the map, to the right, left-aligned title."""
+    """Legend outside the map, to the right, left-aligned title. Title lines are
+    wrapped at 26 characters (:func:`wrap_legend_title`) so a long variable label
+    is not clipped at the figure's right edge (journal widths are fixed)."""
+    title = wrap_legend_title(title)
     leg = ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False,
                     fontsize=6, title_fontsize=6, title=title, alignment="left")
     leg.set_gid("legend")
@@ -357,11 +385,34 @@ _COMMON_DOC = """
 """
 
 
+def _fit_legends(fig, margin: float = 0.005, rounds: int = 6) -> None:
+    """Shrink axes whose legend (placed right of the axes) runs past the figure's
+    right edge. tight_layout ignores that overflow for equal-aspect maps, so a
+    wide area (e.g. a state wider than tall) pushed the legend out of the
+    fixed journal-width figure and clipped it."""
+    renderer = fig._get_renderer()
+    limit = fig.bbox.width * (1 - margin)
+    for ax in fig.axes:
+        leg = ax.get_legend()
+        if leg is None:
+            continue
+        for _ in range(rounds):
+            ax.apply_aspect()
+            over = leg.get_window_extent(renderer).x1 - limit
+            if over <= 0.5:  # display units (pixels at the figure dpi)
+                break
+            active = ax.get_position(original=False)
+            orig = ax.get_position(original=True)
+            width = max(active.width - over / fig.bbox.width, 0.05)
+            ax.set_position([active.x0, orig.y0, width, orig.height])
+
+
 def _render(fig, name, out_dir, values, caption, prov, formats, dpi, notes):
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*tight_layout.*")
         warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
-        return _finish(fig, name, out_dir, values, caption, prov, formats, dpi, notes=notes)
+        return _finish(fig, name, out_dir, values, caption, prov, formats, dpi, notes=notes,
+                       after_layout=_fit_legends)
 
 
 # --------------------------------------------------------------------------- maps
@@ -451,7 +502,7 @@ def choropleth(
 def uncertainty_map(
     gdf, column: str, *, se_col: Optional[str] = None, moe_col: Optional[str] = None,
     thresholds: Sequence[float] = CV_CLASSES, insets: Union[bool, str] = "auto",
-    boundary_source: Optional[str] = None, title: Optional[str] = None,
+    boundary_source: Optional[str] = None, title: Optional[str] = None, legend_title: Optional[str] = None,
     out_dir: Union[str, Path] = ".", name: str = "uncertainty", width: Union[str, float] = "two",
     height: Optional[float] = None, formats: Sequence[str] = DEFAULT_FORMATS, dpi: int = 300,
     data_source: str = "", result_id: Optional[str] = None, manifest_hash: Optional[str] = None,
@@ -486,9 +537,9 @@ def uncertainty_map(
         handles.append(Patch(facecolor=NO_DATA_COLOR, edgecolor="#999999", lw=0.3, label="No data / CV undefined"))
     with matplotlib.rc_context(STYLE):
         _legend(main, handles,
-                    f"Reliability of {column}")
+                    f"Reliability of {legend_title or column}")
     binfo = _boundary_info(g, boundary_source)
-    caption = _caption(title or f"Coefficient of variation of {column}", data_source,
+    caption = _caption(title or f"Coefficient of variation of {legend_title or column}", data_source,
                        f"Boundaries: {binfo['description']}",
                        "CV = SE / |estimate| × 100" + ("" if se_col else ", SE from the published 90% MOE / 1.645")
                        + "; classes at " + ", ".join(f"{x:g}%" for x in t))
