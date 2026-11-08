@@ -186,8 +186,8 @@ def spatial_autocorrelation(
     Args:
         weights: "queen" (default), "rook", or "knn".
         local: Also return local clusters with multiple-comparison correction
-            (BH, alpha 0.10, 999 permutations). p_sim is one-sided (folded):
-            p_adjusted <= 0.05 is the two-sided 0.10 reading. Simulation:
+            (two-sided p_value = 2 x p_sim from 9999 permutations, BH,
+            alpha 0.10). Simulation: rates at nominal under randomness,
             little power on ~150 areas, and spatially patterned sampling
             error creates spurious clusters (see local_notes).
         replicates_path: Census replicates (build_analysis_frame) for a
@@ -223,17 +223,18 @@ def spatial_regression(
     model: str = "lag",
     weights: str = "queen",
     replicates_path: Optional[str] = None,
-    method: str = "ml",
+    method: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Spatial lag or spatial error regression (PySAL spreg) with Lagrange
     multiplier diagnostics; replicate SEs when replicates are given.
 
     Args:
-        method: "ml" (default) or "gm". Simulation with ACS sampling error in
-            the outcome: ML lag intervals for rho covered 0.48 (rho 0.3) and
-            0.003 (rho 0.6) for nominal 0.90, GMM lag 0.90 and 0.89; use
-            method="gm" when rho matters. Error model: lambda is attenuated
-            (either method); beta intervals hold. See the result notes.
+        method: "gm" or "ml". Default: "gm" (GMM) for the lag model, "ml"
+            for the error model. Simulation with ACS sampling error in the
+            outcome: GMM lag intervals for rho covered 0.90 and 0.89 (rho
+            0.3, 0.6) for nominal 0.90, ML lag only 0.48 and 0.003. Error
+            model: lambda is attenuated (either method); beta intervals
+            hold. See the result notes.
 
     Example: spatial_regression("frame.parquet", "poverty_rate ~ median_rent", "tract", 2023, model="error")
     """

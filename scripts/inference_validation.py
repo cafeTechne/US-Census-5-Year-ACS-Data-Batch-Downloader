@@ -19,7 +19,7 @@ regression_calibration (~22 min). Summed per-study times are ~83 min, the
 serial estimate. spatial_fay_herriot takes ~3.5 min for 1000 reps (was 56
 min in v0.11.0, when BLAS ran multithreaded on its 100 x 100 matrices).
 --fast --gate takes ~50 s serial. The Round 15 info studies in the spatial
-group add 5.2 min (spatial_regression_coverage) and 2.5 min
+group add 5.2 min (spatial_regression_coverage) and ~3.6 min
 (local_morans_size) of single-process time, below the --jobs 0 floor.
 --jobs output is identical to the serial output at the same seed except the
 "seconds" column (wall time per study).

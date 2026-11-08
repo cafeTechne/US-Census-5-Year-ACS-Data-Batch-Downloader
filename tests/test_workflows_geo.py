@@ -60,11 +60,13 @@ class TestGeoWorkflows(unittest.TestCase):
         res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error")
         self.guided(res)
         self.assertIn("understates the true lambda", " ".join(res["notes"]))
-        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023)
-        self.assertIn("prefer method='gm'", " ".join(res["notes"]))
-        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="gm")
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023)  # lag default: GMM
         self.guided(res)
         self.assertIn("GMM", res["method"])
+        self.assertIn("the default for the lag model", " ".join(res["notes"]))
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ml")
+        self.guided(res)
+        self.assertIn("ML lag intervals for rho covered 0.48", " ".join(res["notes"]))
         self.assertFalse(g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ols")["success"])
         self.guided(g.spatial_small_area_estimates(self.path, "rate ~ x", "rate_se", "tract", 2023,
                                                    output_path=os.path.join(self.dir, "sfh.csv")))

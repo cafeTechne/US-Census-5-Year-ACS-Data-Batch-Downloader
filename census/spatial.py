@@ -18,15 +18,18 @@ PLAN_ROUND_9.md workstream C. Built on PySAL (``libpysal``, ``esda``, ``spreg``)
 * :func:`local_morans` - LISA (Anselin 1995) with conditional permutation
   p-values corrected for multiple comparisons (census.multitest; BH by
   default), plus the share of replicate maps that keep each area's quadrant.
-  Simulation ('local_morans_size'): p_sim is folded (one-sided), the BH
-  default is conservative under randomness but nearly powerless on ~150
-  areas, and spatially patterned sampling error creates spurious clusters.
+  Default: two-sided p-values (2 x esda's folded p_sim) from 9999
+  permutations. Simulation ('local_morans_size'): per-area and family-wise
+  rates at nominal under randomness; little power on ~150 areas; spatially
+  patterned sampling error creates spurious clusters.
 * :func:`spatial_regression` - spatial lag / spatial error models by ML or
   GMM (spreg), returned as :class:`census.results.ModelResult` with the OLS
   Lagrange-multiplier diagnostics that suggest which model fits, and replicate
-  refits (80) for ACS sampling SEs. Simulation ('spatial_regression_coverage'):
-  under ACS outcome error ML lag intervals for rho fail (GMM lag holds),
-  lambda is attenuated, beta intervals hold; LM tests keep their 0.05 size.
+  refits (80) for ACS sampling SEs. Default estimator: GMM for the lag model,
+  ML for the error model. Simulation ('spatial_regression_coverage'): under
+  ACS outcome error ML lag intervals for rho fail (GMM lag holds), lambda is
+  attenuated by both estimators, beta intervals hold; LM tests keep their
+  0.05 size.
 
 References: Moran (1950) Biometrika 37:17-23; Anselin (1995) Geographical
 Analysis 27:93-115; Anselin, Bera, Florax & Yoon (1996) Regional Science and
@@ -54,17 +57,29 @@ from .variance import REPLICATE_COLUMNS, REPLICATE_COUNT, REPLICATE_FACTOR
 WEIGHT_KINDS = ("queen", "rook", "knn", "distance")
 SPATIAL_MODELS = ("lag", "error")
 SPATIAL_METHODS = ("ml", "gm")
+# Default estimator per model (PLAN_ROUND_15 B, owner decision after the
+# 'spatial_regression_coverage' study): GMM for the lag model (ML lag rho
+# intervals fail under ACS outcome error, GMM's hold); ML for the error model
+# (lambda is attenuated by both estimators and GMM is not better: coverage
+# 0.558 vs 0.581 at lambda 0.3, 0.162 vs 0.192 at 0.6; beta alike).
+DEFAULT_METHODS = {"lag": "gm", "error": "ml"}
+LISA_PERMUTATIONS = 9999
+LISA_SIDED = ("two", "folded")
 
 # Measured caveats (PLAN_ROUND_15 workstream B; census.simulation studies
 # 'spatial_regression_coverage' and 'local_morans_size', full configuration,
 # 12 x 12 rook lattice, tract-profile ACS CVs, nominal 90% / 0.10). Reported,
-# not tuned; defaults unchanged pending an owner decision.
+# not tuned.
 LAG_ML_CAVEAT = (
     "Caveat (simulation 'spatial_regression_coverage'): with ACS sampling error in the outcome, ML lag "
     "intervals for rho covered 0.48 (true rho 0.3) and 0.003 (rho 0.6) at nominal 0.90; rho is biased toward "
-    "0 (-0.16, -0.41) because the outcome's sampling error enters W y. GMM (method='gm', spatial 2SLS) covered "
-    "0.90 and 0.89 for rho: prefer method='gm' when rho is of interest. beta intervals covered 0.90 (rho 0.3) "
+    "0 (-0.16, -0.41) because the outcome's sampling error enters W y. GMM (method='gm', spatial 2SLS, the "
+    "default for the lag model) covered 0.90 and 0.89 for rho. beta intervals covered 0.90 (rho 0.3) "
     "and 0.84-0.85 (rho 0.6) for both estimators")
+LAG_GM_NOTE = (
+    "GMM lag (spatial 2SLS, the default for the lag model): simulation 'spatial_regression_coverage' found rho "
+    "intervals near nominal (0.89-0.90 at rho 0, 0.3, 0.6) under ACS outcome error, where ML lag fails "
+    "(0.48 and 0.003 at rho 0.3 and 0.6); beta intervals covered 0.89-0.90, but 0.84 at rho 0.6")
 ERROR_CAVEAT = (
     "Caveat (simulation 'spatial_regression_coverage'): with ACS sampling error in the outcome, lambda describes "
     "the spatial correlation of the observed residual, sampling noise included, and understates the true lambda "
@@ -74,15 +89,14 @@ NOISY_COVARIATE_CAVEAT = (
     "Covariates with sampling error attenuate beta (simulation: bias about -20%, 90% interval coverage "
     "0.19-0.40); spatial_regression has no measurement-error correction")
 LOCAL_MORAN_CAVEAT = (
-    "Caveat (simulation 'local_morans_size'): p_sim is esda's folded (one-sided, in the observed direction) "
-    "pseudo p-value: under spatial randomness p_sim <= 0.10 in 19.7% of areas, not 10%; for a two-sided "
-    "reading compare p_sim or p_adjusted with alpha/2 (local_morans(..., alpha=0.05) is two-sided 0.10: 9.8%). "
-    "With 999 permutations the smallest p_sim (0.001) exceeds BH's first threshold alpha/n once n > 100, so "
-    "the default correction is conservative (family-wise rate 0.06 under randomness) and has little power "
-    "(1.9% of areas in a 4x4 hot spot raised by 1.5 SD were flagged on a 144-area lattice): no significant "
-    "cluster is not evidence of no clustering. Spatially patterned sampling error (CVs varying smoothly across "
-    "the map) produced spurious clusters in 27% of maps at the default; check replicate_quadrant_share or "
-    "rerun on Fay-Herriot estimates")
+    "Caveat (simulation 'local_morans_size', 144-area lattice): the default reading (two-sided p_value = "
+    "min(1, 2 p_sim), 9999 permutations, BH at alpha 0.10) kept the per-area rate of p_value <= 0.10 at "
+    "0.099 and the family-wise rate (= FDR) at 0.088 under spatial randomness. It has little power: 1.1% of "
+    "areas in a 4x4 hot spot raised by 1.5 SD were flagged, so no significant cluster is not evidence of no "
+    "clustering. Spatially patterned sampling error (CVs varying smoothly across the map) produced spurious "
+    "clusters in 38% of maps; check replicate_quadrant_share or rerun on Fay-Herriot estimates. p_sim is "
+    "esda's folded (one-sided, observed-direction) pseudo p-value; sided='folded' with permutations=999 is "
+    "the pre-Round 15 default (per-area rate of p_sim <= 0.10: 0.196)")
 _CACHE: Dict[str, Any] = {}
 
 
@@ -402,9 +416,10 @@ def local_morans(
     var: str,
     weights,
     *,
-    permutations: int = 999,
+    permutations: int = LISA_PERMUTATIONS,
     correction: str = "bh",
     alpha: float = 0.10,
+    sided: str = "two",
     replicates: Optional[pd.DataFrame] = None,
     geoid_col: str = "GEOID",
     seed: Optional[int] = 12345,
@@ -412,24 +427,30 @@ def local_morans(
     """Local Moran's I (LISA) with multiple-comparison-corrected permutation p-values.
 
     Returns one row per area: GEOID, Ii, quadrant (HH/LH/LL/HL), p_sim
-    (conditional permutation, esda), p_adjusted (census.multitest
-    ``correction``: bh default, by, holm, bonferroni), significant
+    (conditional permutation, esda: folded, i.e. one-sided in the observed
+    direction), p_value (``sided='two'``, the default: min(1, 2 p_sim);
+    ``sided='folded'``: p_sim), p_adjusted (p_value adjusted with
+    census.multitest ``correction``: bh default, by, holm, bonferroni), significant
     (p_adjusted <= alpha), cluster (quadrant if significant else 'ns') and,
     with replicates, ``replicate_quadrant_share``: the share of the 80
     replicate maps on which the area keeps its quadrant (a sampling-stability
     check; low values mean the label may be noise). ``df.attrs`` holds notes.
 
-    Measured behavior (census.simulation 'local_morans_size'; see
-    :data:`LOCAL_MORAN_CAVEAT`, added to the notes): p_sim is folded
-    (one-sided in the observed direction), so p_sim <= alpha is a two-sided
-    test at 2 alpha; ``alpha=0.05`` gives two-sided 0.10. The BH default is
-    conservative under spatial randomness but has little power on ~150
-    areas with 999 permutations, and spatially patterned sampling error
-    produces spurious clusters.
+    Defaults (PLAN_ROUND_15 B, owner decision after the 'local_morans_size'
+    study; :data:`LOCAL_MORAN_CAVEAT` is added to the notes): two-sided
+    p-values and 9999 permutations, so the smallest p_value (0.0002) can pass
+    BH's first threshold alpha/n up to n = 500. Under spatial randomness the
+    per-area rate of p_value <= 0.10 and the family-wise rate are at nominal
+    (the folded 999-permutation reading used before: per-area 0.196, and a
+    family-wise rate of 0.056 only because of its coarse p-value grid).
+    Power is low on ~150 areas, and spatially patterned sampling error
+    produces spurious clusters. About 0.6 s for 3,000 areas.
     """
     from esda.moran import Moran_Local
     from .multitest import adjust_pvalues
 
+    if sided not in LISA_SIDED:
+        raise ValueError(f"sided must be one of {LISA_SIDED}")
     d = _aligned(data, var, weights, geoid_col)
     y = d[var].to_numpy(float)
     with warnings.catch_warnings():
@@ -437,16 +458,19 @@ def local_morans(
         lm = Moran_Local(y, weights, transformation="r", permutations=int(permutations), seed=seed,
                          keep_simulations=False)
     p = np.asarray(lm.p_sim, float)
-    padj = np.asarray(adjust_pvalues(p, correction), float)
+    pv = np.minimum(1.0, 2 * p) if sided == "two" else p
+    padj = np.asarray(adjust_pvalues(pv, correction), float)
     quad = pd.Series(lm.q).map(QUADRANTS).to_numpy()
     sig = padj <= alpha
     out = pd.DataFrame({
         geoid_col: list(d.index), "Ii": np.asarray(lm.Is, float), "quadrant": quad,
-        "p_sim": p, "p_adjusted": padj, "significant": sig,
+        "p_sim": p, "p_value": pv, "p_adjusted": padj, "significant": sig,
         "cluster": np.where(sig, quad, "ns"),
     })
-    notes = [f"permutation p-values ({int(permutations)} conditional permutations, minimum attainable "
-             f"{1 / (permutations + 1):.4g}) adjusted with '{correction}' across {len(y)} local tests",
+    notes = [f"{'two-sided p_value = min(1, 2 p_sim)' if sided == 'two' else 'folded (one-sided) p_value = p_sim'}"
+             f" from {int(permutations)} conditional permutations (minimum attainable p_sim "
+             f"{1 / (permutations + 1):.4g}), adjusted with '{correction}' across {len(y)} local tests, "
+             f"significant at p_adjusted <= {alpha:g}",
              "islands (no neighbors) have Ii = 0 and are never significant"] if permutations else []
     if replicates is not None and len(replicates):
         R = _replicate_matrix(replicates, var, list(d.index), geoid_col, _release_year(data))
@@ -549,7 +573,7 @@ def spatial_regression(
     weights,
     *,
     model: str = "lag",
-    method: str = "ml",
+    method: Optional[str] = None,
     replicates: Optional[pd.DataFrame] = None,
     target: str = "population",
     confidence_level: float = 0.90,
@@ -564,7 +588,9 @@ def spatial_regression(
     ``model``: ``lag`` (y = rho W y + X b + e) or ``error`` (u = lambda W u + e).
     ``method``: ``ml`` (ML_Lag / ML_Error, ``ml_method`` full/ord/LU) or ``gm``
     (GM_Lag: spatial 2SLS with W X, W^2 X instruments; GM_Error_Het:
-    Kelejian-Prucha GMM robust to heteroskedasticity). Coefficients include
+    Kelejian-Prucha GMM robust to heteroskedasticity). Default
+    (:data:`DEFAULT_METHODS`): ``gm`` for the lag model, ``ml`` for the error
+    model. Coefficients include
     the spatial parameter as term ``rho`` or ``lambda``. ``diagnostics`` carries
     the OLS LM tests (``lm_tests``) with a suggested model.
 
@@ -576,11 +602,12 @@ def spatial_regression(
     ml_method='LU' or method='gm' for large n.
 
     Measured behavior (census.simulation 'spatial_regression_coverage', added
-    to the notes): with ACS sampling error in the outcome the default ML lag
+    to the notes): with ACS sampling error in the outcome the ML lag
     estimator's rho is biased toward 0 and its intervals under-cover badly
-    (0.48 at rho 0.3, 0.003 at 0.6); GMM lag (``method='gm'``) covers rho
-    near nominal. In the error model lambda is attenuated by either
-    estimator, while beta intervals stay near nominal. ``replicate_policy``: "flag"
+    (0.48 at rho 0.3, 0.003 at 0.6); GMM lag, the default since Round 15,
+    covers rho near nominal (0.89-0.90). In the error model lambda is
+    attenuated by either estimator (ML, the default, is not worse), while
+    beta intervals stay near nominal. ``replicate_policy``: "flag"
     (default) records failed refits or stochastic variables without
     replicates in diagnostics["replicates_incomplete"]; "strict" raises
     ValueError (census.results.replicate_completeness, PLAN_ROUND_11 Q2/D7).
@@ -590,9 +617,10 @@ def spatial_regression(
 
     check_replicate_policy(replicate_policy)
 
-    model, method = model.lower(), method.lower()
+    model = model.lower()
     if model not in SPATIAL_MODELS:
         raise ValueError(f"model must be one of {SPATIAL_MODELS}")
+    method = DEFAULT_METHODS[model] if method is None else method.lower()
     if method not in SPATIAL_METHODS:
         raise ValueError(f"method must be one of {SPATIAL_METHODS}")
     if target not in INTERVAL_TARGETS:
@@ -664,9 +692,7 @@ def spatial_regression(
     level = confidence_level if confidence_level <= 1 else confidence_level / 100
     table = _table(params, se_model, se_sampling, level, target)
     notes.append(f"intervals and p-values use the '{target}' target")
-    notes.append(LAG_ML_CAVEAT if model == "lag" and method == "ml" else ERROR_CAVEAT if model == "error" else
-                 "GMM lag (spatial 2SLS): simulation 'spatial_regression_coverage' found rho intervals near nominal "
-                 "(0.89-0.90) under ACS outcome error; beta intervals covered 0.84 at rho 0.6")
+    notes.append(ERROR_CAVEAT if model == "error" else LAG_ML_CAVEAT if method == "ml" else LAG_GM_NOTE)
     notes.append(NOISY_COVARIATE_CAVEAT)
     return ModelResult(
         model_type=f"spatial_{model}", formula=formula, n_obs=int(len(y)), coefficients=table,
