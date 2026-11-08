@@ -8,7 +8,7 @@ supported interval method; writes
     docs/audits/inference_validation.csv   one row per (method, target)
 
 Usage:
-    python scripts/inference_validation.py          # full configuration (~40 min)
+    python scripts/inference_validation.py          # full configuration (~105 min; spatial FH ~55)
     python scripts/inference_validation.py --fast   # the CI configuration
     python scripts/inference_validation.py --gate   # also exit 1 on a failed/missing required study
 
@@ -30,8 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from census.simulation import (BAND, CV_PROFILES, FAST, FULL, NOMINAL, SPATIAL_STUDIES, STUDIES,  # noqa: E402
-                               run_study, spatial_config)
+from census.simulation import (BAND, CV_PROFILES, DESIGN_STUDIES, FAST, FULL, NOMINAL, SPATIAL_STUDIES,  # noqa: E402
+                               STUDIES, designs_config, run_study, spatial_config)
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
@@ -39,8 +39,12 @@ OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 # Other studies (fit_replicate_noisy_x, simex, *_low_rel, morans_i_replicate_se)
 # report info rows only. Fixed here, not derived from the results, so a study
 # that silently stops producing gated rows is reported as missing.
+# Default-method design studies (Round 10) run in every full report and count
+# toward the gate; their replicate-refit (these_areas) variants are slower and
+# run only when named with --studies (see docs/audits/CHECK_MAP.md).
+DEFAULT_DESIGN_STUDIES = ("multilevel_known_variance", "multilevel_random_slope", "did_two_group", "did_event")
 REQUIRED_STUDIES = ("fit_replicate", "regression_calibration", "fay_herriot", "correlation", "linear_trend",
-                    "spatial_fay_herriot")
+                    "spatial_fay_herriot") + DEFAULT_DESIGN_STUDIES
 
 
 def gate(df, required=REQUIRED_STUDIES):
@@ -144,13 +148,18 @@ def main() -> int:
     unknown = sorted(set(args.studies or ()) - set(STUDIES))
     if unknown:
         ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
-    main_studies = None if args.studies is None else [s for s in args.studies if s not in SPATIAL_STUDIES]
+    main_studies = None if args.studies is None else [
+        s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES]
     frames = []
     if main_studies is None or main_studies:
         frames.append(run_study(cfg, studies=main_studies, log=lambda m: print(m, flush=True)))
     spatial = [s for s in SPATIAL_STUDIES if args.studies is None or s in args.studies]
     if spatial:  # Round 9 spatial studies (own lattice configuration)
         frames.append(run_study(spatial_config(fast=args.fast), studies=spatial, log=lambda m: print(m, flush=True)))
+    designs = (list(DEFAULT_DESIGN_STUDIES) if args.studies is None
+               else [s for s in args.studies if s in DESIGN_STUDIES])
+    if designs:  # Round 10 multilevel and DiD studies (own configuration)
+        frames.append(run_study(designs_config(fast=args.fast), studies=designs, log=lambda m: print(m, flush=True)))
     frames = [f for f in frames if len(f)]
     df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(
         columns=["study", "method", "target", "reps", "nominal", "coverage", "mc_se", "status"])

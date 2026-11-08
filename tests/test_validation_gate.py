@@ -96,3 +96,19 @@ class TestExitCodes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_default_design_studies_are_required_and_registered():
+    import importlib.util
+    import os
+
+    from census.simulation import DESIGN_STUDIES
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "inference_validation.py")
+    spec = importlib.util.spec_from_file_location("inference_validation_check", path)
+    iv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(iv)
+    # Default-method multilevel and DiD studies gate releases; replicate variants stay on demand.
+    assert set(iv.DEFAULT_DESIGN_STUDIES) <= set(iv.REQUIRED_STUDIES)
+    assert set(iv.DEFAULT_DESIGN_STUDIES) <= set(DESIGN_STUDIES)
+    assert "did_replicate" not in iv.REQUIRED_STUDIES and "multilevel_replicate" not in iv.REQUIRED_STUDIES
