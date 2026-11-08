@@ -5,6 +5,26 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.11.0 (Round 12): verifiable and reproducible workflows
+
+- Independent dense reference checks for the multilevel GLS layer and two-group DiD.
+- `scripts/inference_validation.py --gate`; `docs/audits/CHECK_MAP.md`. The gate also
+  requires the default multilevel and DiD coverage studies (`multilevel_known_variance`,
+  `multilevel_random_slope`, `did_two_group`, `did_event`); replicate-refit and
+  serial-correlation variants remain on demand.
+- `census.results.interval_description`: every output (tables, figures, methods,
+  tool and adapter results) states the same estimand, interval basis, level, and
+  distribution; method-aware estimand text (PUMS, DiD, area-level); undefined
+  uncertainty shown as undefined.
+- `docs/reference_workflow.md`: an offline, rerunnable reference analysis with a
+  blocked case, checked by an independent second reader.
+- Manifests: `confirmatory_incomplete` for runs with blocking deviations (including
+  failed calls); synthetic labels follow the actual data source, with mismatch
+  deviations; caller-supplied replicates described and hashed identically across
+  pandas/numpy versions; hypothesis results kept in bundles; `run_manifest` tool
+  accepts replicates and returns the run status.
+- CLI tool runner accepts `--arg KEY=VALUE` (portable paths).
+
 ## 0.10.1 (Round 11): audit decisions
 
 - **Q2 incomplete replicates:** `replicate_policy="flag"|"strict"` on replicate-based

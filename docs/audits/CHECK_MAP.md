@@ -44,3 +44,8 @@ Scope of the dense reference tests: they check fixed-variance GLS algebra
 independently written REML likelihood). They do not validate REML
 estimation in general, Kenward-Roger adjustments, or interval coverage;
 coverage evidence comes only from the T3 studies.
+
+
+## Release gate scope (decided 2026-11-07)
+
+`python scripts/inference_validation.py --gate` runs and requires the default-method studies, including the Round 10 designs: `multilevel_known_variance`, `multilevel_random_slope`, `did_two_group`, `did_event`. The slower replicate-refit variants (`multilevel_replicate`, `did_replicate`) and the serial-correlation study (`did_serial`) run on demand by naming them with `--studies` (or via `run_study` as above); they are reported but not required.

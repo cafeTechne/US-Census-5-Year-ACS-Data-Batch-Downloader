@@ -89,7 +89,7 @@ from census.panel import (
 from census.stats import add_reliability_columns, clean_census_sentinels, parse_variable_code
 from census.tables import load_variable_metadata
 
-PACKAGE_VERSION = "0.10.1"
+PACKAGE_VERSION = "0.11.0"
 
 CONCORDANCE_MODES = ("fail", "strict", "code")
 MAX_ISSUES_IN_RESULT = 100
