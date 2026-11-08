@@ -606,8 +606,9 @@ def create_manifest(
     An RPP adjustment without ``rpp_year`` gets the latest year in the active RPP
     table before validation and hashing, so the hash fixes the applied year; the
     result says so (``filled``, ``notes``) and the completed manifest is written to
-    ``path``, or back to the input file when no ``path`` is given (a dict input
-    without ``path`` gets it in ``manifest``).
+    ``path``, or, when no ``path`` is given, to a new sibling file
+    ``<name>.completed.json`` (the input file is never overwritten; a dict input
+    without ``path`` gets it in ``manifest``). Commit and run the completed file.
     Returns ``{"hash", "path", "errors", "valid", "notes", "filled"}`` (and
     ``"manifest"`` when something was filled in).
     """
@@ -627,7 +628,11 @@ def create_manifest(
                     filled.append({"adjustment": i, "rpp_year": int(year)})
     errors = validate_manifest(manifest, resolve=resolve, client=client)
     out_path = str(path) if path else (str(path_or_dict) if not isinstance(path_or_dict, Mapping) else None)
-    write_to = path or (out_path if filled else None)
+    write_to = path
+    if not path and filled and out_path:
+        src = Path(out_path)
+        write_to = str(src.with_name(src.stem + ".completed" + (src.suffix or ".json")))
+        out_path = write_to
     if not errors and write_to:
         Path(write_to).parent.mkdir(parents=True, exist_ok=True)
         Path(write_to).write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",

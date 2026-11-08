@@ -699,8 +699,9 @@ def create_manifest(manifest_path: str) -> Dict[str, Any]:
     Commit the manifest and hash BEFORE pulling data; then call run_manifest.
     Several states: geography {"level": "county", "states": ["26", "36"]}; a price
     adjustment: "adjustments": [{"type": "rpp", "variables": ["income"], "rpp_year": 2024}]
-    (rpp_year is required; when omitted, the latest RPP year is filled in and the
-    manifest file rewritten before hashing, as the result's notes say).
+    (rpp_year is required; when omitted, the latest RPP year is filled in before
+    hashing and the completed manifest is written to <name>.completed.json, never
+    over the input; commit and run that file, as the result's notes say).
 
     The schema is documented in census/manifest.py and examples/manifests/.
     Example: create_manifest("examples/manifests/income_population_tracts.json")

@@ -183,7 +183,11 @@ class TestRppYearExplicit(unittest.TestCase):
         year = M.latest_rpp_year()
         self.assertEqual(res["filled"], [{"adjustment": 0, "rpp_year": year}])
         self.assertTrue(any("rpp_year" in n and str(year) in n for n in res["notes"]))
-        written = M.load_manifest(path)
+        with open(path, encoding="utf-8") as f:  # the input file is never overwritten
+            self.assertEqual(json.load(f), m)
+        completed = os.path.join(self.dir, "m.completed.json")
+        self.assertEqual(res["path"], completed)
+        written = M.load_manifest(completed)
         self.assertEqual(written["adjustments"][0]["rpp_year"], year)
         self.assertEqual(M.manifest_hash(written), res["hash"])
         self.assertEqual(_errs(written), [])
