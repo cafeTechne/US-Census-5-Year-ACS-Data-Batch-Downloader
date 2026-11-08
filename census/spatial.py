@@ -37,10 +37,10 @@ Urban Economics 26:77-104; Kelejian & Prucha (1998, 2010); Rey & Anselin (2007)
 PySAL; ACS Variance Replicate Estimate Tables documentation.
 """
 
-import contextlib
+import builtins
 import hashlib
-import io
 import math
+import sys
 import os
 import warnings
 from dataclasses import dataclass, field
@@ -509,12 +509,32 @@ def _scalar(x) -> float:
     return float(np.asarray(x, dtype=float).reshape(-1)[0])
 
 
+def _spreg_print(*args: Any, **kwargs: Any) -> None:
+    """``print`` for the spreg.output module: drops what would reach stdout, forwards other files."""
+    target = kwargs.get("file")
+    if target is not None and target is not sys.stdout and target is not sys.__stdout__:
+        builtins.print(*args, **kwargs)
+
+
+def _silence_spreg_output() -> None:
+    """spreg 1.9 prints the estimator's class name (``print(_reg.__class__.__name__)`` in
+    ``spreg.output.out_part_top``) on every ML/GMM fit, and stdout carries the MCP stdio protocol.
+    Shadow ``print`` in that module only, once: no process-wide stdout redirection, so concurrent
+    fits and other threads' output are unaffected (contextlib.redirect_stdout swaps sys.stdout for
+    every thread)."""
+    import importlib
+
+    # the module, not the spreg.output function that spreg/__init__ re-exports under the same name
+    spreg_output = importlib.import_module("spreg.output")
+    if spreg_output.__dict__.get("print") is not _spreg_print:
+        spreg_output.print = _spreg_print  # type: ignore[attr-defined]
+
+
 def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, ml_method: str, kwargs):
     import spreg
 
-    # spreg 1.9 prints the estimator's class name to stdout from its summary code;
-    # swallow it (stdout carries the MCP stdio protocol).
-    with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
+    _silence_spreg_output()
+    with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         if model == "lag" and method == "ml":
             r = spreg.ML_Lag(y, X, w, method=ml_method, spat_diag=False, name_x=names, name_y=yname, **kwargs)

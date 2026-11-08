@@ -304,5 +304,54 @@ class TestDecennialAliases(unittest.TestCase):
             self.assertNotIn("is an ACS dataset", plan["error"])
 
 
+class TestSpregStdout(unittest.TestCase):
+    """Finding 10: spreg's class-name print is silenced at its source, without swapping sys.stdout."""
+
+    @classmethod
+    def setUpClass(cls):
+        from census.simulation import lattice_weights, make_replicates, replicate_long, sar_field
+
+        rng = np.random.default_rng(3)
+        cls.w = lattice_weights(5)
+        ids = cls.w.id_order
+        x = rng.uniform(0, 10, 25)
+        y = 5 + 2 * x + sar_field(cls.w.full()[0], 0.4, 2.0, rng)
+        cls.df = pd.DataFrame({"GEOID": ids, "y": y, "x": x})
+        cls.reps = replicate_long(ids, ["y"], y[:, None], make_replicates(y[:, None], np.ones((25, 1)), rng))
+
+    def test_no_stdout_from_any_estimator_or_refit(self):
+        import contextlib
+        import io
+
+        from census.spatial import spatial_regression
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for model in ("lag", "error"):
+                for method in ("gm", "ml"):
+                    spatial_regression("y ~ x", self.df, self.w, model=model, method=method, replicates=self.reps)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_fit_does_not_swap_process_stdout(self):
+        import sys
+
+        import spreg
+
+        from census.spatial import spatial_regression
+
+        seen = []
+        real = spreg.GM_Lag
+
+        def spy(*a, **k):
+            seen.append(sys.stdout)
+            return real(*a, **k)
+
+        outer = sys.stdout
+        with mock.patch.object(spreg, "GM_Lag", side_effect=spy):
+            spatial_regression("y ~ x", self.df, self.w, model="lag", method="gm")
+        self.assertTrue(seen)
+        self.assertTrue(all(s is outer for s in seen))  # other threads' output is never redirected
+
+
 if __name__ == "__main__":
     unittest.main()
