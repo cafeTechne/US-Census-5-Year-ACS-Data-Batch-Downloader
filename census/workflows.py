@@ -20,6 +20,9 @@ from census.aggregate import NonAdditiveError, aggregate_then_derive
 from census.aggregate import aggregate_geographies as _aggregate_geographies
 from census.api import CensusAPIClient, infer_dataset
 from census.cache import get_default_cache, import_frozen, read_frozen
+from census.decennial import SAMPLING_REFUSAL as DECENNIAL_SAMPLING_REFUSAL
+from census.decennial import UNCERTAINTY_LABEL as DECENNIAL_UNCERTAINTY_LABEL
+from census.decennial import is_decennial
 from census.derived import difference as derive_difference
 from census.derived import percent_change as derive_percent_change
 from census.derived import product as derive_product
@@ -190,10 +193,11 @@ def _derived_result(result: Any) -> Dict[str, Any]:
 def derive_estimate(
     operation: str,
     estimates: List[float],
-    moes: List[float],
+    moes: Optional[List[float]],
     as_percent: bool = False,
     year_current: Optional[int] = None,
     year_prior: Optional[int] = None,
+    product: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Derive an estimate and its 90% MOE with the Census approximation formulas
     (ACS General Handbook 2020, ch. 8).
@@ -209,6 +213,9 @@ def derive_estimate(
         as_percent: Return proportion/ratio on a 0-100 scale.
         year_current, year_prior: For percent_change between ACS releases (adds the
             overlapping-period note).
+        product: 'decennial' when the inputs are 2020 Census counts: returns the
+            point estimate only; MOE, SE and CV are undefined (None), because census
+            counts are not sample-based (pass moes as zeros or omit them).
 
     Returns estimate, moe, se, cv_percent, method, and notes. method records the
     formula used, e.g. 'proportion_ratio_fallback' when the proportion radicand
@@ -220,10 +227,20 @@ def derive_estimate(
     op = operation.lower().strip()
     if op not in _DERIVE_OPS:
         return errors.error_result(errors.INVALID_INPUT, f"operation must be one of {_DERIVE_OPS}.")
-    if len(estimates) != len(moes) or not estimates:
+    decennial = is_decennial(product)
+    if decennial:
+        if any(m is not None and not (isinstance(m, float) and math.isnan(m)) and float(m) != 0 for m in moes or []):
+            return errors.error_result(
+                errors.INVALID_INPUT,
+                "2020 Census counts have no sampling margin of error; pass moes as zeros or omit them. "
+                + DECENNIAL_SAMPLING_REFUSAL,
+            )
+        moes = [0.0] * len(estimates)
+    if moes is None or len(estimates) != len(moes) or not estimates:
         return errors.error_result(errors.INVALID_INPUT, "estimates and moes must be non-empty and aligned.")
     if op == "sum":
-        return _derived_result(sum_estimates(estimates, moes))
+        return _decennial_point(sum_estimates(estimates, moes)) if decennial else _derived_result(
+            sum_estimates(estimates, moes))
     if len(estimates) != 2:
         return errors.error_result(errors.INVALID_INPUT, f"'{op}' takes exactly two estimates.")
     (x, y), (mx, my) = estimates, moes
@@ -237,7 +254,22 @@ def derive_estimate(
         res = derive_difference(x, mx, y, my)
     else:
         res = derive_percent_change(x, mx, y, my, year_current=year_current, year_prior=year_prior)
-    return _derived_result(res)
+    return _decennial_point(res) if decennial else _derived_result(res)
+
+
+def _decennial_point(res: Any) -> Dict[str, Any]:
+    """A derived value from 2020 Census counts: point estimate, uncertainty undefined (never 0)."""
+    res.moe, res.se, res.cv_percent = math.nan, math.nan, math.nan
+    res.components = {k: (None if "moe" in str(k).lower() else v) for k, v in (res.components or {}).items()}
+    res.method = f"{res.method} (decennial counts: point estimate only)"
+    res.notes = [n for n in res.notes if "MOE" not in n] + [
+        "2020 Census counts are not sample-based: the sampling MOE, SE and CV of this value are "
+        "undefined (not 0). The counts carry disclosure-avoidance noise and coverage error that "
+        "these formulas do not measure; aggregate small areas before deriving rates."
+    ]
+    out = _derived_result(res)
+    out["uncertainty"] = DECENNIAL_UNCERTAINTY_LABEL
+    return out
 
 
 @_guided(
@@ -476,7 +508,9 @@ def batch_significance(
         correction: 'holm' (default; family-wise error), 'bonferroni', 'bh'
             (false discovery rate, for exploratory screening), or 'by'.
         product: '5-year' (default) or '1-year'. 1-year releases never share
-            sample, so no overlap adjustment is applied.
+            sample, so no overlap adjustment is applied. 'decennial' is refused: 2020
+            Census counts are not sample-based (use calculate_significance with
+            product2='decennial' to test an ACS estimate against a census count).
 
     Testing 3,000 tracts at 90% yields about 300 false positives with no
     correction. Report significant_adjusted, not significant_raw.
@@ -685,6 +719,7 @@ def download_table(
     years: Optional[List[int]] = None,
     variables: Optional[List[str]] = None,
     output_dir: Optional[str] = None,
+    dataset: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Download one ACS 5-year table to a tidy panel (CSV) with codebook, SE/CV
     and reliability columns. Plans first and stops if the plan would block.
@@ -698,6 +733,8 @@ def download_table(
         variables: Codes the analysis uses, e.g. ['B17001_001', 'B17001_002']
             (default: the whole table, which blocks more often across years).
         output_dir: Destination folder (default downloads/).
+        dataset: 'dec/dhc' or 'dec/pl' for the 2020 Census (years [2020]; counts
+            are not sample-based, so no SE/CV columns; see `uncertainty`).
 
     Tract releases spanning 2019 and 2020 are apportioned to 2020 tracts. For
     any other option use batch_download (full profile).
@@ -709,16 +746,18 @@ def download_table(
     except ValueError as exc:
         return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
     table = str(table_code).strip().upper()
-    year_list = sorted({int(y) for y in years}) if years else [_default_year(infer_dataset(table))]
-    options = ResearchOptions(compute_reliability=True, include_codebook=True)
-    if level == "tract" and year_list[0] <= 2019 < year_list[-1]:
+    decennial = is_decennial(dataset)
+    year_list = sorted({int(y) for y in years}) if years else (
+        [2020] if decennial else [_default_year(infer_dataset(table))])
+    options = ResearchOptions(compute_reliability=not decennial, include_codebook=True)
+    if level == "tract" and year_list[0] <= 2019 < year_list[-1] and not decennial:
         options.harmonize_tracts_to = 2020  # releases span the 2010/2020 tract change
     client = _client()
     try:
         entities = build_entities(level, state_code, codes, client=client, years=year_list)
     except ValueError as exc:
         return errors.error_result(errors.INVALID_GEO_LEVEL, str(exc))
-    plan = plan_extraction(table, entities, year_list, "panel", options, None, variables, client)
+    plan = plan_extraction(table, entities, year_list, "panel", options, dataset, variables, client)
     if not plan.get("success"):
         return _jsonable(plan)
     if plan.get("would_block"):
@@ -733,8 +772,10 @@ def download_table(
             "next_step": "name fewer variables (variables=[...]) or fewer years, or use check_variable_concordance",
         }
     base_dir = output_dir or os.path.join(ROOT, "downloads")
-    out = run_batch(table, entities, year_list, base_dir, "panel", options, None, client, variables=variables,
+    out = run_batch(table, entities, year_list, base_dir, "panel", options, dataset, client, variables=variables,
                     plan=plan)
+    if isinstance(out, dict) and decennial:
+        out["uncertainty"] = plan.get("uncertainty")
     out = _jsonable(out)
     if isinstance(out, dict) and out.get("success"):
         out["years_requested"] = year_list

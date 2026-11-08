@@ -72,11 +72,12 @@ ANNOTATION_CODES: Dict[str, str] = {
 
 # Variable code anatomy: <table>[_C<col> | _<period>]_<line><suffix>
 #   B19013_001E, B01001A_003M, DP03_0062PE, S1701_C01_001E, B19013_001EA,
-#   CP03_2017_001E, CP03_2022to2017_001SS (comparison-profile significance)
+#   CP03_2017_001E, CP03_2022to2017_001SS (comparison-profile significance),
+#   P1_001N, P12_002NA (2020 Census count and its annotation; census.decennial)
 # Optional "__<first>_<last>" marks a concept segment (a reused code split by year).
 BASE_PATTERN = r"[A-Z]+\d+[A-Z]*(?:_C\d+|_\d{4}(?:to\d{4})?)?_\d+(?:__\d{4}_\d{4})?"
 VARIABLE_CODE_RE = re.compile(
-    rf"^(?P<base>{BASE_PATTERN})(?P<suffix>PEA|PMA|PE|PM|EA|MA|SS|E|M)$"
+    rf"^(?P<base>{BASE_PATTERN})(?P<suffix>PEA|PMA|PE|PM|EA|MA|NA|SS|E|M|N)$"
 )
 
 MEASUREMENT_TYPES: Dict[str, str] = {
@@ -89,7 +90,13 @@ MEASUREMENT_TYPES: Dict[str, str] = {
     "PEA": "Annotation",
     "PMA": "Annotation",
     "SS": "Significance",
+    # 2020 Decennial Census: a published count, not sample-based (no MOE pair)
+    "N": "Count",
+    "NA": "Annotation",
 }
+
+# Suffixes that carry a variable's primary value (labels, concordance keys)
+PRIMARY_SUFFIXES: Tuple[str, ...] = ("E", "PE", "SS", "N")
 
 # Estimate suffix -> paired MOE suffix
 ESTIMATE_MOE_PAIRS: Dict[str, str] = {"E": "M", "PE": "PM"}
@@ -178,8 +185,16 @@ def reliability_flag(cv: float) -> str:
     return RELIABILITY_LOW
 
 
-def calculate_cv(estimate: float, moe: float) -> Dict[str, object]:
-    """Return SE, CV and reliability flag for a single estimate/MOE pair."""
+def calculate_cv(estimate: float, moe: float, product: Optional[str] = None) -> Dict[str, object]:
+    """Return SE, CV and reliability flag for a single estimate/MOE pair.
+
+    ``product='decennial'`` (or a 'dec/pl' / 'dec/dhc' key) raises
+    ``ValueError``: a census count has no sampling MOE, so its CV is undefined
+    (census.decennial.SAMPLING_REFUSAL).
+    """
+    from census.decennial import refuse_sampling
+
+    refuse_sampling(product)
     se = standard_error(moe)
     cv = coefficient_of_variation(estimate, moe)
     # Interval half-width from the decoded SE: 0 for a controlled estimate,
@@ -255,6 +270,7 @@ def acs_overlap_years(
     """
     from census.api import PRODUCT_1YR, require_same_product  # local: keep stats light
 
+    # decennial products raise here: census counts have no sample periods to overlap
     product = require_same_product(product1, product2 if product2 is not None else product1)
     if product == PRODUCT_1YR:
         return 1 if int(year1) == int(year2) else 0
@@ -283,12 +299,39 @@ def z_test(
     share C = overlap_years / period uses the product's period length (5 or
     1), so a same-release 1-year comparison (overlap 1 of 1) is treated as
     independent (factor 1.0), not as 1 of 5 shared years.
+
+    2020 Census counts (product 'decennial' or a 'dec/pl' / 'dec/dhc' key) are
+    not sample-based: two decennial values raise ``ValueError``
+    (census.decennial.SAMPLING_REFUSAL). One ACS estimate against one decennial
+    count is tested with the decennial count as a fixed reference (its MOE
+    must be None, NaN or 0; SE 0): the result says so in ``notes`` and
+    ``comparison`` and measures ACS sampling error only.
     """
+    from census.decennial import MIXED_NOTE, SAMPLING_REFUSAL, is_decennial
+
     period = 5
     if product is not None:
         product1 = product if product1 is None else product1
         product2 = product if product2 is None else product2
-    if product1 is not None or product2 is not None:
+    dec1, dec2 = is_decennial(product1), is_decennial(product2)
+    if dec1 and dec2:
+        raise ValueError(SAMPLING_REFUSAL)
+    if dec1 or dec2:
+        from census.api import PRODUCT_PERIOD_YEARS, require_same_product
+
+        period = PRODUCT_PERIOD_YEARS[require_same_product(product2 if dec1 else product1)]
+        if overlap_years:
+            raise ValueError("overlap_years does not apply to an ACS vs decennial comparison; pass 0.")
+        ref_moe = moe1 if dec1 else moe2
+        if ref_moe is not None and not _isnan(ref_moe) and float(ref_moe) != 0:
+            raise ValueError(
+                "The decennial value has no sampling margin of error; pass its MOE as None (or 0). " + MIXED_NOTE
+            )
+        if dec1:
+            moe1 = 0.0
+        else:
+            moe2 = 0.0
+    elif product1 is not None or product2 is not None:
         from census.api import PRODUCT_PERIOD_YEARS, require_same_product
 
         period = PRODUCT_PERIOD_YEARS[require_same_product(product1, product2)]
@@ -312,6 +355,9 @@ def z_test(
         return float(moe)
 
     m1, m2 = _clean_moe(moe1, "first"), _clean_moe(moe2, "second")
+    comparison = "acs_vs_decennial_reference" if (dec1 or dec2) else "acs_vs_acs"
+    if dec1 or dec2:
+        notes.append(MIXED_NOTE)
     diff = float(est1) - float(est2)
     if any(_isnan(v) for v in (est1, est2)) or any(
         int(float(v)) in CENSUS_SENTINELS for v in (est1, est2) if not _isnan(v)
@@ -329,6 +375,7 @@ def z_test(
             "significant": None,
             "significant_at": {f"{int(lv * 100)}%": None for lv in Z_CRITICAL},
             "overlap_years": overlap_years,
+            "comparison": comparison,
             "notes": notes,
             "verdict": "Not tested: " + "; ".join(notes) + ".",
         }
@@ -355,11 +402,16 @@ def z_test(
             f"{int(lv * 100)}%": bool(z >= zc) for lv, zc in Z_CRITICAL.items()
         },
         "overlap_years": overlap_years,
+        "comparison": comparison,
         "notes": notes,
         "verdict": (
-            f"Statistically significant difference at the {label} confidence level."
-            if significant
-            else f"No statistically significant difference at the {label} confidence level."
+            ("ACS estimate vs decennial count as a fixed reference (ACS sampling error only): "
+             if comparison != "acs_vs_acs" else "")
+            + (
+                f"Statistically significant difference at the {label} confidence level."
+                if significant
+                else f"No statistically significant difference at the {label} confidence level."
+            )
         ),
     }
 

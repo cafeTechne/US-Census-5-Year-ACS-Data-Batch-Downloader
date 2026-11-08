@@ -124,18 +124,22 @@ def _options(args: argparse.Namespace) -> ResearchOptions:
         allow_unverified_concordance=args.allow_unverified_concordance,
         allow_provisional_index=args.allow_provisional_index,
         harmonize_tracts_to=args.harmonize_tracts_to,
+        **({"product": args.product} if getattr(args, "product", None) else {}),
     )
 
 
 def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--table", required=True)
     p.add_argument("--years", required=True, help="e.g. 2015-2022 or 2018,2020")
-    p.add_argument("--geo", default="state", help="us, state, county, tract, place, zcta, msa")
+    p.add_argument("--geo", default="state",
+                   help="us, state, county, tract, place, zcta, msa; 2020 Census also 'block group', block")
     p.add_argument("--state", help="2-digit state FIPS, or 'all' (50 states + DC)")
     p.add_argument("--include-pr", action="store_true", help="with --state all, add Puerto Rico")
     p.add_argument("--codes", help="comma-separated place/county/ZCTA/CBSA codes")
     p.add_argument("--variables", help="comma-separated codes, YEAR:CODE, or concept IDs")
-    p.add_argument("--dataset", help="acs5, profile, subject, cprofile (inferred)")
+    p.add_argument("--dataset", help="acs5, profile, subject, cprofile (inferred); 2020 Census: dec/dhc, dec/pl")
+    p.add_argument("--product", choices=("5-year", "1-year", "decennial"),
+                   help="release family (default 5-year; 'decennial' = 2020 Census DHC unless --dataset dec/pl)")
     p.add_argument("--format", default="panel", choices=OUTPUT_FORMATS)
     p.add_argument("--concordance-mode", default="fail", choices=CONCORDANCE_MODES)
     p.add_argument("--allow-unverified-concordance", action="store_true")
@@ -262,7 +266,7 @@ def cmd_derive(args: argparse.Namespace) -> int:
     return _emit(
         workflows.derive_estimate(
             args.operation, _floats(args.estimates), _floats(args.moes), args.percent,
-            args.year_current, args.year_prior,
+            args.year_current, args.year_prior, product=args.product,
         ),
         args.json,
     )
@@ -452,10 +456,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("derive", help="derived estimate and MOE (Census approximation formulas)")
     p.add_argument("operation", choices=("proportion", "ratio", "product", "difference", "percent_change", "sum"))
     p.add_argument("--estimates", required=True, help="comma-separated, e.g. numerator,denominator")
-    p.add_argument("--moes", required=True, help="comma-separated 90%% MOEs")
+    p.add_argument("--moes", default="", help="comma-separated 90%% MOEs (omit with --product decennial)")
     p.add_argument("--percent", action="store_true", help="0-100 scale for proportion/ratio")
     p.add_argument("--year-current", type=int)
     p.add_argument("--year-prior", type=int)
+    p.add_argument("--product", choices=("5-year", "1-year", "decennial"),
+                   help="'decennial': 2020 Census counts, point estimate only (MOE undefined)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_derive)
 
@@ -492,8 +498,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--year2", type=int)
     p.add_argument("--confidence", type=float, default=0.90)
     p.add_argument("--correction", default="holm", choices=("holm", "bonferroni", "bh", "by"))
-    p.add_argument("--product", default="5-year", choices=("5-year", "1-year"),
-                   help="ACS product of both estimates (1-year releases do not overlap)")
+    p.add_argument("--product", default="5-year", choices=("5-year", "1-year", "decennial"),
+                   help="ACS product of both estimates (1-year releases do not overlap); "
+                   "'decennial' is refused: census counts are not sample-based")
     p.add_argument("--out")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_significance)

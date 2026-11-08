@@ -20,12 +20,12 @@ import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
 from census.geo import get_resource_path
 from census.metadata import SOURCE_MISSING, archived_vintages, table_universe, table_variables
-from census.stats import parse_variable_code
+from census.stats import PRIMARY_SUFFIXES, parse_variable_code
 
 NORMALIZATION_VERSION = 2
 RELABEL_SIMILARITY = 0.80  # same code, labels at least this similar -> needs review
@@ -267,7 +267,7 @@ class Concordance:
         for cid, c in self.concepts.items():
             year = max(c.codes)
             base = c.codes[year]
-            for suffix in ("E", "PE", "SS"):
+            for suffix in PRIMARY_SUFFIXES:
                 meta = self.year_metadata.get(year, {}).get(f"{base}{suffix}")
                 if meta:
                     out[f"{reps[cid]}{suffix}"] = dict(meta)
@@ -364,7 +364,7 @@ class Concordance:
             for year in c.years:
                 base = c.codes[year]
                 meta = self.year_metadata.get(year, {})
-                label = (meta.get(f"{base}E") or meta.get(f"{base}PE") or meta.get(f"{base}SS") or {}).get("label", "")
+                label = _primary_meta(meta, base).get("label", "")
                 rows.append(
                     {
                         "concept_id": cid,
@@ -418,6 +418,15 @@ class Concordance:
 # ---------------------------------------------------------------------------
 
 
+def _primary_meta(variables: Mapping[str, Any], base: str) -> Dict[str, str]:
+    """Metadata of a base's primary code (E, PE, SS, or a 2020 Census count N)."""
+    for suffix in PRIMARY_SUFFIXES:
+        meta = variables.get(f"{base}{suffix}")
+        if meta:
+            return meta
+    return {}
+
+
 def _units_for_year(
     variables: Dict[str, Dict[str, str]], dataset: str, year: int
 ) -> Dict[str, Tuple[str, str, Dict[str, str]]]:
@@ -431,7 +440,7 @@ def _units_for_year(
         by_base.setdefault(base, {})[suffix] = meta
     units: Dict[str, Tuple[str, str, Dict[str, str]]] = {}
     for base, metas in by_base.items():
-        primary = metas.get("E") or metas.get("PE") or metas.get("SS")
+        primary = next((metas[s] for s in PRIMARY_SUFFIXES if s in metas), None)
         if primary is None:
             continue
         units[base] = (line_role(base, dataset, year), canonical_label(primary["label"]), primary)
@@ -697,7 +706,7 @@ def build_evidence(
     records = []
     for year, base in sorted((int(y), b) for y, b in entries):
         variables, source = table_variables(table_code, dataset, year, client)
-        meta = variables.get(f"{base}E") or variables.get(f"{base}PE") or variables.get(f"{base}SS") or {}
+        meta = _primary_meta(variables, base)
         records.append(
             {
                 "year": year,
@@ -789,7 +798,7 @@ def validate_crosswalk_row(
     parsed = parse_variable_code(code)
     base = parsed[0] if parsed else code
     variables, _ = table_variables(table, dataset, year, client)
-    if not any(f"{base}{s}" in variables for s in ("E", "PE", "SS")):
+    if not any(f"{base}{s}" in variables for s in PRIMARY_SUFFIXES):
         errors.append(f"{code} does not exist in {dataset} {table} {year} metadata")
 
     if decision == "merge":

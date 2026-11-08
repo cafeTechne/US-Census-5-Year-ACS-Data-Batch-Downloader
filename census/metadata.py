@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Per-vintage ACS variable and table metadata.
+"""Per-vintage ACS (and 2020 Decennial Census) variable and table metadata.
 
 Source order for one (dataset, year):
 
@@ -32,6 +32,9 @@ DATASET_PATHS: Dict[str, str] = {
     "acs1/profile": "acs/acs1/profile",
     "acs1/subject": "acs/acs1/subject",
     "acs1/cprofile": "acs/acs1/cprofile",
+    # 2020 Decennial Census (census.decennial), archived under metadata/dec/<pl|dhc>/2020/
+    "dec/pl": "dec/pl",
+    "dec/dhc": "dec/dhc",
 }
 
 SOURCE_ARCHIVE = "archive"
@@ -103,7 +106,8 @@ def _normalize_variables(payload: Dict[str, Any]) -> Dict[str, VariableMeta]:
         if not isinstance(d, dict):
             continue
         out[code] = {
-            "label": str(d.get("label", "")).strip(),
+            # 2020 Census labels start with an empty part (" !!Total:"): drop it
+            "label": str(d.get("label", "")).strip().removeprefix("!!"),
             "concept": str(d.get("concept", "")).strip(),
             "group": str(d.get("group", "")),
             "predicateType": str(d.get("predicateType", "")),
@@ -199,9 +203,19 @@ def latest_vintage(dataset: str) -> Optional[int]:
 def describe_variable(
     code: str, year: Optional[int] = None, dataset: Optional[str] = None, client: Any = None
 ) -> Dict[str, Any]:
-    """Label, concept, table and universe for one variable code in one vintage."""
-    from census.api import infer_dataset  # local import avoids a cycle
+    """Label, concept, table and universe for one variable code in one vintage.
 
+    2020 Census count codes (``P12_002N``) default to the DHC (``dec/dhc``);
+    pass ``dataset='dec/pl'`` for P.L. 94-171 codes. Decennial results carry
+    an ``uncertainty`` statement (not sample-based; MOE undefined).
+    """
+    from census.api import infer_dataset  # local import avoids a cycle
+    from census.decennial import DECENNIAL_DHC, UNCERTAINTY_LABEL, is_decennial
+    from census.stats import parse_variable_code
+
+    parsed = parse_variable_code(str(code))
+    if dataset is None and parsed and parsed[1] in ("N", "NA"):
+        dataset = DECENNIAL_DHC
     dataset = dataset or infer_dataset(code)
     year = year or latest_vintage(dataset)
     if year is None:
@@ -227,4 +241,5 @@ def describe_variable(
         "universe": table_universe(meta["group"], dataset, year, client),
         "predicate_type": meta["predicateType"],
         "metadata_source": source,
+        **({"uncertainty": UNCERTAINTY_LABEL} if is_decennial(dataset) else {}),
     }

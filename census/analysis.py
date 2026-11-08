@@ -132,6 +132,17 @@ def _default_variables(df: pd.DataFrame) -> Dict[str, Any]:
     return out
 
 
+METHOD_NOT_SAMPLE_BASED = "not_sample_based"
+
+
+def is_decennial_count(column: str) -> bool:
+    """True for a 2020 Census count column: raw code ``<base>N`` or panel slug ``*_count``."""
+    parsed = parse_variable_code(str(column))
+    if parsed:
+        return parsed[1] == "N"
+    return str(column).endswith("_count")
+
+
 def _clean(est: pd.Series, moe: Optional[pd.Series]) -> Tuple[np.ndarray, np.ndarray]:
     sentinels = np.array(sorted(CENSUS_SENTINELS), dtype=float)
     e = pd.to_numeric(est, errors="coerce").to_numpy(float)
@@ -183,6 +194,12 @@ def analysis_frame(
     Provenance: ``release`` column (``acs5_<Year>`` when Year is present, or
     the ``release`` argument), and ``frame.attrs["variables"]`` recording each
     variable's source columns, method and concept ID.
+
+    2020 Census counts (``<base>N`` codes, ``*_count`` slugs) are not
+    sample-based: their ``_se`` and ``_cv`` are NaN (undefined, never 0) and
+    their method is ``not_sample_based``; release is ``dec_<Year>``, or
+    ``acs5_<Year>+dec_2020`` with a note in ``frame.attrs["notes"]`` when ACS
+    and decennial variables are mixed.
     """
     df = load_source(source)
     if variables is None:
@@ -197,18 +214,20 @@ def analysis_frame(
     if df.duplicated([c for c in UNIT_COLUMNS if c in df.columns]).any():
         raise ValueError("source has duplicate GEOID (and Year) rows; one row per unit is required")
     out = df[[c for c in ID_COLUMNS if c in df.columns]].copy()
-    if "Year" in out.columns:
-        out["release"] = "acs5_" + out["Year"].astype(str)
-    elif release:
-        out["release"] = release
     info: Dict[str, Dict[str, Any]] = {}
     work = df.copy()
+    n_decennial = 0
     for name, ref in var_map.items():
         est_col, moe_col = _resolve(df, ref)
         e, se = _clean(df[est_col], df[moe_col] if moe_col else None)
-        _put(out, name, e, se, METHOD_PUBLISHED if moe_col else "no_sampling_error")
+        method = METHOD_PUBLISHED if moe_col else "no_sampling_error"
+        if moe_col is None and is_decennial_count(est_col):
+            se = np.full_like(e, np.nan)  # census count: sampling SE undefined, never 0
+            method = METHOD_NOT_SAMPLE_BASED
+            n_decennial += 1
+        _put(out, name, e, se, method)
         info[name] = {"estimate_column": est_col, "moe_column": moe_col,
-                      "method": METHOD_PUBLISHED if moe_col else "no_sampling_error",
+                      "method": method,
                       "concept_id": (concept_ids or {}).get(name)}
         # expose cleaned values under the analysis name for derive specs
         work[f"{name}_estimate"] = e
@@ -228,8 +247,22 @@ def analysis_frame(
                           "concept_id": (concept_ids or {}).get(name)}
     for col in keep_columns:
         out[col] = df[col].to_numpy()
+    notes: List[str] = []
+    if n_decennial and n_decennial < len(var_map):
+        from .decennial import MIXED_NOTE
+
+        notes.append(MIXED_NOTE)
+    if "Year" in out.columns or release:
+        if "Year" not in out.columns:
+            label: Any = release
+        elif n_decennial == len(var_map) and n_decennial:
+            label = "dec_" + out["Year"].astype(str)
+        else:
+            label = "acs5_" + out["Year"].astype(str) + ("+dec_2020" if n_decennial else "")
+        out.insert(len([c for c in ID_COLUMNS if c in out.columns]), "release", label)
     out = out.reset_index(drop=True)
     out.attrs["variables"] = info
+    out.attrs["notes"] = notes
     out.attrs["derive"] = [dict(e) for e in (derive or [])]
     return out
 
