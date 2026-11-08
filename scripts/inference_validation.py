@@ -18,8 +18,11 @@ full --gate --jobs 0 took 21.7 min wall; the floor is the longest study,
 regression_calibration (~22 min). Summed per-study times are ~83 min, the
 serial estimate. spatial_fay_herriot takes ~3.5 min for 1000 reps (was 56
 min in v0.11.0, when BLAS ran multithreaded on its 100 x 100 matrices).
---fast --gate takes ~50 s serial. --jobs output is identical to the serial
-output at the same seed except the "seconds" column (wall time per study).
+--fast --gate takes ~50 s serial. The Round 15 info studies in the spatial
+group add 5.2 min (spatial_regression_coverage) and 2.5 min
+(local_morans_size) of single-process time, below the --jobs 0 floor.
+--jobs output is identical to the serial output at the same seed except the
+"seconds" column (wall time per study).
 
 Report versus gate (PLAN_ROUND_12 decision P12-3): by default the command is a
 report generator and always exits 0. With --gate it exits 1 when any gated
@@ -71,7 +74,8 @@ from census.simulation import (BAND, CV_PROFILES, DESIGN_STUDIES, FAST, FULL, NO
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
 # Studies whose gated rows are release claims (the default run of this script).
-# Other studies (fit_replicate_noisy_x, simex, *_low_rel, morans_i_replicate_se)
+# Other studies (fit_replicate_noisy_x, simex, *_low_rel, morans_i_replicate_se,
+# and the Round 15 spatial_regression_coverage and local_morans_size, D15-1)
 # report info rows only. Fixed here, not derived from the results, so a study
 # that silently stops producing gated rows is reported as missing.
 # Default-method design studies (Round 10) run in every full report and count
@@ -195,7 +199,8 @@ def render(df, cfg, label: str, seconds: float) -> str:
                        ("mse_rel_bias_mean", "MSE rel. bias (mean over areas)"),
                        ("mse_rel_bias_abs_max", "max abs MSE rel. bias"),
                        ("eblup_mse_vs_direct", "EBLUP MSE / direct variance"),
-                       ("min_area_coverage", "min per-area coverage"), ("size", "test size")):
+                       ("min_area_coverage", "min per-area coverage"), ("size", "test size"),
+                       ("power", "power"), ("fdr", "FDR")):
             if k in r and r[k] == r[k] and r[k] is not None:
                 notes.append(f"{lab} {_f(r[k])}")
         lines.append(f"| {r['study']} | {r['method']} | {r['target']} | {r['reps']} | {_f(r['coverage'])} | "

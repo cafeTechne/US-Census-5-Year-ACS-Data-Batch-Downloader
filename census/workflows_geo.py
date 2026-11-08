@@ -185,7 +185,11 @@ def spatial_autocorrelation(
 
     Args:
         weights: "queen" (default), "rook", or "knn".
-        local: Also return local clusters with multiple-comparison correction.
+        local: Also return local clusters with multiple-comparison correction
+            (BH, alpha 0.10, 999 permutations). p_sim is one-sided (folded):
+            p_adjusted <= 0.05 is the two-sided 0.10 reading. Simulation:
+            little power on ~150 areas, and spatially patterned sampling
+            error creates spurious clusters (see local_notes).
         replicates_path: Census replicates (build_analysis_frame) for a
             design-based SE of I. That SE is conservative (validated coverage
             0.987 for nominal 0.90).
@@ -203,6 +207,7 @@ def spatial_autocorrelation(
             lisa = spatial.local_morans(gdf, column, w, replicates=reps)
             payload["local_output_path"] = _write_frame(lisa, output_path, "local_morans.csv")
             payload["local_preview"] = _records(lisa, 10)
+            payload["local_notes"] = list(lisa.attrs.get("notes", []))
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     i_value = payload["global"].get("I") if isinstance(payload["global"], dict) else None
@@ -218,9 +223,17 @@ def spatial_regression(
     model: str = "lag",
     weights: str = "queen",
     replicates_path: Optional[str] = None,
+    method: str = "ml",
 ) -> Dict[str, Any]:
     """Spatial lag or spatial error regression (PySAL spreg) with Lagrange
     multiplier diagnostics; replicate SEs when replicates are given.
+
+    Args:
+        method: "ml" (default) or "gm". Simulation with ACS sampling error in
+            the outcome: ML lag intervals for rho covered 0.48 (rho 0.3) and
+            0.003 (rho 0.6) for nominal 0.90, GMM lag 0.90 and 0.89; use
+            method="gm" when rho matters. Error model: lambda is attenuated
+            (either method); beta intervals hold. See the result notes.
 
     Example: spatial_regression("frame.parquet", "poverty_rate ~ median_rent", "tract", 2023, model="error")
     """
@@ -228,7 +241,7 @@ def spatial_regression(
 
     try:
         gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
-        res = spatial.spatial_regression(formula, gdf, w, model=model, replicates=_release_replicates(_read_replicates(replicates_path), year))
+        res = spatial.spatial_regression(formula, gdf, w, model=model, method=method, replicates=_release_replicates(_read_replicates(replicates_path), year))
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
