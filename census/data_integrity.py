@@ -5,18 +5,26 @@ Bundled tables (data/price_indexes/*.csv, data/price_parities/*.csv) carry the
 SHA-256 of their exact bytes in a sidecar JSON. When a table is read from the
 package's own data directory, :func:`read_table_bytes` hashes the bytes it is
 about to parse and raises :class:`BundledDataIntegrityError` on a mismatch.
-A successful check is cached per file (path, size, modification time) for the
-life of the process, so repeated loads do not re-hash.
+The loaders (census.inflation, census.rpp) cache each parsed table for the
+life of the process, so a file is read and hashed once; clearing their caches
+(``load_price_index.cache_clear()``, ``rpp.clear_cache()``) re-reads and
+re-checks it.
 
 Tables from a caller-supplied directory are not checked against anything; the
 caller gets their SHA-256 back to record in the result's provenance.
 """
 
 import hashlib
+import json
 import os
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-_VERIFIED: Dict[Tuple[str, int, int, str], bool] = {}
+from census import errors
+
+INTEGRITY_NEXT_STEP = (
+    "restore the bundled data (git checkout -- data/, or reinstall the package) or regenerate it with the "
+    "update script named in the error, then call again; do not substitute other price values"
+)
 
 
 class BundledDataIntegrityError(ValueError):
@@ -31,23 +39,22 @@ def same_directory(a: str, b: str) -> bool:
     return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
 
 
-def clear_verification_cache() -> None:
-    _VERIFIED.clear()
+def read_sidecar(path: str) -> Dict[str, Any]:
+    """A table's sidecar JSON, or {} when it is missing."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-def _key(path: str, expected: str) -> Tuple[str, int, int, str]:
-    st = os.stat(path)
-    return (os.path.normcase(os.path.realpath(path)), st.st_size, st.st_mtime_ns, expected)
-
-
-def is_verified(path: str, expected: Optional[str]) -> bool:
-    return bool(expected) and _key(path, expected) in _VERIFIED  # type: ignore[arg-type]
+def integrity_error_result(exc: BundledDataIntegrityError) -> Dict[str, Any]:
+    """Structured failure (error_code BUNDLED_DATA_INTEGRITY, next_step) for tools and the CLI."""
+    return errors.error_result(errors.BUNDLED_DATA_INTEGRITY, str(exc), summary=str(exc),
+                               next_step=INTEGRITY_NEXT_STEP)
 
 
 def verify_bundled_bytes(path: str, raw: bytes, expected: Optional[str], sidecar: str, update_script: str) -> None:
     """Raise unless ``raw`` (the bytes of bundled ``path``) hashes to ``expected``."""
-    if expected and is_verified(path, expected):
-        return
     actual = sha256_bytes(raw)
     if not expected or actual != expected:
         raise BundledDataIntegrityError(
@@ -57,7 +64,6 @@ def verify_bundled_bytes(path: str, raw: bytes, expected: Optional[str], sidecar
             f"`git checkout -- {os.path.dirname(path)}` (or reinstall the package), or regenerate the "
             f"table and its checksum with `python {update_script}`."
         )
-    _VERIFIED[_key(path, expected)] = True
 
 
 def read_table_bytes(

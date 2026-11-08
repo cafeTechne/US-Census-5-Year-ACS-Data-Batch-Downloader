@@ -202,11 +202,17 @@ Figures with the same file name from different folders are prefixed with the fol
 the citation ("U.S. Census Bureau, American Community Survey 5-Year Estimates, 2020-2024;
 tables B15002, B19013. Retrieved via the Census Data API"), and `provenance` with
 `analysis_status: exploratory`, `data_source`, the SHA-256 of each input (extraction metadata,
-model frame, replicate file) and, per extraction, the table, release, states, endpoint,
+model frame, replicate file; keyed by the path relative to the inputs' common folder, e.g.
+`extract/26/B19013/B19013_extraction_metadata.json`, so the two states' files stay apart) and, per extraction, the table, release, states, endpoint,
 package version, git commit and number of failed calls (0). `bundle/methods.md` repeats each
 result's summary, interval statement and notes (including the RPP notes from
-`place_adjust_frame`). The data source is observed, not declared: a cache marked synthetic
-(`cache import` of a synthetic file) would label the bundle `synthetic` instead.
+`place_adjust_frame`). The data source is not declared and not read from whatever cache exists
+when the bundle is made: it is what the inputs recorded when their data were read. Each
+extraction metadata file records the source observed at extraction time (`data_source`; a cache
+marked synthetic by `cache import` of a synthetic file gives `synthetic`). Inputs that record
+no source give `unknown`; synthetic and real inputs together give `mixed` with a `MIXED DATA
+SOURCES` warning. A saved result with `"success": false` is refused (a failed step is not a
+result) unless `allow_failed_results=true`, which lists it under "Failed steps" in `methods.md`.
 
 This analysis is **exploratory**: it was not pre-registered with `run_manifest`, whose
 manifests take one state per run and have no place-adjustment step (see "Toolkit gaps").

@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from census import errors
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
 from census.workflows import _load_frame, _records, _write_frame
 from census.results import interval_description
 from census.workflows_inference import _fail, _ok, _out_dir, _read_replicates, interval_next_step, result_summary
@@ -225,6 +226,8 @@ def adjust_for_place(
             adjusted = rpp.adjust_for_place_and_time(value, geography, year, base_year, state=state)
         described = rpp.describe_place_adjustment(geography, year, state=state, base_year=base_year,
                                                   acs_period_years=period_years)
+    except BundledDataIntegrityError as exc:
+        return integrity_error_result(exc)
     except _ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     return _ok(f"{value:,.0f} in {geography} ({year}) = {adjusted:,.0f} at national-average prices"
@@ -328,11 +331,15 @@ def place_adjust_frame(
             unmatched = sorted(set(reps.loc[sel, "GEOID"].astype(str)) - set(by_geoid))
             f = reps.loc[sel, "GEOID"].astype(str).map(by_geoid).to_numpy(float)
             cols = ["estimate"] + [c for c in REPLICATE_COLUMNS if c in reps.columns]
+            # whole-number replicate files read as int64; pandas 3 refuses float values in int columns
+            reps[cols] = reps[cols].astype(float)
             reps.loc[sel, cols] = reps.loc[sel, cols].to_numpy(float) * f[:, None]
             if unmatched:
                 reps = reps[~(sel & reps["GEOID"].astype(str).isin(unmatched))]
             rep_out = _write_frame(reps, replicates_output_path
                                    or os.path.splitext(replicates_path)[0] + "_rpp.parquet", "replicates_rpp.parquet")
+    except BundledDataIntegrityError as exc:
+        return integrity_error_result(exc)
     except (*_ERRORS, rpp.RPPUnavailable) as exc:
         return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
     path = _write_frame(frame, output_path or os.path.splitext(input_path)[0] + "_rpp.parquet", "frame_rpp.parquet")
@@ -347,13 +354,20 @@ def place_adjust_frame(
                      "counties use the state nonmetropolitan-portion RPP (BEA nonmetro portions include "
                      f"micropolitan counties). CBSA membership from {boundary_source} (OMB bulletin 23-01 "
                      "delineation, as in BEA's RPPs).")
+    # provenance as in rpp.describe_place_adjustment: advisories and an unverified custom RPP table
+    advisories = sorted({a for p in parity.values() for a in p["advisories"]})
+    custom = next((p["custom_table"] for p in parity.values() if p.get("custom_table")), None)
+    notes += advisories
+    if custom:
+        notes.append(rpp.custom_table_note(custom))
     notes.append(rpp.RPP_ESTIMATION_ERROR_NOTE)
     return _ok(f"Adjusted {', '.join(variables)} for {len(frame)} rows with {len(parity)} RPP area(s).",
                "fit_model or make_map with input_path=output_path"
                + (" and replicates_path=replicates_output_path" if rep_out else "")
                + "; state in results that a regional price parity adjustment was applied",
                output_path=path, replicates_output_path=rep_out, areas=areas, year=int(year),
-               rpp_areas=_records(counts), notes=notes, applied_by_default=False)
+               rpp_areas=_records(counts), notes=notes, advisories=advisories, custom_table=custom,
+               applied_by_default=False)
 
 
 def make_web_map(

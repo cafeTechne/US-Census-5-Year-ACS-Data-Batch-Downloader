@@ -56,6 +56,7 @@ from census import calculate_cv as _calculate_cv
 from census import describe_variable as _describe_variable
 from census import generate_codebook as _generate_codebook
 from census.concordance import BLOCKING_KINDS
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
 from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
@@ -946,6 +947,8 @@ def adjust_inflation(
         adjusted = _adjust_inflation(value, from_year, to_year, index=index, allow_provisional=allow_provisional)
     except PriceIndexUnavailable as exc:
         return errors.error_result(errors.PRICE_INDEX_UNAVAILABLE, str(exc.args[0]))
+    except BundledDataIntegrityError as exc:
+        return integrity_error_result(exc)
     table = load_price_index(index, allow_provisional=allow_provisional)
     info = price_index_info(index)
     custom = {"custom_table": info["custom_table"]} if "custom_table" in info else {}

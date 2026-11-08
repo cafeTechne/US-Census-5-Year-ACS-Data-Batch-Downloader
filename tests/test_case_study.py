@@ -276,12 +276,13 @@ class TestResultsBundleAndSave(unittest.TestCase):
             code = main(list(argv))
         return code, json.loads(buf.getvalue())
 
-    def _inputs(self):
+    def _inputs(self, source=None):
         meta = os.path.join(self.dir, "B19013_extraction_metadata.json")
         with open(meta, "w", encoding="utf-8") as f:
             json.dump({"table_code": "B19013", "dataset": "acs5", "years": [2024], "geo_level": "county",
                        "endpoint": "https://api.census.gov/data/{year}/acs/acs5",
-                       "entities": [{"state_code": "26"}, {"state_code": "36"}], "failed_calls": []}, f)
+                       "entities": [{"state_code": "26"}, {"state_code": "36"}], "failed_calls": [],
+                       "data_source": source or {"kind": "census_api", "synthetic": False}}, f)
         figs = []
         for folder in ("26", "36"):
             os.makedirs(os.path.join(self.dir, folder), exist_ok=True)
@@ -322,11 +323,9 @@ class TestResultsBundleAndSave(unittest.TestCase):
         self.assertIn("exploratory", methods)
         self.assertIn("RPP error not included.", methods)
 
-    def test_bundle_follows_synthetic_cache(self):
-        from census.cache import QueryCache
-
-        QueryCache(os.environ["CENSUS_CACHE_PATH"]).mark_synthetic(description="generated test data")
-        meta, _ = self._inputs()
+    def test_bundle_follows_recorded_synthetic_source(self):
+        """The source recorded in the extraction metadata, not the cache present at bundle time."""
+        meta, _ = self._inputs({"kind": "synthetic", "synthetic": True, "description": "generated test data"})
         saved = os.path.join(self.dir, "r.json")
         with open(saved, "w", encoding="utf-8") as f:
             json.dump({"success": True, "summary": "x"}, f)
@@ -336,6 +335,7 @@ class TestResultsBundleAndSave(unittest.TestCase):
         self.assertEqual(code, 0, res)
         self.assertTrue(res["data_source"]["synthetic"])
         self.assertEqual(res["data_source"]["kind"], "synthetic")
+        self.assertIn("generated test data", res["citation"])
         self.assertNotIn("Retrieved via the Census Data API", res["citation"])
 
     def test_bundle_missing_result_file(self):

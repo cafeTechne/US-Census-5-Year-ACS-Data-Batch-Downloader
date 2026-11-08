@@ -19,6 +19,7 @@ UNVERIFIED_CONCORDANCE = "UNVERIFIED_CONCORDANCE"
 METADATA_UNAVAILABLE = "METADATA_UNAVAILABLE"
 API_HTTP_ERROR = "API_HTTP_ERROR"
 NO_DATA = "NO_DATA"
+BUNDLED_DATA_INTEGRITY = "BUNDLED_DATA_INTEGRITY"
 
 ERROR_CODES: Dict[str, str] = {
     INVALID_INPUT: "An argument is missing or malformed.",
@@ -33,6 +34,8 @@ ERROR_CODES: Dict[str, str] = {
     METADATA_UNAVAILABLE: "Variable metadata for a vintage could not be loaded.",
     API_HTTP_ERROR: "The Census API request failed.",
     NO_DATA: "The Census API returned no rows.",
+    BUNDLED_DATA_INTEGRITY: "A bundled price table (price index or Regional Price Parity CSV) does not match the "
+                            "checksum shipped with it; restore or regenerate it before adjusting dollars.",
 }
 
 
