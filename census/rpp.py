@@ -55,6 +55,10 @@ RPP_ESTIMATION_ERROR_NOTE = (
     "RPPs are BEA estimates with their own estimation error (not published as standard errors); that error "
     "is not included in ACS MOEs or in adjusted MOEs."
 )
+# BEA's MSA RPPs (every year, as revised) use the OMB bulletin 23-01 delineation (rpp.json
+# "msa_delineation"). The Census 2024 CBSA boundary file carries it (checked 2026-11-08: its 393
+# metropolitan CBSAs are BEA's 387 MSAs plus 6 in Puerto Rico, which have no RPP).
+RPP_CBSA_BOUNDARY_YEAR = 2024
 
 
 class RPPUnavailable(KeyError):
@@ -233,6 +237,19 @@ def place_parity(geography: Any, year: int, state: Optional[str] = None, portion
     if custom is not None:
         out["custom_table"] = custom
     return out
+
+
+def county_rpp_area(county_geoid: str, cbsa: Optional[str] = None, lsad: Optional[str] = None) -> str:
+    """BEA RPP area (rpp.csv GEO FIPS) for a county: its MSA when the county is in a
+    metropolitan CBSA (``lsad == "M1"``), else its state's nonmetropolitan portion
+    (BEA nonmetro portions are built from micropolitan and rural counties). CBSA
+    membership must follow BEA's delineation (:data:`RPP_CBSA_BOUNDARY_YEAR`)."""
+    county = str(county_geoid).strip()
+    if len(county) != 5 or not county.isdigit():
+        raise ValueError(f"county GEOID must be 5 digits, got {county_geoid!r}")
+    if lsad == "M1" and cbsa:
+        return str(cbsa).zfill(5)
+    return f"{county[:2]}999"
 
 
 def adjust_for_place(value: float, geography: Any, year: int, state: Optional[str] = None,

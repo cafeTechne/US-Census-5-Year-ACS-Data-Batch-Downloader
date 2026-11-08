@@ -9,7 +9,7 @@ tool to call next, so smaller local models can follow the workflow
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -85,12 +85,36 @@ def _read_replicates(path: Optional[str]) -> Optional[pd.DataFrame]:
     return read_replicates(path)
 
 
+def _load_frames(input_path: Any) -> pd.DataFrame:
+    """One file, or several merged into one row per GEOID (and Year): files of
+    different tables add columns, files of different states add rows. A cell
+    given different values by two files is an error, never resolved silently."""
+    if isinstance(input_path, str):
+        return _load_frame(input_path)
+    paths = list(input_path or [])
+    if not paths:
+        raise ValueError("input_path is an empty list")
+    frames = [_load_frame(str(p)) for p in paths]
+    if len(frames) == 1:
+        return frames[0]
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    if "GEOID" not in df.columns:
+        raise ValueError("every input file needs a GEOID column")
+    df["GEOID"] = df["GEOID"].astype(str)
+    keys = [c for c in ("GEOID", "Year") if c in df.columns]
+    grouped = df.groupby(keys, sort=False)
+    conflicts = [c for c in df.columns if c not in keys and (grouped[c].nunique(dropna=True) > 1).any()]
+    if conflicts:
+        raise ValueError(f"input files disagree on {conflicts[:5]} for the same {'/'.join(keys)}")
+    return grouped.first().reset_index()
+
+
 def build_analysis_frame(
-    input_path: str,
+    input_path: Union[str, List[str]],
     variables: Optional[List[str]] = None,
     derive: Optional[List[Dict[str, Any]]] = None,
     use_replicates: bool = False,
-    table_code: Optional[str] = None,
+    table_code: Optional[Union[str, List[str]]] = None,
     year: Optional[int] = None,
     output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -99,12 +123,13 @@ def build_analysis_frame(
     replicate values for exact sampling error.
 
     Args:
-        input_path: CSV/Parquet from batch_download.
+        input_path: CSV/Parquet from batch_download, or a list of them (other
+            tables are joined on GEOID/Year; other states are stacked).
         variables: Estimate columns to keep, e.g. ["B19013_001E"]. Default: all.
         derive: Optional derived variables, e.g. [{"name": "poverty_rate",
             "op": "proportion", "num": "B17001_002E", "den": "B17001_001E"}].
         use_replicates: Download Census replicate estimates (needs table_code, year).
-        table_code, year: Detailed table and release for replicates.
+        table_code, year: Detailed table(s) (one code or a list) and release for replicates.
         output_path: Where to write the frame (default downloads/analysis_frame.parquet).
 
     Example: build_analysis_frame("out/B17001_county_panel_2023.csv", derive=[...])
@@ -112,7 +137,7 @@ def build_analysis_frame(
     from census.analysis import analysis_frame, attach_replicates, coverage_report
 
     try:
-        df = _load_frame(input_path)
+        df = _load_frames(input_path)
         if year is not None and "Year" in df.columns:
             df = df[df["Year"] == year]
         frame = analysis_frame(df, variables=variables, derive=derive)
@@ -120,7 +145,9 @@ def build_analysis_frame(
         if use_replicates:
             if not (table_code and year):
                 return _fail(errors.INVALID_INPUT, "use_replicates needs table_code and year.")
-            rep = _replicates_for(table_code, year, df, list(df["GEOID"].astype(str)))
+            tables = [table_code] if isinstance(table_code, str) else list(table_code)
+            geoids = list(df["GEOID"].astype(str))
+            rep = pd.concat([_replicates_for(t, year, df, geoids) for t in tables], ignore_index=True)
             frame, replicates = attach_replicates(frame, rep, derive=derive)
         report = coverage_report(frame, replicates)
     except _INPUT_ERRORS as exc:
@@ -471,6 +498,113 @@ def make_table(kind: str, input_path: str, output_dir: Optional[str] = None,
     files = list(written.values()) if isinstance(written, dict) else written
     return _ok(f"Wrote {kind} table '{name}'.", "include the .tex or .md table in your write-up",
                table_paths=[str(p) for p in files], markdown=table.to_markdown())
+
+
+def _file_sha256(path: str) -> str:
+    import hashlib
+
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _extraction_record(path: str) -> Optional[Dict[str, Any]]:
+    """Provenance fields of an extraction metadata JSON (None for other files)."""
+    if not path.endswith("_extraction_metadata.json"):
+        return None
+    with open(path, encoding="utf-8") as f:
+        meta = json.load(f)
+    return {"table": meta.get("table_code"), "dataset": meta.get("dataset"), "years": meta.get("years"),
+            "geo_level": meta.get("geo_level"), "endpoint": meta.get("endpoint"),
+            "states": sorted({e.get("state_code") for e in meta.get("entities") or [] if e.get("state_code")}),
+            "variables": meta.get("variables"), "generated_at": meta.get("generated_at"),
+            "package_version": meta.get("package_version"), "git_commit": meta.get("git_commit"),
+            "failed_calls": len(meta.get("failed_calls") or [])}
+
+
+def make_results_bundle(
+    output_dir: str,
+    results: Dict[str, str],
+    figure_paths: Optional[List[str]] = None,
+    inputs: Optional[List[str]] = None,
+    title: str = "",
+    notes: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Collect an exploratory (not pre-registered) analysis into one results bundle:
+    results JSON, figures, methods.md, and bundle.json with every file's SHA-256,
+    the data citation and provenance (data source, input hashes, extractions).
+
+    Args:
+        output_dir: Bundle folder.
+        results: {name: path} of tool results saved with `python -m census tool ... --save PATH`.
+        figure_paths: Figure files to copy (e.g. make_map figure_paths).
+        inputs: Files the analysis used (extraction metadata JSON, frames, replicate
+            files); their SHA-256 and, for extraction metadata, table, years, states,
+            endpoint and call failures are recorded.
+        title, notes: Methods heading and extra methods/limitations lines.
+    The data source is observed, not declared: a cache marked synthetic labels the
+    bundle synthetic; otherwise it is Census Data API data (kind "census_api").
+    Pre-registered analyses use run_manifest instead (status "confirmatory").
+    """
+    import shutil
+
+    from census.manifest import STATUS_EXPLORATORY, observed_data_source
+    from census.report_tables import data_citation, results_bundle
+
+    try:
+        loaded = {}
+        for name, path in (results or {}).items():
+            with open(path, encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+        input_records, extractions = [], []
+        for path in inputs or []:
+            input_records.append({"path": os.path.basename(path), "sha256": _file_sha256(path)})
+            rec = _extraction_record(path)
+            if rec:
+                extractions.append(rec)
+        os.makedirs(os.path.join(output_dir, "figures"), exist_ok=True)
+        figs = list(figure_paths or [])
+        base = [os.path.basename(p) for p in figs]
+        # same file name from different folders (e.g. maps/26/choropleth.pdf, maps/36/...): prefix the folder
+        names = [b if base.count(b) == 1 else f"{os.path.basename(os.path.dirname(os.path.abspath(p)))}_{b}"
+                 for p, b in zip(figs, base)]
+        if len(set(names)) != len(names):
+            raise ValueError("figure_paths contain the same file name twice in the same folder name")
+        for path, name in zip(figs, names):
+            shutil.copyfile(path, os.path.join(output_dir, "figures", name))
+    except (OSError, ValueError, TypeError) as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
+    synthetic, marker = observed_data_source()
+    source = {"kind": "synthetic" if synthetic else "census_api", "synthetic": synthetic,
+              **{k: v for k, v in marker.items() if k in ("description", "generator")}}
+    releases = sorted({int(y) for e in extractions for y in e.get("years") or []})
+    tables = sorted({e["table"] for e in extractions if e.get("table")})
+    citation = data_citation(releases, tables, synthetic=synthetic, description=marker.get("description"))
+    lines = [f"# {title or 'Results'}", "",
+             f"**Analysis status:** {STATUS_EXPLORATORY} (not a pre-registered manifest run).", "",
+             f"**Data:** {citation}", ""]
+    for name, res in loaded.items():
+        lines.append(f"## {name}")
+        lines.append("")
+        if res.get("summary"):
+            lines.append(str(res["summary"]))
+            lines.append("")
+        interval = res.get("interval")
+        if isinstance(interval, dict) and interval.get("text"):
+            lines += [f"Intervals: {interval['text']}", ""]
+        for note in res.get("notes") or []:
+            lines.append(f"- {note}")
+        lines.append("")
+    if notes:
+        lines += ["## Notes and limitations", ""] + [f"- {n}" for n in notes] + [""]
+    provenance = {"analysis_status": STATUS_EXPLORATORY, "data_source": source, "inputs": input_records,
+                  "extractions": extractions, "title": title}
+    bundle = results_bundle(output_dir, methods="\n".join(lines), results=loaded, provenance=provenance,
+                            citation=citation)
+    return _ok(f"Results bundle with {len(loaded)} result(s), {len(figure_paths or [])} figure file(s) and "
+               f"{len(input_records)} input hash(es) written; data source {source['kind']}.",
+               "cite bundle.json (file hashes and provenance) and methods.md with the results",
+               output_dir=output_dir, data_source=source, citation=citation,
+               files=len(bundle.get("files", {})), extractions=extractions)
 
 
 def save_json(result: Dict[str, Any], path: str) -> str:

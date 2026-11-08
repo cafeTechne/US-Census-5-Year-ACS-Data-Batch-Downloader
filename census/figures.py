@@ -24,7 +24,7 @@ import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 import matplotlib
 import numpy as np
@@ -133,12 +133,15 @@ def _se_from(frame: pd.DataFrame, se_col: Optional[str], moe_col: Optional[str])
 
 def _finish(fig: Figure, name: str, out_dir: Union[str, Path], values: pd.DataFrame,
             caption: str, provenance: Dict[str, Any], formats: Sequence[str], dpi: int,
-            notes: Optional[List[str]] = None) -> FigureOutput:
+            notes: Optional[List[str]] = None, after_layout: Optional[Callable[[Figure], None]] = None
+            ) -> FigureOutput:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     paths: Dict[str, str] = {}
     with matplotlib.rc_context(STYLE):
         fig.tight_layout()
+        if after_layout is not None:  # e.g. maps: keep a legend outside the axes inside the figure
+            after_layout(fig)
         for fmt in formats:
             fmt = fmt.lower()
             if fmt not in _METADATA:
