@@ -178,12 +178,31 @@ class TestReplicateMoranAndLisa(unittest.TestCase):
         from census.spatial import local_morans
         out = local_morans(self.df, "y", self.w, permutations=199, correction="bh", replicates=self.reps)
         self.assertEqual(len(out), 64)
-        self.assertTrue((out["p_adjusted"] >= out["p_sim"] - 1e-15).all())
+        self.assertTrue((out["p_adjusted"] >= out["p_value"] - 1e-15).all())
         self.assertTrue(set(out["quadrant"]) <= {"HH", "LH", "LL", "HL"})
         self.assertTrue(((out["cluster"] == "ns") | out["significant"]).all())
         self.assertTrue(out["replicate_quadrant_share"].between(0, 1).all())
         from census.multitest import adjust_pvalues
-        np.testing.assert_allclose(out["p_adjusted"], adjust_pvalues(out["p_sim"].to_numpy(), "bh"))
+        # default: two-sided p_value = min(1, 2 p_sim), BH-adjusted (PLAN_ROUND_15 B, owner decision)
+        np.testing.assert_allclose(out["p_value"], np.minimum(1.0, 2 * out["p_sim"]))
+        np.testing.assert_allclose(out["p_adjusted"], adjust_pvalues(out["p_value"].to_numpy(), "bh"))
+        np.testing.assert_array_equal(out["significant"], out["p_adjusted"] <= 0.10)
+        self.assertIn("two-sided", out.attrs["notes"][0])
+        old = local_morans(self.df, "y", self.w, permutations=199, sided="folded")
+        np.testing.assert_allclose(old["p_value"], old["p_sim"])
+        np.testing.assert_allclose(old["p_adjusted"], adjust_pvalues(old["p_sim"].to_numpy(), "bh"))
+        with self.assertRaises(ValueError):
+            local_morans(self.df, "y", self.w, permutations=19, sided="one")
+
+    def test_local_morans_defaults(self):
+        import inspect
+
+        from census.spatial import local_morans
+        sig = inspect.signature(local_morans).parameters
+        self.assertEqual(sig["permutations"].default, 9999)
+        self.assertEqual(sig["sided"].default, "two")
+        self.assertEqual(sig["correction"].default, "bh")
+        self.assertEqual(sig["alpha"].default, 0.10)
 
 
 @unittest.skipUnless(HAVE_PYSAL, "PySAL stack not installed")
@@ -260,6 +279,28 @@ class TestSpatialRegressionReference(unittest.TestCase):
             self.assertEqual(res.diagnostics["replicate_failures"], 0)
         with self.assertRaises(ValueError):
             spatial_regression("y ~ x", df, w, target="these_areas")
+
+    def test_default_method_per_model(self):
+        # PLAN_ROUND_15 B (owner decision): GMM for lag, ML for error; ML lag stays available with its caveat
+        from census.simulation import lattice_weights, sar_field
+        from census.spatial import DEFAULT_METHODS, spatial_regression
+        self.assertEqual(DEFAULT_METHODS, {"lag": "gm", "error": "ml"})
+        rng = np.random.default_rng(5)
+        w = lattice_weights(7)
+        x = rng.uniform(0, 10, 49)
+        df = pd.DataFrame({"GEOID": w.id_order, "x": x, "y": 5 + 2 * x + sar_field(w.full()[0], 0.4, 2.0, rng)})
+        lag = spatial_regression("y ~ x", df, w)
+        self.assertIn("GMM", lag.method)
+        self.assertIsNone(lag.provenance["ml_method"])
+        self.assertIn("the default for the lag model", " ".join(lag.notes))
+        explicit = spatial_regression("y ~ x", df, w, method="gm")
+        np.testing.assert_allclose(lag.coefficients["estimate"], explicit.coefficients["estimate"])
+        ml = spatial_regression("y ~ x", df, w, method="ml")
+        self.assertIn("ML", ml.method)
+        self.assertIn("ML lag intervals for rho covered 0.48", " ".join(ml.notes))
+        err = spatial_regression("y ~ x", df, w, model="error")
+        self.assertIn("ML", err.method)
+        self.assertIn("understates the true lambda", " ".join(err.notes))
 
 
 @unittest.skipUnless(HAVE_PYSAL, "PySAL stack not installed")
