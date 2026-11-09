@@ -227,6 +227,8 @@ def spatial_regression(
 ) -> Dict[str, Any]:
     """Spatial lag or spatial error regression (PySAL spreg) with Lagrange
     multiplier diagnostics; replicate SEs when replicates are given.
+    Lag model: report ``effects`` (direct/indirect/total, with SEs and
+    intervals) first; its beta is not the marginal effect.
 
     Args:
         method: "gm" or "ml". Default: "gm" (GMM) for the lag model, "ml"
@@ -246,8 +248,10 @@ def spatial_regression(
     except _GEO_ERRORS as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
     out = res.to_dict()
-    return _ok(result_summary(res), "make_table or report coefficients with the LM diagnostics",
-               **{k: v for k, v in out.items() if k != "summary"})
+    step = ("report the effects table first (direct, indirect and total effects with their intervals: the "
+            "marginal effects; beta is not one), then rho and the LM diagnostics"
+            if res.effects is not None else "make_table or report coefficients with the LM diagnostics")
+    return _ok(result_summary(res), step, **{k: v for k, v in out.items() if k != "summary"})
 
 
 def spatial_small_area_estimates(

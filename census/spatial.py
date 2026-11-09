@@ -85,6 +85,20 @@ ERROR_CAVEAT = (
     "the spatial correlation of the observed residual, sampling noise included, and understates the true lambda "
     "(bias -0.16 at 0.3, -0.26 at 0.6; 90% intervals covered 0.56-0.58 and 0.16-0.19, ML and GMM alike); "
     "beta intervals covered 0.88-0.91")
+LAG_EFFECTS_NOTE = (
+    "Lag model: the coefficient beta of a covariate is NOT its marginal effect. A change in x in one area "
+    "changes y there and, through the spatial multiplier (I - rho W)^-1, in every other area. Report the "
+    "effects table (result.effects): direct = average effect of an area's own x on its own y (feedback "
+    "included), indirect = average spillover summed over all other areas, total = direct + indirect "
+    "(LeSage & Pace 2009); delta-method SEs from the fit's (beta, rho) covariance, plus replicate refits "
+    "when replicates are given")
+SPATIAL_PARAMETER_TEST_NOTE = (
+    "The p-value of {sp} tests {sp} = 0 within the fitted model; it is not a specification test (it does not "
+    "choose between the lag, error and Durbin models; Juhl 2021, Political Analysis 29(2), sec. 3.2). "
+    "lm_tests compare each spatial model with OLS only")
+# Effects need the eigenvalues of the dense W (O(n^3), once per fit); above
+# this many areas they are not computed (a note says so).
+EFFECTS_MAX_N = 5000
 NOISY_COVARIATE_CAVEAT = (
     "Covariates with sampling error attenuate beta (simulation: bias about -20%, 90% interval coverage "
     "0.19-0.40); spatial_regression has no measurement-error correction")
@@ -559,6 +573,90 @@ def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, m
     return r, betas, se[:k], spatial
 
 
+def weights_eigenvalues(w) -> Optional[np.ndarray]:
+    """Eigenvalues of the (row-standardized) dense W, or None above EFFECTS_MAX_N areas.
+
+    Computed once per fit and reused by every replicate refit: the effect
+    multipliers at any rho are sums over them (Ord 1975).
+    """
+    if w.n > EFFECTS_MAX_N:
+        return None
+    return np.linalg.eigvals(np.asarray(w.full()[0], float))
+
+
+def lag_multipliers(eig: np.ndarray, rho: float) -> Dict[str, float]:
+    """Average impact multipliers of the spatial lag model at ``rho`` and their rho-derivatives.
+
+    S(W) = (I - rho W)^-1. direct = tr(S)/n = mean 1/(1 - rho w_i) over the
+    eigenvalues w_i of W; total = 1' S 1 / n = 1/(1 - rho) for a
+    row-standardized W without islands (islands: :func:`_lag_effect_values`);
+    indirect = total - direct (LeSage & Pace 2009, ch. 2.7). NaN outside
+    |rho| < 1.
+    """
+    nan = {k: float("nan") for k in ("direct", "total", "indirect", "d_direct", "d_total", "d_indirect")}
+    if not (np.isfinite(rho) and abs(rho) < 1):
+        return nan
+    e = np.asarray(eig)
+    den = 1.0 - rho * e
+    direct = float(np.real(np.mean(1.0 / den)))
+    d_direct = float(np.real(np.mean(e / den ** 2)))
+    total, d_total = 1.0 / (1.0 - rho), 1.0 / (1.0 - rho) ** 2
+    return {"direct": direct, "total": total, "indirect": total - direct,
+            "d_direct": d_direct, "d_total": d_total, "d_indirect": d_total - d_direct}
+
+
+def _lag_effect_values(params: np.ndarray, eig: np.ndarray, n_x: int, share: np.ndarray) -> np.ndarray:
+    """Effects [x1 direct, x1 indirect, x1 total, x2 ...] from [const, x1..xk, rho].
+
+    ``share``: the mean row sum of W (1 for row-standardized W without
+    islands); with islands, total = beta (1 - s + s / (1 - rho)) where s is
+    the share of areas with neighbors, since an island's row of S is e_i.
+    """
+    rho = float(params[-1])
+    m = lag_multipliers(eig, rho)
+    s = float(share)
+    tot = (1 - s) + s * m["total"] if np.isfinite(m["total"]) else float("nan")
+    out = []
+    for j in range(n_x):
+        b = float(params[1 + j])
+        out += [b * m["direct"], b * (tot - m["direct"]), b * tot]
+    return np.asarray(out, float)
+
+
+def lag_effects(params: np.ndarray, vm: Optional[np.ndarray], names: List[str], eig: np.ndarray,
+                share: float = 1.0) -> Dict[str, Any]:
+    """Direct, indirect and total effects of a spatial lag fit with delta-method SEs.
+
+    ``params``: [const, x1..xk, rho] (spreg order); ``vm``: their covariance
+    (spreg ``vm``; for GM_Lag and ML_Lag rho is the last row). For covariate
+    k the effects are beta_k times the multipliers of :func:`lag_multipliers`;
+    the gradient is (multiplier) for beta_k and beta_k x d(multiplier)/d rho
+    for rho, so Var = g' V[(k, rho)] g. Returns {"terms", "estimate", "se"}.
+    """
+    params = np.asarray(params, float).ravel()
+    n_x = len(names)
+    est = _lag_effect_values(params, eig, n_x, np.asarray(share))
+    se = np.full(len(est), np.nan)
+    rho = float(params[-1])
+    m = lag_multipliers(eig, rho)
+    s = float(share)
+    if vm is not None and np.isfinite(m["direct"]):
+        V = np.asarray(vm, float)
+        mult = {"direct": (m["direct"], m["d_direct"]),
+                "total": ((1 - s) + s * m["total"], s * m["d_total"])}
+        mult["indirect"] = (mult["total"][0] - m["direct"], mult["total"][1] - m["d_direct"])
+        r = V.shape[0] - 1
+        for j in range(n_x):
+            b, k = float(params[1 + j]), 1 + j
+            sub = V[np.ix_([k, r], [k, r])]
+            for i, eff in enumerate(("direct", "indirect", "total")):
+                mu, dmu = mult[eff]
+                g = np.array([mu, b * dmu])
+                se[3 * j + i] = math.sqrt(max(float(g @ sub @ g), 0.0))
+    terms = [f"{v} ({eff})" for v in names for eff in ("direct", "indirect", "total")]
+    return {"terms": terms, "estimate": est, "se": se}
+
+
 def lm_diagnostics(y: np.ndarray, X: np.ndarray, w) -> Dict[str, Any]:
     """OLS Lagrange-multiplier tests (Anselin et al. 1996) and a model suggestion."""
     import spreg
@@ -674,6 +772,13 @@ def spatial_regression(
                      "is 'lambda'")
     if weights.islands:
         notes.append(f"{len(weights.islands)} island(s) in the weights (zero spatial lag)")
+    eig = weights_eigenvalues(weights) if model == "lag" else None
+    share = 1.0 - len(weights.islands) / weights.n
+    eff = None
+    if eig is not None:
+        k = len(terms)
+        eff = lag_effects(betas, np.asarray(r.vm, float)[:k, :k], names, eig, share)
+    B = None
     if replicates is not None and len(replicates):
         all_used = formula_variables(formula, d)
         used = [v for v in all_used if v in set(replicates["variable"])]
@@ -711,7 +816,29 @@ def spatial_regression(
                      "absorbs outcome sampling error), as for census.models.fit_replicate")
     level = confidence_level if confidence_level <= 1 else confidence_level / 100
     table = _table(params, se_model, se_sampling, level, target)
+    effects = None
+    if model == "lag":
+        table["interpretation"] = ["intercept"] + [
+            "coefficient on X in y = rho W y + X beta + e: NOT the marginal effect (see effects)"] * len(names) + [
+            "spatial lag parameter rho (spillover strength); its p-value tests rho = 0, not the model "
+            "specification"]
+        if eff is None:
+            notes.insert(0, f"{LAG_EFFECTS_NOTE}. Effects were NOT computed: {weights.n} areas exceed "
+                            f"EFFECTS_MAX_N={EFFECTS_MAX_N} (dense eigenvalues of W)")
+        else:
+            eff_sampling = pd.Series(np.nan, index=eff["terms"])
+            if B is not None:
+                E = np.vstack([_lag_effect_values(b, eig, len(names), np.asarray(share)) for b in B])
+                eff_sampling[:] = np.sqrt(REPLICATE_FACTOR * ((E - eff["estimate"]) ** 2).sum(axis=0))
+            effects = _table(pd.Series(eff["estimate"], index=eff["terms"]), pd.Series(eff["se"], index=eff["terms"]),
+                             eff_sampling, level, target)
+            effects.insert(1, "variable", [v for v in names for _ in range(3)])
+            effects.insert(2, "effect", ["direct", "indirect", "total"] * len(names))
+            notes.insert(0, LAG_EFFECTS_NOTE)
+            diagnostics["effects_multipliers"] = {k: v for k, v in lag_multipliers(eig, spatial).items()
+                                                  if not k.startswith("d_")}
     notes.append(f"intervals and p-values use the '{target}' target")
+    notes.append(SPATIAL_PARAMETER_TEST_NOTE.format(sp=sp_name))
     notes.append(ERROR_CAVEAT if model == "error" else LAG_ML_CAVEAT if method == "ml" else LAG_GM_NOTE)
     notes.append(NOISY_COVARIATE_CAVEAT)
     return ModelResult(
@@ -719,5 +846,8 @@ def spatial_regression(
         method=est_method, uncertainty_sources=sources, confidence_level=level, notes=notes,
         diagnostics=diagnostics,
         provenance={"library": "spreg", "spatial_parameter": sp_name, "ml_method": ml_method if method == "ml" else None,
-                    "weights": getattr(weights, "census_report", None) or weights_report(weights)},
+                    "weights": getattr(weights, "census_report", None) or weights_report(weights),
+                    **({"coefficient_meaning": "beta is the coefficient on X in y = rho W y + X beta + e, not a "
+                                               "marginal effect; see effects"} if model == "lag" else {})},
+        effects=effects,
     )

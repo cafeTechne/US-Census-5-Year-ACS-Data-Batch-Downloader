@@ -217,6 +217,10 @@ def regression_table(
     disp.append({"Term": "N", **{m: f"{results[m].n_obs:,}" for m in models}})
     notes = []
     for m, res in results.items():
+        if getattr(res, "effects", None) is not None:
+            notes.append(f"{m}: spatial lag model; its coefficients are not marginal effects: report the "
+                         "direct/indirect/total effects (effects_table) first.")
+    for m, res in results.items():
         info = infos[m]
         # the interval text already carries the REPLICATES INCOMPLETE note: do not repeat it
         extra = [n for n in res.notes if not (info["replicates_incomplete"]
@@ -233,6 +237,50 @@ def regression_table(
     notes.append(_star_note(correction, "across each model's coefficients"
                             + ("" if include_intercept_in_family else ", intercept excluded")))
     return ReportTable(title, pd.DataFrame(disp, columns=["Term"] + models).fillna(""), data,
+                       notes, citation, label)
+
+
+def effects_table(
+    result: ModelResult, *, uncertainty: str = "se", digits: int = 3,
+    title: str = "Spatial lag model: direct, indirect and total effects", citation: str = "", label: str = "",
+) -> ReportTable:
+    """Direct, indirect and total effects of a spatial lag ModelResult (``result.effects``).
+
+    One row per covariate, columns Direct / Indirect / Total, each estimate
+    with ``(SE)`` or ``[lower, upper]`` beneath (the interval target of the
+    fit). These are the marginal effects of the lag model; its coefficients
+    (regression_table) are not. No significance markers.
+    """
+    eff = getattr(result, "effects", None)
+    if eff is None:
+        raise ValueError("result has no effects table (only spatial lag models from census.spatial do)")
+    if uncertainty not in ("se", "ci"):
+        raise ValueError("uncertainty must be 'se' or 'ci'")
+    info = interval_description(result)
+    basis = info["basis_column"]
+    disp = []
+    for v in dict.fromkeys(eff["variable"]):
+        top, bottom = {"Variable": v}, {"Variable": ""}
+        for e in ("direct", "indirect", "total"):
+            r = eff[(eff["variable"] == v) & (eff["effect"] == e)].iloc[0]
+            top[e.capitalize()] = _fmt(r["estimate"], digits)
+            se = r.get(basis)
+            ok = se is not None and np.isfinite(float(se))
+            bottom[e.capitalize()] = ((f"({_fmt(se, digits)})" if ok else "(SE undefined)") if uncertainty == "se"
+                                      else (f"[{_fmt(r['ci_lower'], digits)}, {_fmt(r['ci_upper'], digits)}]"
+                                            if ok else "[undefined]"))
+        disp += [top, bottom]
+    data = eff.assign(se_basis=basis, confidence_level=result.confidence_level, method=result.method,
+                      n_obs=result.n_obs)
+    notes = ["Effects of a one-unit change in each covariate in every area, averaged over areas (LeSage & Pace "
+             "2009): direct = own-area effect including feedback through neighbours; indirect = spillover "
+             "summed over all other areas; total = direct + indirect. The model coefficients (beta) are not "
+             "marginal effects.",
+             f"{result.method}; {info['text']}.",
+             ("Standard errors in parentheses" if uncertainty == "se" else "Confidence intervals in brackets")
+             + f" ({basis}; delta method from the fit's (beta, rho) covariance"
+             + (", plus replicate refits" if "sampling_replicate" in result.uncertainty_sources else "") + ")."]
+    return ReportTable(title, pd.DataFrame(disp, columns=["Variable", "Direct", "Indirect", "Total"]), data,
                        notes, citation, label)
 
 

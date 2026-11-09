@@ -278,19 +278,28 @@ class ModelResult:
     notes: List[str] = field(default_factory=list)
     diagnostics: Dict[str, Any] = field(default_factory=dict)
     provenance: Dict[str, Any] = field(default_factory=dict)
+    # Spatial lag models (census.spatial): direct/indirect/total effects, the
+    # marginal effects (the lag-model beta is not one). COEFFICIENT_COLUMNS
+    # plus "variable" and "effect"; None for every other model.
+    effects: Optional[pd.DataFrame] = None
 
     def summary(self, info: Optional[Dict[str, Any]] = None) -> str:
         """One line; includes the REPLICATES INCOMPLETE note (from the interval text) at most once."""
         info = info or interval_description(self)
+        lead = ("EFFECTS FIRST: report the direct/indirect/total effects table (the marginal effects); "
+                "the lag-model coefficients (beta) are not marginal effects. " if self.effects is not None else "")
         return (
-            f"{self.model_type} '{self.formula}', n={self.n_obs}, method={self.method}, "
+            f"{lead}{self.model_type} '{self.formula}', n={self.n_obs}, method={self.method}, "
             f"SEs include: {', '.join(self.uncertainty_sources)}; {info['text']}"
         )
 
     def to_dict(self) -> Dict[str, Any]:
         info = interval_description(self)
+        head: Dict[str, Any] = {"model_type": self.model_type, "formula": self.formula, "n_obs": self.n_obs}
+        if self.effects is not None:  # effects before the coefficients (PLAN_ROUND_16 A2)
+            head["effects"] = self.effects
         return _jsonable({
-            "model_type": self.model_type, "formula": self.formula, "n_obs": self.n_obs,
+            **head,
             "coefficients": self.coefficients, "method": self.method,
             "uncertainty_sources": self.uncertainty_sources,
             "confidence_level": self.confidence_level, "notes": self.notes,
