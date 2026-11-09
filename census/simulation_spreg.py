@@ -45,11 +45,11 @@ by the delta method, SE(MSE)/(2 RMSE).
 """
 
 import math
+import warnings
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy import linalg as sla, optimize, stats as sps
 
 from .simulation import (FAST, FULL, NOMINAL, SimConfig, _geoids, acs_frame, draw_cv, lattice_weights,
@@ -211,7 +211,9 @@ def me_sem_fit(y: np.ndarray, X: np.ndarray, W: np.ndarray, Sigma: np.ndarray,
     M = [s["M"] @ s["C"], s["M"] @ (A * s["dC"])]
     F = np.array([[0.5 * np.sum(M[a] * M[b].T) for b in range(2)] for a in range(2)])
     try:
-        Fi = sla.inv(F)
+        with warnings.catch_warnings():  # singular at the A = 0 boundary: se_lambda is then not meaningful
+            warnings.simplefilter("ignore", sla.LinAlgWarning)
+            Fi = sla.inv(F)
         se_lam = math.sqrt(Fi[1, 1]) if Fi[1, 1] > 0 else float("nan")
     except (np.linalg.LinAlgError, sla.LinAlgError, ValueError):
         se_lam = float("nan")
@@ -622,7 +624,6 @@ def _rs_rejections(y: np.ndarray, x: np.ndarray, w) -> Dict[str, bool]:
     from .spatial import _silence_spreg_output
 
     _silence_spreg_output()
-    import warnings
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -731,12 +732,18 @@ def study_common_factor_lr(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
                 rng = np.random.default_rng(cfg.seed + 3000 + 100 * zi + 10 * ri + gi)
                 tests: Dict[str, List[bool]] = {"chi2": [], "bootstrap_residual": []}
                 lrs, fail = [], 0
+                fitted: Dict[str, List[float]] = {"sem_lambda": [], "sem_beta": [], "sdm_rho": [], "sdm_beta": [],
+                                                  "sdm_theta": []}
                 for rep in range(reps):
                     x = rng.standard_normal(n)
                     y = SPREG16_JUHL_BETA * x + S @ (gam * x + rng.standard_normal(n))
                     X = np.column_stack([np.ones(n), x])
                     try:
-                        lr, _, sem = common_factor_lr(y, X, W, eig)
+                        lr, sdm, sem = common_factor_lr(y, X, W, eig)
+                        for k, v in (("sem_lambda", sem["lambda"]), ("sem_beta", sem["beta"][1]),
+                                     ("sdm_rho", sdm["rho"]), ("sdm_beta", sdm["coef"][1]),
+                                     ("sdm_theta", sdm["coef"][2])):
+                            fitted[k].append(float(v))
                         boot = (lr_residual_bootstrap(y, X, W, eig, lr, sem, rng)
                                 if gam in SPREG16_JUHL_BOOT_GAMMAS and rep < SPREG16_LR_BOOT_REPS else None)
                     except Exception:  # noqa: BLE001 - counted and reported
@@ -749,7 +756,10 @@ def study_common_factor_lr(cfg: SimConfig, reps: int) -> List[Dict[str, Any]]:
                 label = f"Juhl DGP, queen {side}x{side} (n={n}), rho={rho:g}, gamma={gam:g}"
                 base = {"design": "juhl", "n_areas": n, "rho": rho, "gamma": gam, "scenario": "none",
                         "h0_true": gam == 0, "fit_failures": fail, "lr_df": 1,
-                        "lr_mean": float(np.mean(lrs)) if lrs else float("nan")}
+                        "lr_mean": float(np.mean(lrs)) if lrs else float("nan"),
+                        # mean ML estimates: SEM lambda and beta vs the truth (rho, beta = 2) show how an
+                        # SEM misreads an SDM-like DGP (Lacombe & LeSage 2015); SDM: beta + gamma, -rho beta
+                        **{f"{k}_mean": float(np.mean(v)) if v else float("nan") for k, v in fitted.items()}}
                 rows += _lr_rows(label, "no sampling error", gam == 0, base, tests)
     return rows
 

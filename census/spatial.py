@@ -96,6 +96,13 @@ SPATIAL_PARAMETER_TEST_NOTE = (
     "The p-value of {sp} tests {sp} = 0 within the fitted model; it is not a specification test (it does not "
     "choose between the lag, error and Durbin models; Juhl 2021, Political Analysis 29(2), sec. 3.2). "
     "lm_tests compare each spatial model with OLS only")
+LAG_EFFECTS_CAVEAT = (
+    "Caveat (simulation 'spatial_dgp_recovery', 12x12 rook lattice, nominal 0.90): with ACS outcome error the "
+    "default GMM lag's delta-method effect intervals covered 0.87-0.92 at rho 0.3 but 0.80-0.87 at rho 0.6, "
+    "where the indirect and total effects are heavy-tailed (rho near 1 in some samples; mean bias +0.8, "
+    "simulated percentile intervals covered 0.97-0.98). ML lag effects fail under outcome error (indirect "
+    "0.40 and 0.002), as its rho does. If the data follow a spatial Durbin process (W X effects), the lag "
+    "model's effects are biased, and GMM's W X instruments are invalid (rho near 1)")
 # Effects need the eigenvalues of the dense W (O(n^3), once per fit); above
 # this many areas they are not computed (a note says so).
 EFFECTS_MAX_N = 5000
@@ -837,7 +844,7 @@ def spatial_regression(
                              eff_sampling, level, target)
             effects.insert(1, "variable", [v for v in names for _ in range(3)])
             effects.insert(2, "effect", ["direct", "indirect", "total"] * len(names))
-            notes.insert(0, LAG_EFFECTS_NOTE)
+            notes[0:0] = [LAG_EFFECTS_NOTE, LAG_EFFECTS_CAVEAT]
             diagnostics["effects_multipliers"] = {k: v for k, v in lag_multipliers(eig, spatial).items()
                                                   if not k.startswith("d_")}
     notes.append(f"intervals and p-values use the '{target}' target")

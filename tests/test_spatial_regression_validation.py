@@ -111,6 +111,8 @@ class TestLagEffects(unittest.TestCase):
         keys = list(d)
         self.assertLess(keys.index("effects"), keys.index("coefficients"))
         self.assertEqual(res.notes[0], LAG_EFFECTS_NOTE)
+        self.assertIn("simulation 'spatial_dgp_recovery'", res.notes[1])
+        self.assertIn("not a specification test", " ".join(res.notes))
         self.assertTrue(res.summary().startswith("EFFECTS FIRST"))
         interp = res.coefficients.set_index("term")["interpretation"]
         self.assertIn("NOT the marginal effect", interp["x"])
