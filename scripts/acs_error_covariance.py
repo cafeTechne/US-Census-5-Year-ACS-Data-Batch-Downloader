@@ -416,7 +416,8 @@ def write_report(df, extras, files, years, elapsed, findings, conclusion):
     L.append(f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} by "
              f"`scripts/acs_error_covariance.py` (commit {_git_commit()}, {elapsed / 60:.1f} min). "
              "PLAN_ROUND_16 workstream C (C1-C2). Status: **info** (gates nothing). "
-             f"Per-class numbers: `docs/audits/{os.path.basename(OUT_CSV)}`.\n")
+             f"Per-class numbers: `docs/audits/{os.path.basename(OUT_CSV)}` (written by the script; git-ignored like "
+             "the other audit CSVs).\n")
     L.append("## Question\n")
     L.append("Do the sampling errors of ACS 5-year estimates covary between areas (neighbouring tracts or "
              "counties, tracts in the same county), and can 80 replicates measure that covariance well enough "
