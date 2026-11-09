@@ -118,6 +118,8 @@ def _load_tables(year, level, state, files):
         files.append({"kind": "VRE", "year": year, "level": level, "state": state, "table": t,
                       "url": f.attrs["source_url"], "sha256": f.attrs["sha256"],
                       "acquisition": f.attrs.get("acquisition", "download")})
+        if f.attrs.get("substitution"):  # e.g. B01003 total read from B01001 (census.replicate.fetch_vre)
+            files[-1]["substitution"] = f.attrs["substitution"]
         frames[t] = f
     return frames
 
@@ -519,8 +521,20 @@ def write_report(df, extras, files, years, elapsed, findings, conclusion):
         seen.add(f["url"])
         name = f"`{f['url'].rsplit('/', 1)[-1]}`" + (" (manual download)" if f.get("acquisition") == "manual download"
                                                      else "")
+        if f.get("substitution"):
+            name += f" (substitute for `{f['substitution']['requested_url'].rsplit('/', 1)[-1]}`)"
         rows.append([f["kind"], f["year"], f["level"], name, f"`{f['sha256']}`"])
     L.append(_md_table(["kind", "year", "level", "file", "SHA-256"], rows) + "\n")
+    subs = [f for f in files if f.get("substitution")]
+    if subs:
+        L.append("**Substituted files** (census.replicate.fetch_vre, `VRE_TOTAL_FALLBACKS`):\n")
+        L.append(_md_table(["year", "level", "state", "requested", "reason", "used instead"],
+                           [[f["year"], f["level"], STATES.get(f["state"], f["state"]),
+                             f["substitution"]["requested_url"], f["substitution"]["reason"],
+                             ", ".join(f"{k} = {v} of {f['substitution']['source_url']}"
+                                       for k, v in f["substitution"]["lines"].items())] for f in subs]) + "\n")
+        L.append("Basis: " + subs[0]["substitution"]["verification"] + " The substitute file's SHA-256 is the one "
+                 "listed above.\n")
     missing = [f for f in files if f.get("unavailable")]
     if missing:
         L.append("**Unavailable files** (skipped; the variables that need them are not analysed for that state "
@@ -816,19 +830,27 @@ FINDINGS = """\
    scored on held-out replicates after removing the design directions, it is worse than independence
    for every variable (-25 to -50 nats for tracts). Without that projection it appeared to gain 30-90
    nats, entirely from the cross-half dependence created by the near-null design directions.
-6. **Stability across releases (tracts and counties, 2015-2019 vs 2020-2024).** One 2015-2019 file is
-   missing: Michigan tract total population (`2019/data/5-year/140/B01003_26.csv.zip`). census.gov's
-   firewall answered that one URL with its 'Request Rejected' page (support ID 13979921158196382640) on
-   the first request and on the single delayed retry, while every other 2019 tract file, including New
-   York's B01003_36 from the same directory, downloaded normally; the rejection is URL-specific, not
-   rate limiting (see Data: unavailable files). So the 2015-2019 tract comparison has no Michigan
-   population row; everything else was analysed. Results: (a) **Uncontrolled variables are stable.**
+6. **Stability across releases (tracts and counties, 2015-2019 vs 2020-2024).** One 2015-2019 file,
+   Michigan tract total population (`2019/data/5-year/140/B01003_26.csv.zip`), is refused by census.gov's
+   firewall ('Request Rejected', support ID 13979921158196382640) for every client, while every other
+   2019 tract file, including New York's B01003_36 from the same directory, downloads normally. Its only
+   line is read instead from line 1 ("Total:") of the same release's Michigan tract B01001 file
+   (B01001_26; see Data: substituted files). The two lines are the same total population: in the New York
+   2015-2019 tract files B01003 line 1 and B01001 line 1 agree in ESTIMATE, MOE and all 80 replicates for
+   all 4,918 tracts (0 differing cells), a check re-run by tests/test_replicate_live.py. All variables are
+   therefore analysed in both states and releases. Results: (a) **Uncontrolled variables are stable.**
    Poverty count, poverty rate, owner share and median income stay at 0 to within +/-0.005 at every order
    in both states and releases; of 108 tract class comparisons for them, 3 differ by more than 2 combined
-   SEs (about 5 expected by chance; largest |z| 2.5, all differences <= 0.004). (b) **Population (New
-   York) is stable**: order 1 -0.039 [-0.060, -0.018] in 2015-2019 vs -0.040 [-0.060, -0.020] (within
-   county -0.042 vs -0.043), the same fast decay, a county aggregation ratio of 0.000 again (tract errors
-   sum to zero within a county), and split-half pair reliability 0.60 (2020-2024: 0.61). (c)
+   SEs (about 5 expected by chance; largest |z| 2.5, all differences <= 0.004). (b) **Population is stable
+   in both states.** New York: order 1 -0.039 [-0.060, -0.018] in 2015-2019 vs -0.040 [-0.060, -0.020]
+   (within county -0.042 vs -0.043), the same fast decay, a county aggregation ratio of 0.000 again (tract
+   errors sum to zero within a county), and split-half pair reliability 0.60 (2020-2024: 0.61). Michigan
+   (B01001 line 1): order 1 -0.066 [-0.088, -0.044] vs -0.071 [-0.090, -0.052]; within county -0.075
+   [-0.103, -0.046] vs -0.081 [-0.106, -0.056]; across county -0.005 [-0.014, 0.004] vs +0.003 [-0.007,
+   0.014]; order 2 within county -0.019 vs -0.018; rook vs corner-only -0.075 vs -0.028 (2020-2024: -0.080
+   vs -0.029); aggregation ratio 0.000 in both releases; split-half pair reliability at order 1 0.64
+   (2020-2024: 0.67). Every Michigan population class difference between releases is at most 0.008
+   (order 1 across county, 1.1 combined SEs). As in 2020-2024, Michigan's within-county order-1 correlation is nearly twice New York's. (c)
    **Households change sign.** Occupied housing units (B25003_001) in 2015-2019 have *positive* mean r
    between neighbouring tracts in the same county - Michigan order 1 +0.025 [0.016, 0.033] (within county
    +0.028), New York +0.012 [0.003, 0.020] - against -0.025 and -0.015 in 2020-2024 (differences 8.4 and
@@ -873,8 +895,8 @@ analyses map it is indistinguishable from zero.**
   stress tests outside the observed range, not plausible ACS conditions for these variables; the
   realistic end of the grid is -0.1..0.05. Correlated-error scenarios with large positive rho should be
   stated as hypothetical (for example for variables or survey designs not studied here).
-* Limits: two states, two releases at tract level (2015-2019 without Michigan population: firewall
-  rejection of that one file), 80 replicates (about 77 effective), and counties as a proxy for weighting
+* Limits: two states, two releases at tract level (2015-2019 Michigan population read from B01001 line
+  1, verified identical to B01003 line 1; Findings 6), 80 replicates (about 77 effective), and counties as a proxy for weighting
   areas. The 95% |r| of 0.23 for a single pair means no individual pair can be
   flagged; only class means are evidence.
 """

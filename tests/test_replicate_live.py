@@ -64,6 +64,23 @@ class TestLiveVRE(unittest.TestCase):
         self.assertTrue(check["passed"], check)
         self.assertEqual(check["controlled_rows"], 52)  # state total population is controlled
 
+    def test_b01003_total_equals_b01001_total(self):
+        """Basis of the B01003 <- B01001 substitute (census.replicate.VRE_TOTAL_FALLBACKS): line 1 identical."""
+        from census.replicate import REPLICATE_COLUMNS
+
+        kw = dict(check_moe=False, allow_substitute=False)
+        b3 = self._fetch("B01003", 2019, "tract", state_code="36", **kw)
+        b1 = self._fetch("B01001", 2019, "tract", state_code="36", lines=[1], **kw)
+        self.assertNotIn("substitution", b3.attrs)
+        self.assertEqual(len(b3), len(b1))
+        self.assertGreater(len(b3), 4000)
+        cols = ["GEOID", "NAME", "estimate", "moe", "se_published", "controlled"] + REPLICATE_COLUMNS
+        left = b3.set_index("GEOID", drop=False)[cols].sort_index()
+        right = b1.set_index("GEOID", drop=False)[cols].sort_index()
+        self.assertTrue(left.index.equals(right.index))
+        differing = int(((left != right) & ~(left.isna() & right.isna())).to_numpy().sum())
+        self.assertEqual(differing, 0)
+
     def test_published_table_list_matches_registry(self):
         from census.replicate import vre_tables
 

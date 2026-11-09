@@ -563,5 +563,157 @@ class TestTableList(unittest.TestCase):
         self.assertEqual(session.calls, [])
 
 
+
+REJECTED_PAGE = (b"<html><head><title>Request Rejected</title></head><body>The requested URL was rejected. "
+                 b"Your support ID is: 13979921158196382640<br><br></body></html>")
+
+
+def _vre_zip(table, title, lines, seed=0):
+    """Synthetic 2019 tract VRE zip for Michigan: ``lines`` = [(ORDER, TITLE)], 3 tracts, MOEs consistent."""
+    rng = np.random.default_rng(seed)
+    head = ["TBLID", "GEOID", "NAME", "ORDER", "TITLE", "ESTIMATE", "MOE", "CME", "SE"] + [
+        f"Var_Rep{i}" for i in range(1, 81)]
+    out = [",".join(head), f"{table},,,,{title}" + "," * (len(head) - 5),
+           f"{table},,,,Universe:  Total population" + "," * (len(head) - 5)]
+    for k in range(3):
+        for order, ltitle in lines:
+            est = 1000 + 300 * k + 10 * order
+            reps = est + rng.integers(-60, 61, 80)
+            se = math.sqrt(4.0 / 80.0 * float(np.sum((reps - est) ** 2)))
+            moe = round(Z90 * se)
+            out.append(",".join([table, f"14000US2616300{k}100", f"\"Census Tract {k}, Wayne County, Michigan\"",
+                                 str(order), ltitle, str(est), str(moe), f"+/-{moe}", str(round(se))]
+                                + [str(int(r)) for r in reps]))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"{table}_26.csv", "\n".join(out) + "\n")
+    return buf.getvalue()
+
+
+class TestTotalFallback(unittest.TestCase):
+    """B01003 line 1 <- B01001 line 1 when census.gov rejects (or 404s) the B01003 file."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.url3 = rp.vre_url("B01003", 2019, "tract", "26")
+        self.url1 = rp.vre_url("B01001", 2019, "tract", "26")
+        # Identical pair: same seed, same line-1 values; B01001 has more lines after line 1.
+        self.b01003 = _vre_zip("B01003", "TOTAL POPULATION", [(1, "Total")], seed=3)
+        self.b01001 = _vre_zip("B01001", "SEX BY AGE", [(1, "Total")], seed=3)
+        self.b01001 = self._add_lines(self.b01001)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def _add_lines(raw):
+        """B01001 copy whose line 1 is titled 'Total:' and which has a line 2 per tract."""
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            rows = zf.read("B01001_26.csv").decode().rstrip("\n").split("\n")
+        out = rows[:3]
+        for r in rows[3:]:
+            out.append(r.replace(",1,Total,", ",1,Total:,"))
+            parts = r.replace(",1,Total,", ",2,Male:,").split(",")
+            out.append(",".join(parts))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("B01001_26.csv", "\n".join(out) + "\n")
+        return buf.getvalue()
+
+    def _fetch(self, session, **kw):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            frame = rp.fetch_vre("B01003", 2019, "tract", "26", session=session, cache_dir=self.tmp, **kw)
+        return frame, [str(w.message) for w in caught]
+
+    def _check_substituted(self, frame, msgs, reason):
+        sub = frame.attrs["substitution"]
+        self.assertEqual(sub["requested_table"], "B01003")
+        self.assertEqual(sub["requested_url"], self.url3)
+        self.assertEqual(sub["source_table"], "B01001")
+        self.assertEqual(sub["lines"], {"B01003_001": "B01001_001"})
+        self.assertEqual(sub["source_url"], self.url1)
+        self.assertEqual(sub["source_sha256"], hashlib.sha256(self.b01001).hexdigest())
+        self.assertIn(reason, sub["reason"])
+        self.assertIn("0 differing cells", sub["verification"])
+        self.assertEqual(frame.attrs["source_url"], self.url1)  # the file actually read
+        self.assertEqual(frame.attrs["sha256"], sub["source_sha256"])
+        self.assertEqual(frame.attrs["table"], "B01003")
+        self.assertTrue(frame.attrs["notes"][0].startswith("substituted_source:"))
+        self.assertTrue(any("substitute" in m and self.url1 in m for m in msgs))  # never silent
+        self.assertEqual(set(frame["variable"]), {"B01003_001"})
+        self.assertEqual(set(frame["title"]), {"Total"})
+        self.assertTrue(frame.attrs["moe_check"]["passed"])
+        # The B01003 path holds nothing: the substitute is not cached under the requested name.
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "140", "B01003_26.csv.zip")))
+
+    def test_rejection_uses_b01001_with_provenance(self):
+        page = FakeResponse(REJECTED_PAGE, ctype="text/html")
+        frame, msgs = self._fetch(FakeSession({self.url3: page, self.url1: FakeResponse(self.b01001)}))
+        self._check_substituted(frame, msgs, "13979921158196382640")
+        self.assertEqual(frame.attrs["substitution"]["support_id"], "13979921158196382640")
+        self.assertIsNone(frame.attrs["substitution"]["http_status"])
+
+    def test_404_uses_b01001(self):
+        frame, msgs = self._fetch(FakeSession({self.url1: FakeResponse(self.b01001)}))
+        self._check_substituted(frame, msgs, "404")
+        self.assertEqual(frame.attrs["substitution"]["http_status"], 404)
+        # Cached B01001 is reused on the next call (B01003 is requested again, then B01001 from the cache).
+        s2 = FakeSession({})
+        again, _ = self._fetch(s2)
+        self.assertEqual(s2.calls, [self.url3])
+        pd.testing.assert_frame_equal(again, frame)
+
+    def test_relabelled_frame_equals_b01003_frame(self):
+        direct = rp.fetch_vre("B01003", 2019, "tract", "26", cache_dir=self.tmp,
+                              session=FakeSession({self.url3: FakeResponse(self.b01003)}))
+        shutil.rmtree(os.path.join(self.tmp, "140"))
+        frame, _ = self._fetch(FakeSession({self.url1: FakeResponse(self.b01001)}))
+        pd.testing.assert_frame_equal(frame, direct, check_like=False)
+
+    def test_substitute_unavailable_raises_original_error(self):
+        page = FakeResponse(REJECTED_PAGE, ctype="text/html")
+        with self.assertRaises(rp.VREDownloadError) as ctx:
+            self._fetch(FakeSession({self.url3: page}))  # B01001: 404
+        self.assertTrue(ctx.exception.rejected)
+        self.assertEqual(ctx.exception.url, self.url3)
+        self.assertIn("13979921158196382640", str(ctx.exception))
+        with self.assertRaises(rp.VREDownloadError) as ctx:
+            self._fetch(FakeSession({}))
+        self.assertIn(self.url3, str(ctx.exception))
+
+    def test_other_lines_tables_and_opt_out_do_not_fall_back(self):
+        page = FakeResponse(REJECTED_PAGE, ctype="text/html")
+        session = FakeSession({self.url3: page, self.url1: FakeResponse(self.b01001)})
+        with self.assertRaises(rp.VREDownloadError) as ctx:
+            self._fetch(session, lines=[1, 2])
+        self.assertIn("No verified substitute", str(ctx.exception))
+        self.assertIn("[2]", str(ctx.exception))
+        self.assertNotIn(self.url1, session.calls)
+        with self.assertRaises(rp.VREDownloadError):
+            self._fetch(session, allow_substitute=False)
+        self.assertNotIn(self.url1, session.calls)
+        url = rp.vre_url("B01001", 2019, "tract", "26")
+        with self.assertRaises(rp.VREDownloadError):  # B01001 itself has no substitute
+            rp.fetch_vre("B01001", 2019, "tract", "26", session=FakeSession({url: page}), cache_dir=self.tmp)
+        # Line 1 requested explicitly: substitute used.
+        frame, _ = self._fetch(session, lines=[1])
+        self.assertIn("substitution", frame.attrs)
+
+    def test_other_failures_do_not_fall_back(self):
+        session = FakeSession({self.url3: FakeResponse(b"", status=500, ctype="text/html"),
+                               self.url1: FakeResponse(self.b01001)})
+        with self.assertRaises(rp.VREDownloadError) as ctx:
+            self._fetch(session)
+        self.assertIn("HTTP 500", str(ctx.exception))
+        self.assertNotIn(self.url1, session.calls)
+
+    def test_lines_filter_without_substitution(self):
+        session = FakeSession({self.url1: FakeResponse(self.b01001)})
+        frame = rp.fetch_vre("B01001", 2019, "tract", "26", session=session, cache_dir=self.tmp, lines=[2])
+        self.assertEqual(set(frame["variable"]), {"B01001_002"})
+        self.assertNotIn("substitution", frame.attrs)
+
+
 if __name__ == "__main__":
     unittest.main()
