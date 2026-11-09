@@ -333,7 +333,31 @@ Independent outcome error keeps the size (the SEM-plus-noise null is not an SEM,
 
 ### SEM estimates across gamma (Lacombe & LeSage 2015; Juhl design, no sampling error)
 
-See the section "SEM lambda and beta across gamma" below.
+Mean ML estimates, 1000 repetitions per cell (true beta = 2; the DGP's rho is the SEM's "lambda" when gamma = 0):
+
+| rho | gamma | SEM lambda-hat, n = 49 / 100 / 225 / 400 | SEM beta-hat, n = 400 |
+| ---: | ---: | :--- | ---: |
+| 0.4 | 0 | 0.281 / 0.336 / 0.369 / 0.384 | 1.999 |
+| 0.4 | 0.5 | 0.298 / 0.363 / 0.384 / 0.395 | 2.487 |
+| 0.4 | 1.0 | 0.316 / 0.379 / 0.408 / 0.413 | 2.976 |
+| 0.6 | 0 | 0.481 / 0.545 / 0.572 / 0.583 | 1.999 |
+| 0.6 | 0.5 | 0.507 / 0.562 / 0.588 / 0.599 | 2.476 |
+| 0.6 | 1.0 | 0.536 / 0.608 / 0.631 / 0.644 | 2.943 |
+| 0.8 | 1.0 | 0.765 / 0.816 / 0.837 / 0.841 | 2.910 |
+
+**Reading** (consistent with Lacombe & LeSage 2015 and Juhl 2021):
+- **ML lambda has a small-sample downward bias** (-0.12 at n = 49, rho 0.6, gamma 0).
+- **An omitted variable correlated with x pushes the SEM's lambda up.** At n >= 225 with gamma = 1, lambda-hat exceeds the true rho.
+- **The SEM's beta absorbs gamma.** beta-hat is about beta + gamma (2.48 at gamma 0.5, 2.94 at gamma 1), slightly less at high rho. The SEM reports it as both the direct and the total effect, while the true total effect is beta + gamma / (1 - rho). The SEM therefore misses the indirect effect gamma rho / (1 - rho) entirely (see A3 for the Juhl DGP).
+- **The SDM's rho-hat matches the SEM's lambda-hat under H0** (the two models coincide).
+- **A diagnostic for users:**
+  - a gap between the SEM and OLS beta;
+  - significant lag-model indirect effects;
+  - a rejected common-factor LR.
+
+  Each is an omitted-variable signal (Lacombe & LeSage). None is decisive alone, given the LR's power.
+
+Reproducibility: the `common_factor_lr` rows from the 5-process run and a separate single-process rerun are identical.
 
 ### Conclusion (A4)
 
