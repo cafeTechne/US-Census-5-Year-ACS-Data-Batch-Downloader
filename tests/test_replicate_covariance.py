@@ -232,3 +232,38 @@ def test_holdout_comparison_prefers_true_structure():
     out0 = rc.holdout_model_comparison(d0, {"order12": cls})
     assert out0["gain_nats_per_replicate"]["order12"] < 0.2
     assert out0["gain_nats_per_replicate"]["order12"] < out["gain_nats_per_replicate"]["order12"]
+
+
+def _constrained(n, k, rng):
+    """iid deviations made orthogonal to k random replicate-space directions (a design constraint)."""
+    v = np.linalg.qr(rng.normal(size=(REPLICATE_COUNT, k)))[0].T  # (k, R) orthonormal
+    g = rng.normal(size=(n, REPLICATE_COUNT))
+    return g - (g @ v.T) @ v, v
+
+
+def test_replicate_spectrum_detects_design_null_directions():
+    rng = np.random.default_rng(12)
+    d, v = _constrained(1500, 3, rng)
+    spec = rc.replicate_spectrum(d)
+    assert spec["n_null"] == 3 and spec["effective_replicates"] == 77
+    cosines = np.linalg.svd(spec["null_directions"] @ v.T, compute_uv=False)
+    assert cosines.min() > 0.999
+    assert rc.replicate_spectrum(rng.normal(size=(1500, REPLICATE_COUNT)))["n_null"] == 0
+    small = rc.replicate_spectrum(d[:100])
+    assert small["n_null"] == 0 and "not detected" in small["note"]
+    # fewer effective replicates widen the null spread of a pairwise r to ~1/sqrt(R - k)
+    r = rc.pair_correlations(d, np.arange(0, 1500, 2), np.arange(1, 1500, 2))
+    assert np.std(r) == pytest.approx(1 / math.sqrt(77), rel=0.08)
+
+
+def test_holdout_removes_cross_half_dependence_from_design_directions():
+    rng = np.random.default_rng(13)
+    d, v = _constrained(1200, 3, rng)
+    leaky = rc.holdout_model_comparison(d, {}, remove_directions=None)
+    fixed = rc.holdout_model_comparison(d, {})
+    explicit = rc.holdout_model_comparison(d, {}, remove_directions=v)
+    # independent areas: only the cross-half leak lets Ledoit-Wolf beat independence
+    assert leaky["gain_nats_per_replicate"]["ledoit_wolf"] > 0
+    assert fixed["gain_nats_per_replicate"]["ledoit_wolf"] < 0
+    assert explicit["gain_nats_per_replicate"]["ledoit_wolf"] < 0
+    assert fixed["directions_removed"] == 4 and explicit["directions_removed"] == 3

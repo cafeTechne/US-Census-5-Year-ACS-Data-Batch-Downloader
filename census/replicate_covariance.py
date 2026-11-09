@@ -23,6 +23,12 @@ What 80 replicates can and cannot say
   and |r| > 0.22 happens 5% of the time (:func:`null_correlation`). Pairwise
   correlations are therefore never reported as individually established; only
   structured summaries over many pairs are (:func:`summarize_pair_correlations`).
+* The 80 ACS replicates are not 80 free dimensions: in 2020-2024 Michigan and
+  New York tract data every area's deviations nearly vanish along the same 3
+  replicate-space directions (:func:`replicate_spectrum`; a property of the
+  replicate-factor design), so the empirical null SD of r between independent
+  areas is about 1/sqrt(77) = 0.114-0.116 and |r| > 0.22 happens ~6% of the
+  time (docs/audits/acs_sampling_covariance.md).
 * Uncertainty of those summaries comes from (a) the 80 replicates, by a
   bootstrap over replicate columns (an approximation: SDR replicate
   deviations are close to, but not exactly, iid across replicates), and (b)
@@ -37,7 +43,7 @@ does not depend on census.replicate or on the network.
 """
 
 import math
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -60,6 +66,7 @@ __all__ = [
     "aggregation_variance_ratio",
     "ledoit_wolf_intensity",
     "holdout_model_comparison",
+    "replicate_spectrum",
     "rank_report",
 ]
 
@@ -522,6 +529,7 @@ def holdout_model_comparison(
     *,
     split: str = "random",
     seed: int = 0,
+    remove_directions: Any = "auto",
 ) -> Dict[str, Any]:
     """Score covariance models on replicates held out of the fit.
 
@@ -539,6 +547,17 @@ def holdout_model_comparison(
     A Ledoit-Wolf shrinkage model (identity target) is always included.
     A fitted structure that is not positive definite is projected (eigenvalues
     clipped at 1e-3) and flagged.
+
+    The 80 replicates are not exchangeable draws: real ACS deviations of every
+    area nearly vanish along a few directions of replicate space (a property
+    of the replicate-factor construction; :func:`replicate_spectrum`). Then
+    the held-out half's component along such a direction is minus the
+    training half's for every area at once - a dependence between the halves
+    that a low-rank model (Ledoit-Wolf) exploits and that is not covariance
+    between areas. ``remove_directions="auto"`` (default) projects each half
+    orthogonally to these directions (restricted to the half) and to the
+    constant vector; an (k, R) array gives the directions explicitly; None
+    disables it.
     """
     d = np.asarray(deviations, dtype=float)
     n, n_rep = d.shape
@@ -556,9 +575,24 @@ def holdout_model_comparison(
     flags: Dict[str, bool] = {name: False for name in models}
     lw_int = []
     base = []
+    if isinstance(remove_directions, str) and remove_directions == "auto":
+        directions = np.vstack([replicate_spectrum(d)["null_directions"], np.ones((1, n_rep))])
+    elif remove_directions is None:
+        directions = np.zeros((0, n_rep))
+    else:
+        directions = np.atleast_2d(np.asarray(remove_directions, dtype=float))
+
+    def half(idx: np.ndarray) -> np.ndarray:
+        h = d[:, idx]
+        if not directions.shape[0]:
+            return h
+        q, rr = np.linalg.qr(directions[:, idx].T)
+        q = q[:, np.abs(np.diag(rr)) > 1e-10]
+        return h - (h @ q) @ q.T
+
     for tr, te in (halves, halves[::-1]):
-        z_tr, sd = _standardized(d[:, tr])
-        x_te = math.sqrt(4.0) * d[:, te].T
+        z_tr, sd = _standardized(half(tr))
+        x_te = math.sqrt(4.0) * half(te).T
         z_te = x_te / sd
         diag = float(np.mean(-0.5 * np.sum(z_te * z_te, axis=1)))
         base.append(diag)
@@ -581,16 +615,52 @@ def holdout_model_comparison(
             scores[name].append(ll - diag)
             params[name].append(rho.tolist())
             flags[name] = flags[name] or projected
-        lw = ledoit_wolf_intensity(d[:, tr])
+        lw = ledoit_wolf_intensity(half(tr))
         lw_int.append(lw["intensity"])
         scores["ledoit_wolf"].append(_loglik_lowrank(lw["intensity"], z_tr, z_te) - diag)
     return {
         "n_areas": int(n), "n_replicates": int(n_rep), "split": split,
+        "directions_removed": int(directions.shape[0]),
         "gain_nats_per_replicate": {k: float(np.mean(v)) for k, v in scores.items()},
         "gain_by_direction": {k: [float(x) for x in v] for k, v in scores.items()},
         "fitted_rho": params, "projected_to_pd": flags,
         "ledoit_wolf_intensity": [float(x) for x in lw_int],
     }
+
+
+def replicate_spectrum(deviations: np.ndarray, threshold: float = 0.25) -> Dict[str, Any]:
+    """Eigenvalues of the replicate-space Gram matrix of standardized deviations.
+
+    For n areas with iid deviations the eigenvalues of Z^T Z / n (R x R; Z the
+    areas' deviations scaled to unit mean square) lie above the
+    Marchenko-Pastur lower edge (1 - sqrt(R/n))^2 (relative to their mean).
+    Directions with eigenvalue below ``threshold`` x that edge are near-null:
+    almost every area's deviation vector is orthogonal to them, a property of
+    the replicate design shared by all areas, which lowers the effective
+    number of replicates for a correlation to about R - k. Detection needs
+    n >= 4 R areas (otherwise no directions are returned and ``note`` says
+    so; pass directions found on a larger set, e.g. tracts, instead).
+    Returns the sorted eigenvalues relative to their mean, the (k, R)
+    near-null directions and R - k.
+    """
+    d = np.asarray(deviations, dtype=float)
+    n_rep = d.shape[1]
+    norm = np.sqrt(np.mean(d * d, axis=1, keepdims=True))
+    z = d[norm[:, 0] > 0] / norm[norm[:, 0] > 0]
+    n = z.shape[0]
+    _, s, vt = np.linalg.svd(z, full_matrices=False)
+    ev = s ** 2 / n
+    ratio = ev / np.mean(ev)
+    out = {"eigen_ratio": np.sort(ratio), "null_directions": np.zeros((0, n_rep)), "n_null": 0,
+           "effective_replicates": int(n_rep), "mp_lower_edge": math.nan, "note": ""}
+    if n < 4 * n_rep:
+        out["note"] = f"{n} areas < 4 x {n_rep} replicates: near-null directions not detected"
+        return out
+    edge = (1.0 - math.sqrt(n_rep / n)) ** 2
+    null = ratio < threshold * edge
+    out.update(null_directions=vt[null], n_null=int(null.sum()), effective_replicates=int(n_rep - null.sum()),
+               mp_lower_edge=float(edge))
+    return out
 
 
 def rank_report(deviations: np.ndarray) -> Dict[str, Any]:
