@@ -14,9 +14,13 @@ run with ``scripts/inference_validation.py --studies NAME``):
   y = y* + d with independent d_i ~ N(0, s_i^2), s_i = CV_i x mean(y*), CVs
   from the tract profile scaled by 0, 0.5, 1, 2. Fitted: the tool default
   (spreg ML_Error, uncorrected) and the engine's existing spatial
-  Fay-Herriot likelihood (census.sae_spatial; :func:`me_sem_fit` with
-  V = sigma^2 [(I - lambda W)'(I - lambda W)]^-1 + diag(s^2), REML and ML),
+  Fay-Herriot likelihood (census.sae_spatial) with
+  V = sigma^2 [(I - lambda W)'(I - lambda W)]^-1 + diag(s^2), REML and ML,
   whose rho is the SEM's lambda corrected for independent outcome error.
+  These rows call the shipped estimator itself,
+  census.spatial.error_model_known_variances (the function behind
+  ``spatial_regression(correct_outcome_error=True)``); :func:`me_sem_fit`
+  is used only for the dense-Sigma oracle.
 * ``spatial_error_attenuation_correlated`` (A1, correlated sampling
   errors): as above at CV x 1, with d ~ N(0, S R(gamma) S), R(gamma) the
   correlation matrix of a SAR(gamma) process on the same W (gamma 0.3, 0.6;
@@ -154,6 +158,11 @@ def me_sem_fit(y: np.ndarray, X: np.ndarray, W: np.ndarray, Sigma: np.ndarray,
     ``starts``. SEs from the expected information 0.5 tr(M V_k M V_l),
     M = P (REML) or V^-1 (ML), as census.sae_spatial's rho_se, and
     (X'V^-1X)^-1 (beta).
+
+    Its parameterization, bounds, starts and convergence rule differ from the
+    shipped estimator (census.spatial.error_model_known_variances), so the A1
+    diagonal-Sigma rows do not use it: here it is the dense-Sigma oracle (and
+    the null fit of the common-factor bootstrap).
     """
     method = method.upper()
     if method not in ("REML", "ML"):
@@ -358,6 +367,17 @@ def _uncorrected_sem(y: np.ndarray, x: np.ndarray, w) -> Tuple[float, float, flo
     return float(b[1]), float(se[1]), lam, float(se[2])
 
 
+def _shipped_correction(y: np.ndarray, x: np.ndarray, W: np.ndarray, s: np.ndarray, method: str
+                        ) -> Tuple[float, float, float, float, bool]:
+    """The tool's correct_outcome_error estimator (census.spatial.error_model_known_variances, diagonal s^2):
+    (beta, se, lambda, se, boundary). Non-convergence and singular fits raise RuntimeError (a fit failure)."""
+    from .spatial import error_model_known_variances
+
+    f = error_model_known_variances(y, np.column_stack([np.ones(len(y)), x]), W, s ** 2, method)
+    return (float(f["beta"][1]), float(math.sqrt(f["vcov_beta"][1, 1])), f["lambda"], f["se_lambda"],
+            f["boundary"])
+
+
 def _attenuation_cell(cfg: SimConfig, reps: int, seed: int, kind: str, lam: float, cv_scale: float,
                       gamma: Optional[float]) -> List[Dict[str, Any]]:
     side = SPREG16_SIDE
@@ -396,8 +416,11 @@ def _attenuation_cell(cfg: SimConfig, reps: int, seed: int, kind: str, lam: floa
             rec[names[0]]["fail"] += 1
         X = x[:, None]
         for k, meth, kind_s in corrected:
-            Sig = np.diag(s ** 2) if kind_s == "diag" else (s[:, None] * Lr) @ (s[:, None] * Lr).T
             try:
+                if kind_s == "diag":  # the shipped estimator (correct_outcome_error=True), same function
+                    fits[k] = _shipped_correction(y, x, W, s, meth)
+                    continue
+                Sig = (s[:, None] * Lr) @ (s[:, None] * Lr).T
                 f = me_sem_fit(y, X, W, Sig, method=meth)
                 if not f["converged"]:
                     raise ValueError("not converged")

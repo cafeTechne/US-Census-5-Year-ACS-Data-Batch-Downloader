@@ -132,6 +132,13 @@ _CONTROLLED_TOTAL_NAMES = ("population", "total_population", "pop", "total_pop",
 CORRECTION_METHODS = ("reml", "ml")
 CORRECTION_LAMBDA_BOUNDARY = 0.98  # |lambda| at or above: boundary fit (the A1 studies' definition)
 SIGMA2_ZERO_REL = 1e-8             # sigma^2 at or below this share of Var(y): boundary (as the A1 studies)
+# correct_outcome_error=True works on dense n x n matrices (O(n^3) per likelihood evaluation); larger frames
+# are refused. Measured (rook lattice, one BLAS thread, Python 3.14, scratch benchmark of the whole
+# spatial_regression call): see CORRECTION_COST_NOTE. 2,000 keeps one fit near 4 minutes and under 1 GB
+# (an MCP call stays interactive); time grows about n^2.6, so 3,000 areas would take about 13 minutes.
+CORRECTION_MAX_N = 2000
+CORRECTION_COST_NOTE = ("measured for a full call, one BLAS thread: n=1024 40 s / 0.5 GB peak, n=2025 3.9 min / "
+                        "0.9 GB, n=3025 12.8 min / 1.7 GB")
 LAG_EFFECTS_NOTE = (
     "Lag model: the coefficient beta of a covariate is NOT its marginal effect. A change in x in one area "
     "changes y there and, through the spatial multiplier (I - rho W)^-1, in every other area. Report the "
@@ -605,6 +612,10 @@ def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, m
     import spreg
 
     _silence_spreg_output()
+    if model == "lag":
+        # spreg's own impacts (default 'simple') are not used: the effects table comes from lag_effects with the
+        # cached eigenvalues; computing them on the main fit and every replicate refit is wasted work
+        kwargs = {"spat_impacts": None, **kwargs}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         if model == "lag" and method == "ml":
@@ -630,15 +641,45 @@ def _spreg_fit(y, X, w, model: str, method: str, names: List[str], yname: str, m
     return r, betas, se[:k], spatial
 
 
+def _eigenvalues_dense(W: np.ndarray) -> np.ndarray:
+    """Eigenvalues of a dense W. A row-standardized W with a symmetric pattern (W = D^-1 C, C = C', as for
+    contiguity and distance-band weights) is similar to the symmetric D^-1/2 C D^-1/2, whose eigenvalues
+    eigvalsh returns (real, about 3-10x faster than eigvals); other W (kNN, general weights) use eigvals."""
+    d = np.count_nonzero(W, axis=1).astype(float)
+    C = W * d[:, None]
+    if np.allclose(C, C.T, rtol=1e-12, atol=1e-12):
+        r = np.zeros_like(d)
+        np.sqrt(d, out=r, where=d > 0)
+        inv = np.divide(1.0, r, out=np.zeros_like(r), where=r > 0)
+        S = inv[:, None] * C * inv[None, :]
+        return np.linalg.eigvalsh(0.5 * (S + S.T))
+    return np.linalg.eigvals(W)
+
+
 def weights_eigenvalues(w) -> Optional[np.ndarray]:
     """Eigenvalues of the (row-standardized) dense W, or None above EFFECTS_MAX_N areas.
 
     Computed once per fit and reused by every replicate refit: the effect
-    multipliers at any rho are sums over them (Ord 1975).
+    multipliers at any rho are sums over them (Ord 1975). Cached on the
+    weights object, keyed by a hash of its current sparse matrix, so repeated
+    fits on the same weights do not repeat the O(n^3) decomposition.
     """
     if w.n > EFFECTS_MAX_N:
         return None
-    return np.linalg.eigvals(np.asarray(w.full()[0], float))
+    sp = w.sparse.tocsr()
+    h = hashlib.sha1()
+    for a in (sp.indptr, sp.indices, sp.data):
+        h.update(np.ascontiguousarray(a).tobytes())
+    key = (sp.shape, h.hexdigest())
+    cached = getattr(w, "_census_eigenvalues", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    eig = _eigenvalues_dense(np.asarray(w.full()[0], float))
+    try:
+        w._census_eigenvalues = (key, eig)
+    except AttributeError:  # weights objects without attribute assignment: no cache
+        pass
+    return eig
 
 
 def lag_multipliers(eig: np.ndarray, rho: float) -> Dict[str, float]:
@@ -662,6 +703,22 @@ def lag_multipliers(eig: np.ndarray, rho: float) -> Dict[str, float]:
             "d_direct": d_direct, "d_total": d_total, "d_indirect": d_total - d_direct}
 
 
+def effect_multipliers(eig: np.ndarray, rho: float, share: float = 1.0) -> Dict[str, float]:
+    """Average direct / indirect / total multipliers at ``rho`` with islands, and their rho-derivatives.
+
+    As :func:`lag_multipliers`, but total = (1 - s) + s / (1 - rho) where
+    ``share`` s is the share of areas with neighbours (an island's row of
+    S = (I - rho W)^-1 is e_i); indirect = total - direct. The multipliers
+    behind the effects table and ``diagnostics['effects_multipliers']``.
+    NaN outside |rho| < 1.
+    """
+    m = lag_multipliers(eig, rho)
+    s = float(share)
+    total, d_total = (1 - s) + s * m["total"], s * m["d_total"]
+    return {"direct": m["direct"], "total": total, "indirect": total - m["direct"],
+            "d_direct": m["d_direct"], "d_total": d_total, "d_indirect": d_total - m["d_direct"]}
+
+
 def _lag_effect_values(params: np.ndarray, eig: np.ndarray, n_x: int, share: np.ndarray) -> np.ndarray:
     """Effects [x1 direct, x1 indirect, x1 total, x2 ...] from [const, x1..xk, rho].
 
@@ -669,14 +726,11 @@ def _lag_effect_values(params: np.ndarray, eig: np.ndarray, n_x: int, share: np.
     islands); with islands, total = beta (1 - s + s / (1 - rho)) where s is
     the share of areas with neighbors, since an island's row of S is e_i.
     """
-    rho = float(params[-1])
-    m = lag_multipliers(eig, rho)
-    s = float(share)
-    tot = (1 - s) + s * m["total"] if np.isfinite(m["total"]) else float("nan")
+    m = effect_multipliers(eig, float(params[-1]), float(share))
     out = []
     for j in range(n_x):
         b = float(params[1 + j])
-        out += [b * m["direct"], b * (tot - m["direct"]), b * tot]
+        out += [b * m["direct"], b * m["indirect"], b * m["total"]]
     return np.asarray(out, float)
 
 
@@ -694,14 +748,10 @@ def lag_effects(params: np.ndarray, vm: Optional[np.ndarray], names: List[str], 
     n_x = len(names)
     est = _lag_effect_values(params, eig, n_x, np.asarray(share))
     se = np.full(len(est), np.nan)
-    rho = float(params[-1])
-    m = lag_multipliers(eig, rho)
-    s = float(share)
+    m = effect_multipliers(eig, float(params[-1]), float(share))
     if vm is not None and np.isfinite(m["direct"]):
         V = np.asarray(vm, float)
-        mult = {"direct": (m["direct"], m["d_direct"]),
-                "total": ((1 - s) + s * m["total"], s * m["d_total"])}
-        mult["indirect"] = (mult["total"][0] - m["direct"], mult["total"][1] - m["d_direct"])
+        mult = {e: (m[e], m[f"d_{e}"]) for e in ("direct", "indirect", "total")}
         r = V.shape[0] - 1
         for j in range(n_x):
             b, k = float(params[1 + j]), 1 + j
@@ -757,8 +807,8 @@ def controlled_total_reason(outcome: str) -> Optional[str]:
     return None
 
 
-def _error_model_known_variances(y: np.ndarray, X: np.ndarray, W: np.ndarray, D: np.ndarray,
-                                 method: str) -> Dict[str, Any]:
+def error_model_known_variances(y: np.ndarray, X: np.ndarray, W: np.ndarray, D: np.ndarray,
+                                method: str = "reml") -> Dict[str, Any]:
     """Spatial error model with known independent outcome sampling variances ``D`` (census.sae_spatial).
 
     y = X beta + u + e, u = lambda W u + eps, eps ~ N(0, sigma^2 I), e ~ N(0, diag(D)):
@@ -767,18 +817,32 @@ def _error_model_known_variances(y: np.ndarray, X: np.ndarray, W: np.ndarray, D:
     Molina & Marhuenda 2015 eq. (6)). (sigma^2, lambda) by REML or ML
     (census.sae_spatial.estimate_variance_rho), beta by GLS with covariance
     (X'V^-1X)^-1, SEs of (sigma^2, lambda) from the inverse expected
-    information 0.5 tr(M V_k M V_l), M = P (REML) or V^-1 (ML) - the
-    estimator of the A1 studies (census.simulation_spreg.me_sem_fit with a
-    diagonal Sigma). ``X`` includes the constant. Raises RuntimeError when the
-    optimizer does not converge (no fallback to the uncorrected estimate).
+    information 0.5 tr(M V_k M V_l), M = P (REML) or V^-1 (ML).
+
+    The ONE estimator behind ``spatial_regression(correct_outcome_error=True)``
+    and the A1 studies' diagonal-Sigma rows (census.simulation_spreg
+    'spatial_error_attenuation' and '_correlated' call this function), so the
+    validated coverage describes the shipped path. ``X`` includes the
+    constant; ``W`` is dense. Returns ``boundary`` (|lambda| >=
+    CORRECTION_LAMBDA_BOUNDARY or sigma^2 at 0) with ``sigma2_zero``. Raises
+    RuntimeError when the optimizer does not converge or V is singular at the
+    optimum (no fallback to the uncorrected estimate).
     """
     from scipy import linalg as sla
     from .sae_spatial import _fisher, _fit, _loglik
 
-    fit = _fit(y, X, D, W, method.upper())
+    meth = method.upper()
+    try:
+        fit = _fit(y, X, D, W, meth)
+    except (np.linalg.LinAlgError, sla.LinAlgError) as exc:
+        raise RuntimeError(
+            f"correct_outcome_error: the {meth} fit is singular at the optimum (V = sigma^2 C(lambda) + "
+            f"diag(SE^2) cannot be factorized: {exc}); no corrected estimate is reported and the uncorrected fit "
+            "is not substituted. This happens when sigma^2 is estimated at 0 and some SEs are 0 or tiny; check "
+            "the SE column (units must match the outcome)") from exc
     if not fit["converged"]:
         raise RuntimeError(
-            f"correct_outcome_error: the {method.upper()} optimizer for (sigma^2, lambda) did not converge "
+            f"correct_outcome_error: the {meth} optimizer for (sigma^2, lambda) did not converge "
             f"(stopped at lambda={fit['rho']:.4f}, sigma^2={fit['A']:.4g}); no corrected estimate is reported and "
             "the uncorrected fit is not substituted. Check the SE column (units must match the outcome), the "
             "weights, and whether the sampling variances exceed the outcome's variance")
@@ -791,14 +855,15 @@ def _error_model_known_variances(y: np.ndarray, X: np.ndarray, W: np.ndarray, D:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", sla.LinAlgWarning)
-                Fi = sla.inv(_fisher(s, method.upper()))
+                Fi = sla.inv(_fisher(s, meth))
         except (np.linalg.LinAlgError, sla.LinAlgError, ValueError):
             pass
     ll, _ = _loglik(np.array([A, lam]), y, X, D, W, "ML")
     return {"A": A, "lambda": lam, "beta": np.asarray(fit["beta"], float), "vcov_beta": np.asarray(fit["Q"], float),
             "se_A": float(math.sqrt(Fi[0, 0])) if np.isfinite(Fi[0, 0]) and Fi[0, 0] > 0 else float("nan"),
             "se_lambda": float(math.sqrt(Fi[1, 1])) if np.isfinite(Fi[1, 1]) and Fi[1, 1] > 0 else float("nan"),
-            "loglik": float(ll), "converged": True, "sigma2_zero": bool(sigma2_zero)}
+            "loglik": float(ll), "converged": True, "sigma2_zero": bool(sigma2_zero),
+            "boundary": bool(sigma2_zero or abs(lam) >= CORRECTION_LAMBDA_BOUNDARY)}
 
 
 def _corrected_error_regression(formula: str, d: pd.DataFrame, weights, *, outcome: str, se_col: Optional[str],
@@ -818,10 +883,23 @@ def _corrected_error_regression(formula: str, d: pd.DataFrame, weights, *, outco
     if corr_method not in CORRECTION_METHODS:
         raise ValueError(f"with correct_outcome_error=True, method must be one of {CORRECTION_METHODS} "
                          f"(variance-component estimator; REML is the validated default), not {method!r}")
+    if len(d) > CORRECTION_MAX_N:
+        raise ValueError(
+            f"correct_outcome_error=True is limited to {CORRECTION_MAX_N} areas (got {len(d)}): the known-variance "
+            f"fit works on dense n x n matrices (O(n^3) time per likelihood evaluation, O(n^2) memory; "
+            f"{CORRECTION_COST_NOTE}). Fit at county level, or subset the frame to a region (e.g. one or a few "
+            "states or metro areas) and rebuild the weights for it")
     se = pd.to_numeric(d[se_col], errors="coerce").to_numpy(float)
     if not np.isfinite(se).all() or (se < 0).any():
         bad = list(np.asarray(d.index)[~(np.isfinite(se) & (se >= 0))][:20])
         raise ValueError(f"se_col {se_col!r} must be finite and >= 0 in every area: {bad}")
+    if (se == 0).any():
+        zero = list(np.asarray(d.index)[se == 0][:20])
+        raise ValueError(
+            f"se_col {se_col!r} is 0 in {int((se == 0).sum())} area(s): {zero}. The known-variance model would treat "
+            "those estimates as exact (V is singular when sigma^2 is estimated at 0, and an exact area can force a "
+            "degenerate boundary fit). An ACS SE of 0 usually marks a controlled or suppressed cell: drop those "
+            "areas (subset the frame and rebuild the weights) or give them their published nonzero SE")
     y2, X, names, yname = _design(formula, d)
     y = y2[:, 0]
     n = len(y)
@@ -830,7 +908,7 @@ def _corrected_error_regression(formula: str, d: pd.DataFrame, weights, *, outco
     W = np.asarray(weights.full()[0], float)  # row-standardized, in w.id_order (= d's row order)
     D = se ** 2
     Xc = np.column_stack([np.ones(n), X])
-    fit = _error_model_known_variances(y, Xc, W, D, corr_method)
+    fit = error_model_known_variances(y, Xc, W, D, corr_method)
     terms = ["Intercept"] + names + ["lambda"]
     params = pd.Series(list(fit["beta"]) + [fit["lambda"]], index=terms)
     se_model = pd.Series(list(np.sqrt(np.diag(fit["vcov_beta"]))) + [fit["se_lambda"]], index=terms)
@@ -960,8 +1038,10 @@ def spatial_regression(
     bias it upward (notes). Controlled totals (population, households,
     housing units: :data:`CONTROLLED_TOTAL_CELLS`, or ``controlled_total=True``)
     have negatively correlated errors within counties and get a warning note
-    and ``diagnostics['controlled_total_warning']``. Non-convergence raises
-    RuntimeError. Replicates are not used with this option.
+    and ``diagnostics['controlled_total_warning']``. Non-convergence, or a
+    singular V at the optimum, raises RuntimeError; SEs of 0 and frames above
+    :data:`CORRECTION_MAX_N` areas (dense O(n^3) fit) are refused with
+    ValueError. Replicates are not used with this option.
     """
     from .analysis import formula_variables
     from .models import INTERVAL_TARGETS, _table
@@ -1045,7 +1125,7 @@ def spatial_regression(
         # failed refits and variables without replicates can be incomplete
         stoch = stochastic_variables(data, [v for v in all_used if v not in used])
         precheck_replicates(replicate_policy, variables_without_replicates=stoch, context="spatial_regression")
-        B, failed = [], 0
+        B, failed, explosive = [], 0, 0
         for k in range(REPLICATE_COUNT):
             dd = d.copy()
             for v, m in mats.items():
@@ -1055,12 +1135,24 @@ def spatial_regression(
                 _, b, _, _ = _spreg_fit(yr, Xr, weights, model, method, names, yname, ml_method, spreg_kwargs)
                 if not np.isfinite(b).all():
                     raise ValueError("non-finite")
+                if model == "lag" and not abs(float(b[-1])) < 1:
+                    # (I - rho W)^-1 is not a stationary multiplier: effects undefined, not a usable refit
+                    explosive += 1
+                    raise ValueError("|rho| >= 1")
                 B.append(b)
             except Exception:  # noqa: BLE001 - counted and reported
                 failed += 1
+        context = "spatial_regression"
+        if explosive:
+            context += (f" ({explosive} replicate refit(s) estimated |rho| >= 1, where the spatial multiplier and "
+                        "the effects are undefined; counted as failed refits)")
+            diagnostics["replicate_refits_rho_out_of_bounds"] = explosive
         replicate_completeness(replicate_policy, failed_refits=failed, variables_without_replicates=stoch,
-                               context="spatial_regression", diagnostics=diagnostics, notes=notes)
-        check_refit_count(failed, len(B), max_failed_replicates, "spatial_regression")
+                               context=context, diagnostics=diagnostics, notes=notes)
+        if explosive:
+            notes.append(f"{explosive} of {REPLICATE_COUNT} replicate refits estimated |rho| >= 1 and were counted "
+                         "as failed refits (not dropped silently); se_sampling uses the remaining refits")
+        check_refit_count(failed, len(B), max_failed_replicates, context)
         B = np.vstack(B)
         se_sampling = pd.Series(np.sqrt(REPLICATE_FACTOR * ((B - betas) ** 2).sum(axis=0)), index=terms)
         sources.append(SOURCE_SAMPLING_REPLICATE)
@@ -1090,7 +1182,14 @@ def spatial_regression(
             effects.insert(1, "variable", [v for v in names for _ in range(3)])
             effects.insert(2, "effect", ["direct", "indirect", "total"] * len(names))
             notes[0:0] = [LAG_EFFECTS_NOTE, LAG_EFFECTS_CAVEAT]
-            diagnostics["effects_multipliers"] = {k: v for k, v in lag_multipliers(eig, spatial).items()
+            if not abs(spatial) < 1:
+                notes.insert(0, f"rho = {spatial:.4f} is outside (-1, 1): (I - rho W)^-1 is not a stationary spatial "
+                                "multiplier, so the direct, indirect and total effects are undefined (reported as "
+                                "NaN, no intervals). Do not interpret beta or rho as effects; check the "
+                                "specification (a spatial Durbin process or W X instruments correlated with the "
+                                "error push GMM rho toward or past 1), or try method='ml'")
+                diagnostics["effects_undefined"] = True
+            diagnostics["effects_multipliers"] = {k: v for k, v in effect_multipliers(eig, spatial, share).items()
                                                   if not k.startswith("d_")}
     notes.append(f"intervals and p-values use the '{target}' target")
     notes.append(SPATIAL_PARAMETER_TEST_NOTE.format(sp=sp_name))

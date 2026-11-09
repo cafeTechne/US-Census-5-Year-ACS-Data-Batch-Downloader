@@ -3,9 +3,11 @@
 
 PLAN_ROUND_16 A1 (owner-approved option). The tool path must be the A1
 study's estimator: the spatial Fay-Herriot REML (or ML) fit with diagonal
-Sigma = diag(SE^2) (census.simulation_spreg.me_sem_fit), whose coverage is in
-docs/audits/spatial_regression_validation.md. Checked here on the study's own
-seeded draws, plus option handling, warnings, boundary and convergence.
+Sigma = diag(SE^2), census.spatial.error_model_known_variances, which the
+study's diagonal rows call directly (tests/test_review_fixes_r16.py); its
+coverage is in docs/audits/spatial_regression_validation.md. Also checked
+against the study-only me_sem_fit on the study's own seeded draws, plus
+option handling, warnings, boundary and convergence.
 """
 
 import json

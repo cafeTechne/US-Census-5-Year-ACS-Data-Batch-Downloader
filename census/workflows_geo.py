@@ -246,6 +246,8 @@ def spatial_regression(
             errors across areas. method is then "reml" (default) or "ml".
             Validated: lambda intervals covered 0.86-0.93. Warns for
             population/household totals (negatively correlated errors).
+            At most 2,000 areas (dense O(n^3) fit); larger frames fail:
+            use counties or a regional subset. SEs of 0 are refused.
         controlled_total: true flags the outcome as a controlled total.
 
     Example: spatial_regression("frame.parquet", "poverty_rate ~ median_rent", "tract", 2023, model="error")
@@ -259,7 +261,12 @@ def spatial_regression(
                                          correct_outcome_error=correct_outcome_error, se_col=se_col,
                                          controlled_total=controlled_total)
     except _GEO_ERRORS as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+        step = ""
+        if correct_outcome_error and f"limited to {spatial.CORRECTION_MAX_N} areas" in str(exc):
+            step = (f"refit at county level, or subset input_path to a region of at most "
+                    f"{spatial.CORRECTION_MAX_N} areas (one or a few states or metro areas) and rerun; or drop "
+                    "correct_outcome_error and report the attenuation caveat from the notes")
+        return _fail(errors.INVALID_INPUT, str(exc), step)
     out = res.to_dict()
     step = ("report the effects table first (direct, indirect and total effects with their intervals: the "
             "marginal effects; beta is not one), then rho and the LM diagnostics"
