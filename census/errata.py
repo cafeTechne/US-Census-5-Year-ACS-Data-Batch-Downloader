@@ -277,7 +277,7 @@ def check_urls(
         import requests
 
         session = requests.Session()
-        session.headers["User-Agent"] = "acs-batch-downloader/errata-check (research toolkit)"
+        session.headers["User-Agent"] = "census-research-engine/errata-check (research toolkit)"
 
         def get(url: str) -> int:  # type: ignore[no-redef]
             time.sleep(delay)

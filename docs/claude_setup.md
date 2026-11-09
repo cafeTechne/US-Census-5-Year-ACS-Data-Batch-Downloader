@@ -81,7 +81,7 @@ claude mcp add census -- python mcp_server.py
 
 Or with an absolute path:
 ```bash
-claude mcp add census -- python c:\Users\hobo\Desktop\US-Census-5-Year-ACS-Data-Batch-Downloader\mcp_server.py
+claude mcp add census -- python C:\path\to\Census-Research-Engine\mcp_server.py
 ```
 
 ### Option B: Project Configuration (`.claude/config.json`)
@@ -93,7 +93,7 @@ Create or edit `.claude/config.json` in the workspace root:
     "census": {
       "command": "python",
       "args": [
-        "c:\\Users\\hobo\\Desktop\\US-Census-5-Year-ACS-Data-Batch-Downloader\\mcp_server.py"
+        "C:\\path\\to\\Census-Research-Engine\\mcp_server.py"
       ],
       "env": {
         "CENSUS_API_KEY": "${CENSUS_API_KEY}"
@@ -112,7 +112,7 @@ To enable the tool across all projects in Claude Code, add the server under `"mc
     "census": {
       "command": "python",
       "args": [
-        "c:\\Users\\hobo\\Desktop\\US-Census-5-Year-ACS-Data-Batch-Downloader\\mcp_server.py"
+        "C:\\path\\to\\Census-Research-Engine\\mcp_server.py"
       ]
     }
   }
@@ -135,7 +135,7 @@ Add the `census` entry under `"mcpServers"`:
     "census": {
       "command": "python",
       "args": [
-        "c:\\Users\\hobo\\Desktop\\US-Census-5-Year-ACS-Data-Batch-Downloader\\mcp_server.py"
+        "C:\\path\\to\\Census-Research-Engine\\mcp_server.py"
       ],
       "env": {
         "PYTHONIOENCODING": "utf-8"

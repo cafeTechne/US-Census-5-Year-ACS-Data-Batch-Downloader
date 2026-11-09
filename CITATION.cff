@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software in research, please cite it as below."
-title: "US Census ACS 5-Year Data Batch Downloader"
+title: "Census Research Engine"
 abstract: >-
   A Python toolkit and MCP server for extracting American Community Survey
   5-year data from the US Census Bureau API into research-ready files, with
@@ -11,7 +11,7 @@ type: software
 authors:
   - alias: cafeTechne
 license: AGPL-3.0-or-later
-repository-code: "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader"
+repository-code: "https://github.com/cafeTechne/Census-Research-Engine"
 version: "0.14.0"
 doi: "10.5281/zenodo.23925301"
 # doi: Zenodo concept DOI, added after the first archived release (see CHANGELOG.md "Releasing").

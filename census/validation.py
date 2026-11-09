@@ -74,7 +74,7 @@ CHECK_IDS: Tuple[str, ...] = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F
 
 # Census API: at most 50 variables per request (NAME counts).
 MAX_GET_VARIABLES = 48
-USER_AGENT = "acs-batch-downloader/validation (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/validation (research toolkit; python-requests)"
 WWW2_DELAY_SECONDS = 3.0  # census.gov firewall rejects rapid scripted requests
 
 SUMMARY_FILE_URL = (

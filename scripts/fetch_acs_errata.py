@@ -31,7 +31,7 @@ LISTINGS = {
     "errata": errata.ERRATA_LISTING_URL,
     "user_note": errata.USER_NOTES_LISTING_URL,
 }
-USER_AGENT = "acs-batch-downloader/errata (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/errata (research toolkit; python-requests)"
 MAX_PAGES = 40
 
 

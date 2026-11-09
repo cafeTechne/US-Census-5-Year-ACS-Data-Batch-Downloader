@@ -62,7 +62,7 @@ from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, chec
                       check_replicate_policy, replicate_completeness)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
 
-USER_AGENT = "acs-batch-downloader/pums (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/pums (research toolkit; python-requests)"
 PUMS_DATA_BASE = "https://www2.census.gov/programs-surveys/acs/data/pums"
 PUMS_DOCS_BASE = "https://www2.census.gov/programs-surveys/acs/tech_docs/pums"
 PUMS_API_TEMPLATE = "https://api.census.gov/data/{year}/acs/{dataset}/pums"

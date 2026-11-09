@@ -59,7 +59,7 @@ import pandas as pd
 from .geo import get_resource_path
 from .geo_crosswalk import tract_vintage
 
-USER_AGENT = "acs-batch-downloader/boundaries (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/boundaries (research toolkit; python-requests)"
 BASE_URL = "https://www2.census.gov/geo/tiger"
 SOURCE_CRS = "EPSG:4269"
 DETAILS = ("cb", "tiger")

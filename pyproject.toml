@@ -47,8 +47,8 @@ census-acs = "census.__main__:main"
 census-acs-mcp = "mcp_server:main"
 
 [project.urls]
-Repository = "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader"
-Changelog = "https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader/blob/main/CHANGELOG.md"
+Repository = "https://github.com/cafeTechne/Census-Research-Engine"
+Changelog = "https://github.com/cafeTechne/Census-Research-Engine/blob/defaultBranch/CHANGELOG.md"
 
 [tool.setuptools]
 py-modules = ["mcp_server"]

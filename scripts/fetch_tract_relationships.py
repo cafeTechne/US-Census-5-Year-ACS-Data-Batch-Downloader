@@ -65,7 +65,7 @@ CT_DOCS = [
 LAND_TOLERANCE = 0.10
 # Matches whose land area differs by more than this are listed in the sidecar.
 LAND_REPORT = 0.01
-USER_AGENT = "acs-batch-downloader/fetch_tract_relationships (research toolkit)"
+USER_AGENT = "census-research-engine/fetch_tract_relationships (research toolkit)"
 
 # Output column -> source column in the national file.
 NATIONAL_COLUMNS: List[Tuple[str, str]] = [

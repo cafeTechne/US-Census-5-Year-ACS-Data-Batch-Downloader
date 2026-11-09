@@ -1,4 +1,4 @@
-# US Census ACS 5-Year Data Batch Downloader
+# Census Research Engine
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23925301.svg)](https://doi.org/10.5281/zenodo.23925301)
 
@@ -22,8 +22,8 @@ All four interfaces share one pipeline and the same defaults.
 Tested on Python 3.10–3.12 (Linux and Windows CI).
 
 ```bash
-git clone https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader
-cd US-Census-5-Year-ACS-Data-Batch-Downloader
+git clone https://github.com/cafeTechne/Census-Research-Engine
+cd Census-Research-Engine
 pip install -r requirements.txt
 ```
 

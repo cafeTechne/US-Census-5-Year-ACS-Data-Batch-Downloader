@@ -135,7 +135,7 @@ VRE_STATE_CODES: Tuple[str, ...] = (
 ).split()
 
 CONTROLLED_CME = "*****"
-USER_AGENT = "acs-batch-downloader/replicate (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/replicate (research toolkit; python-requests)"
 
 # Columns of a replicate frame, in order (PLAN_ROUND_7.md section 4, B3).
 REPLICATE_FRAME_COLUMNS: List[str] = ["GEOID", "NAME", "variable", "estimate", "moe"] + list(
