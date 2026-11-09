@@ -12,11 +12,9 @@ Copyrighted text is not committed; only short quotations and section/equation re
 - **ADAPTATION:** my inference for this engine, not a claim of the paper. It must be tested before use.
 - **NOT READ:** supplements and web appendices.
 
-**Not retrievable automatically (not circumvented):**
-- LeSage & Pace (2014), *Econometrics* 2(4):217-249. MDPI returned HTTP 403 to scripted requests.
-- Koley & Bera (2024), *Spatial Economic Analysis* 19(1):30-56. The SSRN preprint and the publisher returned 403.
-
-The owner can download both in a browser and place them in `literature_pdfs/` (gitignored) for reading.
+**Retrieved by the owner (2026-11-08):** these two were blocked to scripted requests (HTTP 403) and were not circumvented. The owner downloaded them in a browser into `literature_pdfs/`, which is gitignored; see sections 7 and 8.
+- LeSage & Pace (2014): MDPI version of record.
+- Koley & Bera: SSRN preprint, abstract 4252849. The journal version may differ.
 
 ---
 
@@ -153,13 +151,56 @@ The owner can download both in a browser and place them in `literature_pdfs/` (g
 **ADAPTATION / implications:**
 - **Not applicable to the Local Moran's I problem.** It could inform a later null model for *bivariate* map comparisons (for example our `correlation` tools), only with validation and only for I ≤ 0.7.
 
+## 7. LeSage & Pace (2014): "The Biggest Myth in Spatial Econometrics"
+
+*Econometrics* 2(4):217-249, doi 10.3390/econometrics2040217. Full text read (numeric table rows skimmed).
+
+**VERIFIED:**
+- **Effects:** for the SDM y = αι + ρWy + Xβ + WXθ + ε, the partial derivatives are ∂y/∂xᵣ′ = (I − ρW)⁻¹(Iβᵣ + Wθᵣ) (Eq. 32). The SAR case is θ = 0 (Eqs. 18-19). The diagonal holds the direct (own-region) effects; the off-diagonal elements hold the indirect (spillover) effects (sec. 3.3).
+- **Interpretation:**
+  - β is not the marginal effect when the model contains Wy.
+  - When W changes, ρ and β shift in offsetting ways ("required to maintain relatively stable partial derivatives"; Fig. 1). The effects stay stable (Tables 5-8).
+  - So sensitivity checks must compare **effects, not coefficients** (sec. 3.1, 3.3).
+- **Robustness:** observation-level (n²k) effects are **not** robust to W. Scalar summaries averaged over observations are (sec. 4, 5).
+- **Effect draws:** medians of simulated effect draws are suggested, since total effects can be asymmetric (footnote 12). Draws from the ML estimates and their covariance are "equivalent" to their MCMC draws.
+- **Misspecification signal:** sensitivity to W is often a symptom of model misspecification. For a correctly specified SEM, OLS β is unbiased, so large OLS-versus-SEM differences in β point to misspecification. The Bell & Bockstael re-analysis is the example: 5 of 10 coefficients differ by more than 1.67 SD. A Hausman test is cited to Pace & LeSage (2008; **NOT READ**).
+- **Weights similarity:** corr(Wₐu, W_b u) = (mₐ/m_b)^½ for nearest-neighbour matrices (Eq. 7), and the correlation of effects across W is given by Eq. (27).
+- **Model choice:** weight matrices can be compared by Bayesian posterior model probabilities (Eq. 34). Flexibility in modelling the spillovers matters more than flexibility in the disturbances (sec. 4).
+
+**ADAPTATION / implications:**
+- **Effects in the tool:** the lag-model output reports average direct, indirect and total effects with simulated intervals, and labels β as not the marginal effect.
+- **W sensitivity:** A's weights-sensitivity results compare effects across W, not ρ/β.
+- **OLS-versus-SEM β gap:** a candidate diagnostic for the SEM route. It is cheap. The formal Hausman version is unread, so report the gap descriptively unless validated.
+
+## 8. Koley & Bera: "To use, or not to use the spatial Durbin model?"
+
+SSRN 4252849 preprint; the journal version is *Spatial Economic Analysis* 19(1):30-56 (2024). Preprint read in full; proofs in its appendix skimmed.
+
+**VERIFIED:**
+- **The hypothesis tested** is the **linear** H0D: γ = 0, the Durbin (WX) term, in y = λWy + αι + Xβ + WXγ + ε. Here λ is the **lag** coefficient. This is **not** the common-factor hypothesis H0S: γ + βλ = 0 (sec. 2):
+  - accepting H0S points to the SEM;
+  - accepting H0D points to the SAR.
+- **Tests:** the joint RS_λγ, plus Bera-Yoon robust versions RS*_λ and RS*_γ. All need **only OLS** (sec. 3-4).
+  - Robust to **local** misspecification only, with Monte Carlo suggesting some non-local robustness.
+  - Additivity identity (Eq. 3.9/4.16): RS_λγ = RS_λ + RS*_γ = RS*_λ + RS_γ. They recommend using it to check computations.
+- **Assumptions:** normal errors (asymptotic validity under non-normality is asserted via Fang et al. 2014, not shown); increasing-domain asymptotics; bounded W row sums; nonstochastic X.
+- **Recommended sequence:** run RS_λγ first; if it rejects, run RS*_λ and RS*_γ.
+- **Monte Carlo:**
+  - Design: Columbus 49-district W (and W⊗I₂, n = 98); α = 1, β = 1.5; ε ~ N(0, 2); x ~ N(0, 4); λ ∈ [0, 0.6]; γ ∈ [0, 0.35]; 5000 reps.
+  - Results: at n = 49 the unadjusted tests over-reject, while the adjusted and joint tests under-reject slightly. RS*_γ has flat size under λ ≠ 0, at a cost in power.
+  - **No SEM DGP is simulated.**
+
+**ADAPTATION / implications:**
+- **They do not identify the SEM.** Under an SEM DGP the SDM representation has γ = −βλ ≠ 0, so RS*_γ is expected to reject and point toward an SDM. That is my derivation, not shown in the paper. The SEM-versus-SDM decision therefore still needs the common-factor test (Juhl's bootstrap or the LR test).
+- **They are already in spreg 1.9.1** (`lm_wx`, `lm_spdurbin`, `rlm_wx`, `rlm_durlag`). If the tool adds them, use spreg's implementation and verify it with the paper's additivity identity, not a reimplementation.
+
 ---
 
 ## Consequences for Round 16
 
 - **A1:** don't implement Lorincz-Comi et al. (closed access, assumptions unverifiable). First test whether the **existing spatial Fay-Herriot model** recovers λ/ρ with correct coverage under outcome sampling error. That is the independence-based correction the literature's data model implies. Then test it under correlated errors.
-- **A2:** impacts, not coefficients (Juhl fn. 23). LeSage & Pace (2014) remains unread pending access, so effect definitions are verified against the standard S(W) algebra.
-- **A3/A4:** Juhl's DGP grid. Measure LR size, and use the bootstrap critical value if needed. A ρ = 0 test is not a specification test.
+- **A2:** impacts, not coefficients (Juhl fn. 23; LeSage & Pace 2014, Eq. 32). Report averaged direct/indirect/total effects with simulated intervals. Check W sensitivity on effects, not on ρ/β.
+- **A3/A4:** Koley & Bera's OLS-only robust RS tests (in spreg) answer *SAR vs SDM*, not *SEM vs SDM*; use them only alongside a common-factor test. Juhl's DGP grid. Measure LR size, and use the bootstrap critical value if needed. A ρ = 0 test is not a specification test.
 - **B:** keep three questions distinct:
   1. latent elevation (Wong, Sun et al.);
   2. local similarity (Local Moran's I);
