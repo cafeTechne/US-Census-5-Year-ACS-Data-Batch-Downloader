@@ -4,8 +4,8 @@
 Skipped unless CENSUS_LIVE_TESTS=1. Downloads real Variance Replicate Estimate
 files from www2.census.gov into a temporary cache and checks that replicate
 MOEs reproduce the published MOEs (validation check F3) and that the frozen
-fixture still matches the live file. Requests are spaced out, because
-census.gov's firewall rejects rapid scripted requests.
+fixture still matches the live file. Requests are spaced out as a courtesy
+(census.http also paces, retries, and handles the firewall page).
 
     CENSUS_LIVE_TESTS=1 python -m pytest -q tests/test_replicate_live.py
 """

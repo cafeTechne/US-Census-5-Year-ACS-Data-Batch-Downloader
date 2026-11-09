@@ -51,6 +51,7 @@ Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a
 | `CENSUS_PRICE_PARITY_DIR` | Alternate Regional Price Parity directory (default `data/price_parities/`); same treatment |
 | `BLS_USER_AGENT` | Identifying User-Agent for `scripts/update_price_indexes.py` |
 | `CENSUS_VRE_DIR` | Cache for downloaded Census Variance Replicate Estimate files (default `.cache/vre/`) |
+| `CENSUS_WWW2_MIN_INTERVAL` / `CENSUS_WWW2_ATTEMPTS` / `CENSUS_WWW2_BACKOFF_BASE` / `CENSUS_WWW2_REJECTED_RETRY_DELAY` | census.gov file downloads (`census/http.py`): seconds between requests to one host (default 1), attempts on HTTP 429/5xx or connection errors (4), backoff base in seconds (2; doubled per retry, capped at 60, honours `Retry-After`), and the wait before the single retry of a firewall "Request Rejected" page (30). A rejection that persists names the cache path where a browser-downloaded copy of the file is picked up |
 | `CENSUS_LIVE_TESTS=1` | Enable live API contract tests and the live validation battery |
 
 ## Quick start

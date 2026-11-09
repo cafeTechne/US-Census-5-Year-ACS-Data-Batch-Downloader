@@ -58,6 +58,7 @@ import pandas as pd
 
 from .api import PRODUCT_1YR, PRODUCT_5YR, normalize_product
 from .geo import STATE_FILES, STATE_MAPPING, get_resource_path
+from .http import adopt_manual_file, polite_get
 from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, check_refit_count,
                       check_replicate_policy, replicate_completeness)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
@@ -195,13 +196,18 @@ def _write_sidecar(path: str, meta: Dict[str, Any]) -> None:
         json.dump(meta, f, indent=2)
 
 
-def read_cache_entry(path: str) -> Optional[Dict[str, Any]]:
+def read_cache_entry(path: str, url: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Sidecar metadata if ``path`` exists and matches its recorded SHA-256.
+
+    With ``url``, a file placed at ``path`` by hand (no sidecar yet) is
+    adopted with ``source: "manual download"`` (census.http.adopt_manual_file).
 
     State PUMS zips run to hundreds of MB, so the full SHA-256 is recomputed
     only when the file's size or mtime differs from the values recorded in
     the sidecar (``size_bytes``, ``mtime_ns``); a verified hash refreshes them.
     """
+    if url is not None:
+        adopt_manual_file(path, url, _sidecar(path))
     if not (os.path.exists(path) and os.path.exists(_sidecar(path))):
         return None
     try:
@@ -236,17 +242,11 @@ def write_cache_entry(path: str, raw: bytes, url: str, content_type: str = "") -
     return meta
 
 
-def _download(url: str, session: Any = None, timeout: float = 600.0) -> Tuple[bytes, str]:
-    import requests
-
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    except requests.RequestException as exc:  # pragma: no cover - network failure
-        raise PumsError(f"Download failed for {url}: {exc}") from exc
+def _download(url: str, session: Any = None, timeout: float = 600.0,
+              cache_path: Optional[str] = None) -> Tuple[bytes, str]:
+    resp = polite_get(url, user_agent=USER_AGENT, error=PumsError, session=session, timeout=timeout,
+                      cache_path=cache_path)
     raw = resp.content or b""
-    if b"Request Rejected" in raw[:2000]:
-        raise PumsError(f"census.gov rejected the request for {url}; wait and retry later")
     if resp.status_code == 404:
         raise PumsError(f"Not published (HTTP 404): {url}")
     if resp.status_code != 200:
@@ -258,9 +258,9 @@ def cached_download(url: str, subdir: str = "", *, cache_dir: Optional[str] = No
                     session: Any = None) -> Tuple[str, Dict[str, Any]]:
     """Path and sidecar metadata of ``url`` in the PUMS cache, downloading if needed."""
     path = os.path.join(cache_dir or pums_cache_dir(), subdir, url.rsplit("/", 1)[-1])
-    meta = None if refresh else read_cache_entry(path)
+    meta = None if refresh else read_cache_entry(path, url)
     if meta is None:
-        raw, ctype = _download(url, session=session)
+        raw, ctype = _download(url, session=session, cache_path=path)
         meta = write_cache_entry(path, raw, url, ctype)
     return path, meta
 
