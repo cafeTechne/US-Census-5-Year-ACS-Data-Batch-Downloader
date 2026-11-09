@@ -1587,6 +1587,8 @@ def _census_vre_replicates(m: Mapping[str, Any], frame: pd.DataFrame, codes_by_y
                 files.append({"table": table, "release": year, "summary_level": f.attrs.get("summary_level"),
                               "state_code": f.attrs.get("state_code"), "url": f.attrs.get("source_url"),
                               "sha256": f.attrs.get("sha256"), "moe_check": f.attrs.get("moe_check")})
+                if f.attrs.get("substitution"):  # B01003 total read from B01001 (census.replicate.fetch_vre)
+                    files[-1]["substitution"] = f.attrs["substitution"]
                 frames.append(f[f["GEOID"].astype(str).isin(want)])
             rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
             for n in names:
@@ -2005,6 +2007,11 @@ def methods_section(manifest: Mapping[str, Any], results: Optional[Mapping[str, 
                       "SHA-256 of each file in run.json"
                       + (f"; canonical SHA-256 of the replicates used `{rep_info['sha256']}`" if rep_info.get("sha256")
                          else "") + ")")
+        subs = [f["substitution"] for f in files if f.get("substitution")]
+        if subs:
+            rep_source += "; " + "; ".join(
+                f"{', '.join(s['lines'])} read from {', '.join(s['lines'].values())} of `{s['source_url']}` because "
+                f"`{s['requested_url']}` was unavailable ({s['reason']}); {s['verification']}" for s in subs)
         rep_short = " and replicate-based standard errors from Census VRE files"
     elif results is None and census_vre_source(m):
         rep_source = "the 80 replicate estimates of the Census VRE files fetched for the manifest's tables"

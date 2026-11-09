@@ -685,7 +685,9 @@ def _download(
     raw = resp.content or b""
     content_type = str(resp.headers.get("Content-Type", ""))
     if resp.status_code == 404:
-        raise VREDownloadError(f"Not published (HTTP 404): {url}")
+        exc = VREDownloadError(f"Not published (HTTP 404): {url}")
+        exc.url, exc.status_code = url, 404  # type: ignore[attr-defined]
+        raise exc
     if resp.status_code != 200:
         raise VREDownloadError(f"HTTP {resp.status_code} for {url}")
     return raw, content_type
@@ -915,6 +917,54 @@ def read_vre_csv(source: Union[str, bytes, io.IOBase], encoding: Optional[str] =
     return out.reset_index(drop=True)
 
 
+# Substitute files for VRE files census.gov does not serve. Only the verified
+# pair is listed: B01003 (Total Population) line 1 and B01001 (Sex by Age)
+# line 1 ("Total:") are the same total population. Verified on 2026-11-09 for
+# the 2015-2019 New York tract files (B01003_36 and B01001_36, 4,918 tracts):
+# ESTIMATE, MOE and Var_Rep1-80 identical, 0 differing cells; the live test in
+# tests/test_replicate_live.py re-checks it. Needed because www2.census.gov's
+# firewall rejects .../2019/data/5-year/140/B01003_26.csv.zip for every client
+# (support ID 13979921158196382640) while B01001_26 downloads normally.
+VRE_TOTAL_FALLBACKS: Dict[Tuple[str, int], Tuple[str, int]] = {("B01003", 1): ("B01001", 1)}
+VRE_TOTAL_FALLBACK_TITLES: Dict[Tuple[str, int], str] = {("B01003", 1): "Total"}
+VRE_TOTAL_FALLBACK_VERIFICATION = (
+    "B01003 line 1 (Total population) equals B01001 line 1 (Total:) cell for cell: verified 2026-11-09 on the "
+    "2015-2019 New York tract VRE files (4,918 tracts; ESTIMATE, MOE and Var_Rep1-80 identical, 0 differing "
+    "cells); re-checked by tests/test_replicate_live.py (CENSUS_LIVE_TESTS=1)."
+)
+
+
+def _fallback_reason(exc: BaseException) -> Optional[str]:
+    """Why a download failed when the failure allows a substitute file (firewall rejection or HTTP 404); else None."""
+    if getattr(exc, "rejected", False):
+        sid = getattr(exc, "support_id", "") or "none shown"
+        return f"census.gov firewall 'Request Rejected' page (support ID {sid})"
+    if getattr(exc, "status_code", None) == 404:
+        return "HTTP 404 (not published)"
+    return None
+
+
+def _load_vre_file(
+    table: str,
+    year: int,
+    sumlev: str,
+    state: Optional[str],
+    session: Any,
+    cache_dir: Optional[str],
+    refresh: bool,
+) -> Tuple[bytes, Dict[str, Any], str, str]:
+    """(raw bytes, sidecar metadata, URL, cache path) of one VRE file, from the cache or downloaded."""
+    url = vre_url(table, year, sumlev, state)
+    path = os.path.join(cache_dir or vre_cache_dir(year), sumlev, url.rsplit("/", 1)[-1])
+    raw = None if refresh else _read_cached(path, url, _decompress)
+    if raw is None:
+        raw, ctype = _download(url, session=session, cache_path=path)
+        _decompress(raw)  # validate before caching
+        return raw, _write_cached(path, raw, url, ctype), url, path
+    with open(_sidecar_path(path), encoding="utf-8") as f:
+        return raw, json.load(f), url, path
+
+
 def fetch_vre(
     table: str,
     year: int,
@@ -925,18 +975,33 @@ def fetch_vre(
     cache_dir: Optional[str] = None,
     refresh: bool = False,
     check_moe: bool = True,
+    lines: Optional[Sequence[int]] = None,
+    allow_substitute: bool = True,
 ) -> pd.DataFrame:
     """Download (or read from cache) one VRE file and return its replicate frame.
 
     Tract and block-group files are per state, so ``state_code`` is required for
     them; for state-nested national files (state, county, county subdivision,
-    place, congressional district) ``state_code`` filters the rows.
+    place, congressional district) ``state_code`` filters the rows. ``lines``
+    (ORDER numbers) keeps only those table lines.
 
     Files are cached under ``$CENSUS_VRE_DIR`` (default ``.cache/vre``) as
     ``<year>/<sumlev>/<file>`` with a ``.json`` sidecar holding the source URL
     and SHA-256; a cached file whose hash does not match is downloaded again.
     ``client`` (a census.api client) is accepted for interface symmetry; only
     its ``session`` attribute is used, if present.
+
+    Substitute file (``VRE_TOTAL_FALLBACKS``): when the B01003 file cannot be
+    fetched because census.gov rejects it (firewall page) or answers HTTP 404,
+    and only line 1 is needed, the B01001 file of the same release, geography
+    and state is fetched and its line 1 ("Total:", verified identical cell for
+    cell) is returned relabelled as B01003_001 with title "Total". This is never
+    silent: a warning is issued, ``attrs["substitution"]`` records the
+    requested and the substituted file (URLs, SHA-256 of the file read, reason,
+    verification statement) and ``attrs["notes"]`` says so; ``source_url`` and
+    ``sha256`` name the file actually read. Other lines, other tables, other
+    failures, or ``allow_substitute=False`` raise the original error, as does
+    an unavailable substitute.
 
     With ``check_moe`` the published-MOE self-check runs on load and a warning
     is issued when any uncontrolled row disagrees beyond rounding.
@@ -949,20 +1014,55 @@ def fetch_vre(
     state = str(state_code).zfill(2) if state_code not in (None, "") else None
     if state is not None and sumlev not in STATE_NESTED_SUMLEVS:
         raise ValueError(f"Summary level {sumlev} is not nested in states; omit state_code.")
-    url = vre_url(table, year, sumlev, state)
-    path = os.path.join(cache_dir or vre_cache_dir(year), sumlev, url.rsplit("/", 1)[-1])
-    raw = None if refresh else _read_cached(path, url, _decompress)
-    meta: Dict[str, Any]
-    if raw is None:
-        if session is None and client is not None:
-            session = getattr(client, "session", None)
-        raw, ctype = _download(url, session=session, cache_path=path)
-        _decompress(raw)  # validate before caching
-        meta = _write_cached(path, raw, url, ctype)
-    else:
-        with open(_sidecar_path(path), encoding="utf-8") as f:
-            meta = json.load(f)
+    wanted = None if lines is None else sorted({int(x) for x in lines})
+    if session is None and client is not None:
+        session = getattr(client, "session", None)
+    substitution: Optional[Dict[str, Any]] = None
+    try:
+        raw, meta, url, path = _load_vre_file(table, year, sumlev, state, session, cache_dir, refresh)
+    except VREDownloadError as exc:
+        reason = _fallback_reason(exc)
+        sub_lines = sorted(o for (t, o) in VRE_TOTAL_FALLBACKS if t == table)
+        if not allow_substitute or reason is None or not sub_lines:
+            raise
+        need = wanted if wanted is not None else sub_lines
+        other = [o for o in need if o not in sub_lines]
+        if other or not need:
+            raise VREDownloadError(
+                f"{exc}\nNo verified substitute file exists for {table} line(s) {other or need} (substitutes "
+                f"exist only for {[f'{table}_{o:03d}' for o in sub_lines]})."
+            ) from exc
+        src_table = VRE_TOTAL_FALLBACKS[(table, need[0])][0]
+        try:
+            raw, meta, url, path = _load_vre_file(src_table, year, sumlev, state, session, cache_dir, refresh)
+        except VREDownloadError:
+            raise exc from None  # the substitute is unavailable too: report the original failure
+        substitution = {
+            "requested_table": table,
+            "requested_url": getattr(exc, "url", None) or vre_url(table, year, sumlev, state),
+            "reason": reason,
+            "support_id": getattr(exc, "support_id", None),
+            "http_status": getattr(exc, "status_code", None),
+            "source_table": src_table,
+            "lines": {f"{table}_{o:03d}": "{}_{:03d}".format(*VRE_TOTAL_FALLBACKS[(table, o)]) for o in need},
+            "source_url": url,
+            "source_sha256": meta.get("sha256"),
+            "verification": VRE_TOTAL_FALLBACK_VERIFICATION,
+        }
+        wanted = need
     frame = read_vre_csv(raw)
+    if substitution is not None:
+        parts = []
+        for target, source in substitution["lines"].items():
+            part = frame[frame["variable"] == source].copy()
+            part["variable"] = target
+            part["title"] = VRE_TOTAL_FALLBACK_TITLES[(table, int(target.rsplit("_", 1)[1]))]
+            parts.append(part)
+        attrs = dict(frame.attrs)
+        frame = pd.concat(parts, ignore_index=True)
+        frame.attrs.update(attrs)
+    elif wanted is not None:
+        frame = frame[frame["variable"].isin({f"{table}_{o:03d}" for o in wanted})].reset_index(drop=True)
     if state is not None and sumlev not in PER_STATE_SUMLEVS:
         frame = frame[frame["GEOID"].str.startswith(state)].reset_index(drop=True)
     frame.attrs.update(
@@ -976,6 +1076,15 @@ def fetch_vre(
         cache_path=path,
         acquisition=meta.get("source", "download"),
     )
+    if substitution is not None:
+        note = (
+            f"{substitution['requested_url']} is unavailable ({substitution['reason']}); "
+            + ", ".join(f"{k} is {v}" for k, v in substitution["lines"].items())
+            + f" of {url} (SHA-256 {substitution['source_sha256']}), relabelled. {VRE_TOTAL_FALLBACK_VERIFICATION}"
+        )
+        frame.attrs["substitution"] = substitution
+        frame.attrs["notes"] = [f"substituted_source: {note}"]
+        warnings.warn(f"VRE substitute file used: {note}", stacklevel=2)
     if check_moe:
         report = verify_published_moe(frame)
         frame.attrs["moe_check"] = {k: v for k, v in report.items() if k != "mismatches"}

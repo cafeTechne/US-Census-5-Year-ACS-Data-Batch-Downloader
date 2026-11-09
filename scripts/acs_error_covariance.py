@@ -118,6 +118,8 @@ def _load_tables(year, level, state, files):
         files.append({"kind": "VRE", "year": year, "level": level, "state": state, "table": t,
                       "url": f.attrs["source_url"], "sha256": f.attrs["sha256"],
                       "acquisition": f.attrs.get("acquisition", "download")})
+        if f.attrs.get("substitution"):  # e.g. B01003 total read from B01001 (census.replicate.fetch_vre)
+            files[-1]["substitution"] = f.attrs["substitution"]
         frames[t] = f
     return frames
 
@@ -519,8 +521,20 @@ def write_report(df, extras, files, years, elapsed, findings, conclusion):
         seen.add(f["url"])
         name = f"`{f['url'].rsplit('/', 1)[-1]}`" + (" (manual download)" if f.get("acquisition") == "manual download"
                                                      else "")
+        if f.get("substitution"):
+            name += f" (substitute for `{f['substitution']['requested_url'].rsplit('/', 1)[-1]}`)"
         rows.append([f["kind"], f["year"], f["level"], name, f"`{f['sha256']}`"])
     L.append(_md_table(["kind", "year", "level", "file", "SHA-256"], rows) + "\n")
+    subs = [f for f in files if f.get("substitution")]
+    if subs:
+        L.append("**Substituted files** (census.replicate.fetch_vre, `VRE_TOTAL_FALLBACKS`):\n")
+        L.append(_md_table(["year", "level", "state", "requested", "reason", "used instead"],
+                           [[f["year"], f["level"], STATES.get(f["state"], f["state"]),
+                             f["substitution"]["requested_url"], f["substitution"]["reason"],
+                             ", ".join(f"{k} = {v} of {f['substitution']['source_url']}"
+                                       for k, v in f["substitution"]["lines"].items())] for f in subs]) + "\n")
+        L.append("Basis: " + subs[0]["substitution"]["verification"] + " The substitute file's SHA-256 is the one "
+                 "listed above.\n")
     missing = [f for f in files if f.get("unavailable")]
     if missing:
         L.append("**Unavailable files** (skipped; the variables that need them are not analysed for that state "

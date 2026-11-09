@@ -158,7 +158,8 @@ class TestRejectedPage(HttpTestCase):
         page = FakeResponse(REJECTED_PAGE, headers={"Content-Type": "text/html"})
         s = FakeSession([page, page, FakeResponse(b"never reached")])
         with self.assertRaises(rp.VREDownloadError) as ctx:
-            rp.fetch_vre("B01003", 2019, "tract", "26", session=s, cache_dir=self.tmp, check_moe=False)
+            rp.fetch_vre("B01003", 2019, "tract", "26", session=s, cache_dir=self.tmp, check_moe=False,
+                         allow_substitute=False)  # the B01001 substitute: tests/test_replicate.py
         exc = ctx.exception
         path = os.path.join(self.tmp, "140", "B01003_26.csv.zip")
         self.assertEqual(len(s.calls), 2)  # never loops
