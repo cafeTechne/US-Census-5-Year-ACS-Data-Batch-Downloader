@@ -1,7 +1,7 @@
 # Round 16: Validating Spatial Methods Under ACS Sampling Error
 
 **Date:** 2026-11-08
-**Status:** Approved by the owner/planner with qualifications (2026-11-08); implementation in progress
+**Status:** Implemented (section 7); released as v0.15.0
 **Baseline:** v0.14.0 (spreg 1.9.1, esda 2.10.0, libpysal 4.15.1)
 **Companions:** [PLAN_ROUND_15.md](PLAN_ROUND_15.md) (spatial coverage studies), [docs/remote_access_decisions.md](docs/remote_access_decisions.md) (remote access follows this round)
 
@@ -148,3 +148,26 @@ References:
 ## 6. Release
 
 v0.15.0 with a Zenodo DOI, after code review, fixes, the full gate, and a test run on both Python 3.10 and 3.14 before the push.
+
+---
+
+## 7. Implementation status (2026-11-09)
+
+| Workstream | Result |
+| :--- | :--- |
+| A spatial regression | **λ attenuation is real and correctable:** spatial Fay-Herriot recovers λ (coverage 0.86-0.93, uncorrected 0.003-0.85) under independent errors, and fails under positively correlated errors. **Lag effects** were added to the tool. **SDM data** break default GMM lag (documented). **LR common-factor test:** size fine for n ≥ 100, power weak, so not added. **Koley & Bera tests** don't identify SEM vs SDM |
+| B LISA | No default change. "38%" corrected. Fay-Herriot smoothing induces clusters only under positively correlated errors. Stability ≠ evidence. Wong 2021 targets a different estimand |
+| C covariance | Rates/shares/medians: neighbour error r ≈ 0 (±0.003 tracts). Controlled totals are correlated within county, with a release-dependent sign (2020-2024 negative; 2015-2019 households positive). The single 2019 Michigan population file is rejected by the census.gov firewall (URL-specific, not rate limiting) |
+| D literature | 12 sources read in full (owner-supplied PDFs for the blocked ones); verification levels recorded |
+| Owner decisions | Include `correct_outcome_error` in v0.15.0 (approved 2026-11-09) |
+| Review | `/code-review high`: 10 findings fixed. The shipped λ estimator is now the one the studies run, with coverage unchanged within 0.007 |
+
+**Proposals for a later round:**
+- the spatial Durbin model via spreg `slx_lags`, plus the common-factor test (LR/bootstrap);
+- simulated percentile intervals for lag effects at high ρ;
+- adaptive (Storey) BH and cluster-level FDR for LISA, scored on the existing runs;
+- a corrected global Moran's I (Lorincz-Comi Eq. 4) using the replicate covariance, after its inference is verified;
+- posterior exceedance probabilities (Sun et al. 2015);
+- the LISA weights guidance (P-B5).
+
+**Next:** minimum SSH remote access (docs/remote_access_decisions.md).
