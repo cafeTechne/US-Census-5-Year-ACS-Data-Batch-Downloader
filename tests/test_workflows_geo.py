@@ -74,6 +74,21 @@ class TestGeoWorkflows(unittest.TestCase):
         self.guided(res)
         self.assertIn("ML lag intervals for rho covered 0.48", " ".join(res["notes"]))
         self.assertFalse(g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ols")["success"])
+        # PLAN_ROUND_16 A1 option: lambda corrected for independent outcome sampling error
+        res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error", correct_outcome_error=True,
+                                   se_col="rate_se")
+        self.guided(res)
+        self.assertIn("known outcome sampling variances", res["method"])
+        self.assertIn("independent across areas", " ".join(res["notes"]))
+        self.assertIn("corrected lambda", res["next_step"])
+        self.assertIn("lambda_uncorrected", res["diagnostics"]["outcome_error_correction"])
+        self.assertFalse(res["diagnostics"]["controlled_total_warning"])
+        flagged = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error",
+                                       correct_outcome_error=True, se_col="rate_se", controlled_total=True)
+        self.assertTrue(flagged["diagnostics"]["controlled_total_warning"])
+        fail = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, model="error", correct_outcome_error=True)
+        self.assertEqual(fail["error_code"], "INVALID_INPUT")
+        self.assertIn("needs se_col", json.dumps(fail))
         self.guided(g.spatial_small_area_estimates(self.path, "rate ~ x", "rate_se", "tract", 2023,
                                                    output_path=os.path.join(self.dir, "sfh.csv")))
         self.assertFalse(g.spatial_regression(self.path, "rate ~ nope", "tract", 2023)["success"])
