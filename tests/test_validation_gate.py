@@ -218,7 +218,7 @@ class TestRound15SpatialStudies(unittest.TestCase):
         self.assertEqual(set(lisa["scenario"]), {"null_random_se", "null_clustered_se", "hot_spot"})
         self.assertTrue(lisa["power"].notna().any())
         # the tool-default rows are labelled: GMM lag, ML error; two-sided 9999-permutation LISA
-        dflt = reg[reg["tool_default"].fillna(False).astype(bool)]
+        dflt = reg[reg["tool_default"].eq(True)]
         self.assertEqual(set(zip(dflt["model"], dflt["estimator"])), {("lag", "gm"), ("error", "ml")})
         self.assertTrue(dflt["method"].str.contains(r"\[tool default\]").all())
         ld = lisa[lisa["reading"] == "default"]

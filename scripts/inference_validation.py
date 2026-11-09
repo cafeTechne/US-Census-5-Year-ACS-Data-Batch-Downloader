@@ -68,6 +68,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from census.lisa_validation import LISA_STUDIES  # noqa: E402
 from census.simulation import (BAND, CV_PROFILES, DESIGN_STUDIES, FAST, FULL, NOMINAL, SPATIAL_STUDIES,  # noqa: E402
                                STUDIES, group_config, run_study, run_study_job)
 
@@ -260,7 +261,7 @@ def main() -> int:
     if unknown:
         ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
     main_studies = None if args.studies is None else [
-        s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES]
+        s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES and s not in LISA_STUDIES]
     groups = []
     if main_studies is None or main_studies:
         groups.append(("main", main_studies))
@@ -271,6 +272,9 @@ def main() -> int:
                else [s for s in args.studies if s in DESIGN_STUDIES])
     if designs:  # Round 10 multilevel and DiD studies (own configuration)
         groups.append(("designs", designs))
+    lisa = [] if args.studies is None else [s for s in args.studies if s in LISA_STUDIES]
+    if lisa:  # Round 16 LISA validation studies: on demand only (info rows)
+        groups.append(("lisa", lisa))
     frames = _run_groups(groups, args.fast, jobs, lambda m: print(m, flush=True))
     frames = [f for f in frames if f is not None and len(f)]
     df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(

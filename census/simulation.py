@@ -1092,11 +1092,13 @@ def designs_config(fast: bool = True, **overrides: Any) -> SimConfig:
 
 
 def group_config(group: str, fast: bool) -> SimConfig:
-    """Configuration of a study group: "main" (FULL/FAST), "spatial" or "designs"."""
+    """Configuration of a study group: "main" (FULL/FAST), "spatial", "designs" or "lisa"."""
     if group == "spatial":
         return spatial_config(fast=fast)
     if group == "designs":
         return designs_config(fast=fast)
+    if group == "lisa":
+        return _lisa.lisa_config(fast=fast)
     if group != "main":
         raise ValueError(f"unknown study group {group!r}")
     return FAST if fast else FULL
@@ -1231,3 +1233,12 @@ def serial_config(fast: bool = True, **overrides: Any) -> SimConfig:
     reps = {k: 0 for k in base.reps}
     reps.update(SERIAL_REPS_FAST if fast else SERIAL_REPS_FULL)
     return replace(base, reps=reps, **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Round 16 (PLAN_ROUND_16 workstream B): LISA under sampling error
+# ---------------------------------------------------------------------------
+# Info rows only, on demand (scripts/inference_validation.py --studies NAME);
+# not in any default report. Design and methods: census.lisa_validation, which
+# registers its studies in STUDIES when imported.
+from . import lisa_validation as _lisa  # noqa: E402
