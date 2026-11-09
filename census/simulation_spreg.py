@@ -77,7 +77,12 @@ SPREG16_SDM_RHO = 0.4
 SPREG16_SDM_THETA = 0.3
 SPREG16_OMIT_CORR = 0.5                      # corr(x, z) for the omitted covariate z
 SPREG16_OMIT_RHO = 0.7                       # SAR autocorrelation of z
-SPREG16_JUHL_RHO = 0.5                       # Juhl (2021) Eq. 5 DGP in the A3 set ...
+SPREG16_EFFECT_DRAWS = 1000                  # draws for simulated (LeSage & Pace) effect intervals
+# spreg's OLS-based RS tests (Koley & Bera 2024): none of them tests SEM vs SDM (the common factor)
+SPREG16_RS_TESTS = {"lml": "rho = 0 (lag), assuming theta = 0", "lmwx": "theta = 0 (WX), assuming rho = 0",
+                    "lmspdurbin": "rho = 0 and theta = 0 (joint)", "rlmwx": "theta = 0, robust to rho",
+                    "rlmdurlag": "rho = 0, robust to theta"}
+SPREG16_JUHL_RHO = 0.5                      # Juhl (2021) Eq. 5 DGP in the A3 set ...
 SPREG16_JUHL_GAMMA = 0.25                    # ... with gamma / beta = 0.5
 SPREG16_REPS_FULL = {"spatial_error_attenuation": 300, "spatial_error_attenuation_correlated": 300,
                      "spatial_dgp_recovery": 400, "common_factor_lr": 1000, "common_factor_lr_acs": 500}
@@ -509,6 +514,7 @@ def study_spatial_dgp_recovery(cfg: SimConfig, reps: int) -> List[Dict[str, Any]
     g = _geoids(m)
     w = lattice_weights(side, g)
     W = w.full()[0]
+    eig = np.linalg.eigvals(W)
     rows: List[Dict[str, Any]] = []
     for di, (label, kind, p) in enumerate(SPREG16_DGPS):
         rho = p.get("rho", 0.0)
@@ -520,11 +526,14 @@ def study_spatial_dgp_recovery(cfg: SimConfig, reps: int) -> List[Dict[str, Any]
             if kind in ("sar", "sdm") else 10.0 + cfg.beta * cfg.x_mean
         for si, scen in enumerate(("acs", "none")):
             rng = np.random.default_rng(cfg.seed + 2400 + 10 * di + si)
+            rng_sim = np.random.default_rng([cfg.seed, 2400 + 10 * di + si, 1])  # effect-interval draws
             fits = [(mod, meth) for mod in SPATIAL_MODELS for meth in SPATIAL_METHODS]
             rec = {f: {"beta": [], "beta_cov": [], "sp": [], "sp_cov": [], "fail": 0,
                        **{e: [] for e in ("direct", "indirect", "total")},
                        **{f"{e}_cov": [] for e in ("direct", "indirect", "total")},
+                       **{f"{e}_simcov": [] for e in ("direct", "indirect", "total")},
                        **{f"{e}_se": [] for e in ("direct", "indirect", "total")}} for f in fits}
+            rs_rej: Dict[str, List[bool]] = {k: [] for k in SPREG16_RS_TESTS}
             for _ in range(reps):
                 x, ystar = _dgp_draw(cfg, kind, p, W, inv, rng)
                 ses: Dict[str, np.ndarray] = {}
@@ -533,6 +542,8 @@ def study_spatial_dgp_recovery(cfg: SimConfig, reps: int) -> List[Dict[str, Any]
                     ses["y"] = draw_cv(m, "tract", rng) / 100 * mean_y
                     y = ystar + ses["y"] * rng.standard_normal(m)
                 frame = acs_frame(g, {"y": y, "x": x}, ses)
+                for k, rej in _rs_rejections(y, x, w).items():
+                    rs_rej[k].append(rej)
                 for f in fits:
                     mod, meth = f
                     r = rec[f]
@@ -552,10 +563,12 @@ def study_spatial_dgp_recovery(cfg: SimConfig, reps: int) -> List[Dict[str, Any]
                         r["sp_cov"].append(bool(tab.loc[sp, "ci_lower"] <= sp_truth <= tab.loc[sp, "ci_upper"]))
                     if mod == "lag":
                         eff = res.effects.set_index("effect")
-                        for e in ("direct", "indirect", "total"):
+                        lo, hi = _simulated_effect_ci(res, eig, rng_sim)
+                        for i, e in enumerate(("direct", "indirect", "total")):
                             r[e].append(float(eff.loc[e, "estimate"]))
                             r[f"{e}_se"].append(float(eff.loc[e, "se_model"]))
                             r[f"{e}_cov"].append(bool(eff.loc[e, "ci_lower"] <= truth[e] <= eff.loc[e, "ci_upper"]))
+                            r[f"{e}_simcov"].append(bool(lo[i] <= truth[e] <= hi[i]))
                     else:
                         b = tab.loc["x"]
                         for e in ("direct", "total"):
@@ -586,9 +599,56 @@ def study_spatial_dgp_recovery(cfg: SimConfig, reps: int) -> List[Dict[str, Any]
                     has_ci = mod == "lag" or e != "indirect"
                     rows.append(_metric_row(lab, f"{e} effect of x ({truth[e]:.3f})", r[e], truth[e],
                                             r[f"{e}_cov"] if has_ci else None,
-                                            {**base, "term": f"x ({e})", "parameter_class": "substantive effect"},
+                                            {**base, "term": f"x ({e})", "parameter_class": "substantive effect",
+                                             "interval": "delta method [tool]" if mod == "lag" else "beta interval"},
                                             r[f"{e}_se"] if has_ci else None))
+                    if mod == "lag":
+                        rows.append(_metric_row(lab, f"{e} effect of x ({truth[e]:.3f}), simulated interval",
+                                                r[e], truth[e], r[f"{e}_simcov"],
+                                                {**base, "term": f"x ({e})", "parameter_class": "substantive effect",
+                                                 "interval": f"simulated percentile ({SPREG16_EFFECT_DRAWS} draws)"}))
+            for k, v in rs_rej.items():
+                rows.append(_rate(f"OLS-based RS test {k} (spreg; Koley & Bera 2024); DGP {label}, rook 12x12, "
+                                  f"{scen_label}", f"rejection rate at {SPREG16_LR_ALPHA:g} (H0: {SPREG16_RS_TESTS[k]})",
+                                  v, SPREG16_LR_ALPHA, {"dgp": kind, "dgp_label": label, "scenario": scen,
+                                                        "term": k, "parameter_class": "specification test"}))
     return rows
+
+
+def _rs_rejections(y: np.ndarray, x: np.ndarray, w) -> Dict[str, bool]:
+    """Rejections at SPREG16_LR_ALPHA of spreg's OLS-based RS tests (SPREG16_RS_TESTS)."""
+    import spreg
+
+    from .spatial import _silence_spreg_output
+
+    _silence_spreg_output()
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ols = spreg.OLS(y[:, None], x[:, None])
+        lm = spreg.LMtests(ols, w, tests=["lml", "lmwx", "lmspdurbin", "rlmwx", "rlmdurlag"])
+    return {k: float(np.ravel(getattr(lm, k))[1]) < SPREG16_LR_ALPHA for k in SPREG16_RS_TESTS}
+
+
+def _simulated_effect_ci(res, eig: np.ndarray, rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray]:
+    """LeSage & Pace (2009) simulated 90% intervals of (direct, indirect, total) for the first covariate.
+
+    Draws (beta, rho) from N(estimate, coefficient_vcov) of the lag fit and
+    takes percentiles of the effects; draws with |rho| >= 1 give NaN effects
+    and are dropped.
+    """
+    cv = res.diagnostics["coefficient_vcov"]
+    est = res.coefficients.set_index("term").loc[cv["terms"], "estimate"].to_numpy(float)
+    draws = rng.multivariate_normal(est, np.asarray(cv["matrix"], float), size=SPREG16_EFFECT_DRAWS)
+    b, r = draws[:, 1], draws[:, -1]
+    ok = np.abs(r) < 1
+    b, r = b[ok], r[ok]
+    direct = np.real(np.mean(1.0 / (1.0 - r[:, None] * eig[None, :]), axis=1))  # census.spatial.lag_multipliers
+    total = 1.0 / (1.0 - r)
+    vals = np.column_stack([b * direct, b * (total - direct), b * total])
+    q = (1 - NOMINAL) / 2
+    return np.quantile(vals, q, axis=0), np.quantile(vals, 1 - q, axis=0)
 
 
 # ---------------------------------------------------------------------------

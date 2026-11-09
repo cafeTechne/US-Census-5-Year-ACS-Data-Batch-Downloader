@@ -777,7 +777,10 @@ def spatial_regression(
     eff = None
     if eig is not None:
         k = len(terms)
-        eff = lag_effects(betas, np.asarray(r.vm, float)[:k, :k], names, eig, share)
+        vm_k = np.asarray(r.vm, float)[:k, :k]
+        eff = lag_effects(betas, vm_k, names, eig, share)
+        # for simulated (LeSage & Pace 2009) effect intervals: draws from N(estimates, vcov)
+        diagnostics["coefficient_vcov"] = {"terms": terms, "matrix": vm_k.tolist()}
     B = None
     if replicates is not None and len(replicates):
         all_used = formula_variables(formula, d)

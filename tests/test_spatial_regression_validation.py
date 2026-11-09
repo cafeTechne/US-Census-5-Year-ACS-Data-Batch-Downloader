@@ -118,6 +118,9 @@ class TestLagEffects(unittest.TestCase):
         self.assertEqual(list(res.effects.columns[:3]), ["term", "variable", "effect"])
         self.assertTrue(np.isfinite(res.effects["se_model"]).all())
         self.assertTrue((res.effects["ci_lower"] < res.effects["ci_upper"]).all())
+        cv = res.diagnostics["coefficient_vcov"]
+        self.assertEqual(cv["terms"], ["Intercept", "x", "z", "rho"])
+        np.testing.assert_allclose(np.sqrt(np.diag(cv["matrix"])), res.coefficients["se_model"])
         err = spatial_regression("y ~ x + z", df, w, model="error")
         self.assertIsNone(err.effects)
         self.assertNotIn("effects", err.to_dict())
@@ -274,6 +277,20 @@ class TestStudyEstimators(unittest.TestCase):
         self.assertAlmostEqual(sdm["total"], 0.8 / 0.6, places=10)
         # SEM written as SDM (theta = -rho beta): total effect beta
         self.assertAlmostEqual(true_effects(W, 0.4, 0.5, -0.2)["total"], 0.5, places=10)
+
+    def test_rs_additivity(self):
+        # Koley & Bera (2024): RS_rho,gamma = RS_rho + RS*_gamma = RS*_rho + RS_gamma (in spreg 1.9.1 the
+        # robust tests are defined by these differences, so this checks the wiring, not the theory)
+        from census.spatial import _silence_spreg_output
+        _silence_spreg_output()
+        w, W, eig, x, y = self.data["rook"]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            lm = spreg.LMtests(spreg.OLS(y[:, None], x[:, None]), w,
+                               tests=["lml", "lmwx", "lmspdurbin", "rlmwx", "rlmdurlag"])
+        joint = lm.lmspdurbin[0]
+        self.assertAlmostEqual(joint, lm.lml[0] + lm.rlmwx[0], places=8)
+        self.assertAlmostEqual(joint, lm.rlmdurlag[0] + lm.lmwx[0], places=8)
 
     def test_sar_correlation(self):
         from census.simulation_spreg import neighbour_correlation, sar_correlation
