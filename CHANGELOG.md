@@ -5,6 +5,30 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.15.1 (patch): B01003 total from B01001 for firewall-blocked VRE files
+
+- **`fetch_vre` substitute for the total-population VRE file.** census.gov's firewall
+  rejects the 2015-2019 Michigan tract B01003 file for every client (support ID
+  13979921158196382640). When a B01003 file is rejected or returns HTTP 404, `fetch_vre`
+  now reads line 1 ("Total:") of the B01001 file for the same release, geography and
+  state, and relabels it as B01003_001.
+  - Only this pair is substituted (`VRE_TOTAL_FALLBACKS`). On the 2015-2019 New York
+    tract files the two lines are identical in every cell. A live test
+    (`CENSUS_LIVE_TESTS=1`) re-checks this.
+  - The substitution is never silent. It issues a warning and is recorded in
+    `attrs["substitution"]`: requested URL, reason, the B01001 URL and its SHA-256, and
+    the verification. Manifest replicate records and methods text carry it.
+  - Other B01003 lines, other tables or failures, `allow_substitute=False`, or an
+    unavailable B01001 file still raise the original error. A new `lines=` argument
+    keeps only the requested table lines.
+- **Michigan 2015-2019 population covariance completed**
+  (`docs/audits/acs_sampling_covariance.md`), using the B01001 substitute. Results match
+  2020-2024 and New York, so the conclusions are unchanged.
+  - Order 1 within county is -0.075 [-0.103, -0.046] (2020-2024: -0.081).
+  - Across county it is -0.005 [-0.014, 0.004].
+  - The county aggregation ratio is 0.000.
+  - Split-half pair reliability is 0.64.
+
 ## 0.15.0 (Round 16): spatial methods validated under ACS sampling error
 
 - Project renamed **Census Research Engine** (github.com/cafeTechne/Census-Research-Engine);
