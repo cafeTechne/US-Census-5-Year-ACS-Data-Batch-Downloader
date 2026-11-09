@@ -276,14 +276,16 @@ def check_urls(
 
         import requests
 
+        from census.http import polite_get
+
         session = requests.Session()
-        session.headers["User-Agent"] = "acs-batch-downloader/errata-check (research toolkit)"
 
         def get(url: str) -> int:  # type: ignore[no-redef]
             time.sleep(delay)
             try:
-                return session.get(url, timeout=30, allow_redirects=True).status_code
-            except requests.RequestException:
+                return polite_get(url, user_agent="census-research-engine/errata-check (research toolkit)",
+                                  session=session, timeout=30).status_code
+            except RuntimeError:  # connection failure after retries, or the firewall page
                 return 0
 
     failures = []

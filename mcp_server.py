@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""US Census ACS Batch Downloader: MCP server.
+"""Census Research Engine: MCP server.
 
 Exposes discovery, extraction, cross-vintage concordance review, and research
 statistics tools over the Model Context Protocol. The server instructions and

@@ -5,8 +5,8 @@ on:
   push:
   pull_request:
   schedule:
-    # Weekly live validation against Census-published values (Mondays 06:00 UTC).
-    - cron: "0 6 * * 1"
+    # Weekly live validation against Census-published values (Mondays 06:17 UTC; off the hour, since GitHub may delay or drop top-of-hour schedules).
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 permissions:

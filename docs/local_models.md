@@ -46,7 +46,7 @@ Any MCP client that can use a local model works. The server entry is the same ev
   "mcpServers": {
     "census": {
       "command": "python",
-      "args": ["/path/to/US-Census-5-Year-ACS-Data-Batch-Downloader/mcp_server.py", "--profile", "core"],
+      "args": ["/path/to/Census-Research-Engine/mcp_server.py", "--profile", "core"],
       "env": {"CENSUS_API_KEY": "your-key"}
     }
   }

@@ -71,6 +71,7 @@ extra mismatch.
 import io
 import json
 import os
+import warnings
 import zipfile
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -78,6 +79,7 @@ import numpy as np
 import pandas as pd
 
 from .api import BASE_URL, DEFAULT_API_KEY
+from .http import adopt_manual_file, payload_problem, polite_get, quarantine
 from .replicate import USER_AGENT, _read_cached, _sha256, _sidecar_path, _write_cached
 from .geo import get_resource_path
 
@@ -148,29 +150,51 @@ def _state(state: Any) -> str:
     return code
 
 
-def _get(url: str, params: Optional[Dict[str, str]] = None, session: Any = None, timeout: float = 300.0) -> bytes:
-    import requests
-
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    except requests.RequestException as exc:
-        raise BlockDataError(f"download failed for {url}: {exc}") from exc
+def _get(url: str, params: Optional[Dict[str, str]] = None, session: Any = None, timeout: float = 300.0,
+         cache_path: Optional[str] = None) -> bytes:
+    resp = polite_get(url, user_agent=USER_AGENT, error=BlockDataError, session=session, timeout=timeout,
+                      params=params, cache_path=cache_path)
     if resp.status_code != 200:
         raise BlockDataError(f"HTTP {resp.status_code} for {url}")
-    raw = resp.content or b""
-    if b"Request Rejected" in raw[:2000]:
-        raise BlockDataError(f"census.gov rejected the request for {url}; retry later")
-    return raw
+    return resp.content or b""
 
 
-def _cached_or_fetch(path: str, url: str, fetch: Any, content_type: str) -> bytes:
+def _cached_or_fetch(path: str, url: str, fetch: Any, content_type: str, adopt: bool = False,
+                     zip_member: Optional[str] = None) -> bytes:
+    """Cached bytes or ``fetch()``; with ``adopt``, a file placed at ``path`` by hand is used (raw downloads).
+
+    Raw downloads (``adopt``) are checked with census.http.payload_problem (a
+    zip with a ``zip_member`` member, never an HTML page): a manually placed
+    file that fails is moved aside to ``<path>.invalid`` (no sidecar) and
+    BlockDataError names it; a cached file that fails is moved aside and
+    fetched again; a fetched payload that fails raises before anything is
+    cached.
+    """
+    if adopt:
+        def check(p: str) -> None:
+            problem = payload_problem(p, zip_member)
+            if problem:
+                raise BlockDataError(f"Manually placed file {p} is not usable: {problem}.")
+
+        adopt_manual_file(path, url, _sidecar_path(path), validate=check)
     raw = _read_cached(path)
+    if raw is not None and adopt:
+        problem = payload_problem(raw, zip_member)
+        if problem:
+            dest = quarantine(path, _sidecar_path(path))
+            warnings.warn(f"cached file {path} is not usable ({problem}); moved aside to {dest} and fetching it "
+                          "again", UserWarning, stacklevel=2)
+            raw = None
     if raw is not None:
         return raw
     if _offline():
         raise BlockDataError(f"{os.path.basename(path)} not cached and CENSUS_BLOCK_OFFLINE is set")
     raw = fetch()
+    if adopt:
+        problem = payload_problem(raw, zip_member)
+        if problem:
+            raise BlockDataError(f"{url} returned content that is not the data file: {problem}. Nothing was "
+                                 f"cached; download it in a web browser and save it at {path}")
     _write_cached(path, raw, url, content_type)
     return raw
 
@@ -210,7 +234,8 @@ def load_block_relationships(state: Any, session: Any = None) -> pd.DataFrame:
     st = _state(state)
     url = REL_URL.format(state=st)
     path = os.path.join(block_cache_dir(), os.path.basename(url))
-    raw = _cached_or_fetch(path, url, lambda: _get(url, session=session), "application/zip")
+    raw = _cached_or_fetch(path, url, lambda: _get(url, session=session, cache_path=path), "application/zip",
+                           adopt=True, zip_member=".txt")
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
             name = next(n for n in zf.namelist() if n.lower().endswith(".txt"))
@@ -538,15 +563,10 @@ def _write_assignment_cache(path: str, df: pd.DataFrame, url: str) -> None:
 
 def _fetch_zcta2020(session: Any = None) -> None:
     """Stream the national 2020 ZCTA-to-block file once; cache one compact file per state."""
-    import requests
-
     if _offline():
         raise BlockDataError("2020 ZCTA block file not cached and CENSUS_BLOCK_OFFLINE is set")
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(ZCTA_2020_URL, headers={"User-Agent": USER_AGENT}, timeout=600, stream=True)
-    except requests.RequestException as exc:
-        raise BlockDataError(f"download failed for {ZCTA_2020_URL}: {exc}") from exc
+    resp = polite_get(ZCTA_2020_URL, user_agent=USER_AGENT, error=BlockDataError, session=session, timeout=600,
+                      stream=True)
     if resp.status_code != 200:
         raise BlockDataError(f"HTTP {resp.status_code} for {ZCTA_2020_URL}")
     lines = (ln.decode("utf-8-sig") if isinstance(ln, bytes) else ln for ln in resp.iter_lines())

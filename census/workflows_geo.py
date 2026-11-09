@@ -188,8 +188,8 @@ def spatial_autocorrelation(
         local: Also return local clusters with multiple-comparison correction
             (two-sided p_value = 2 x p_sim from 9999 permutations, BH,
             alpha 0.10). Simulation: rates at nominal under randomness,
-            little power on ~150 areas, and spatially patterned sampling
-            error creates spurious clusters (see local_notes).
+            little power on ~150 areas, and spatially varying SEs create
+            spurious significant areas (see local_notes).
         replicates_path: Census replicates (build_analysis_frame) for a
             design-based SE of I. That SE is conservative (validated coverage
             0.987 for nominal 0.90).
@@ -224,9 +224,14 @@ def spatial_regression(
     weights: str = "queen",
     replicates_path: Optional[str] = None,
     method: Optional[str] = None,
+    correct_outcome_error: bool = False,
+    se_col: Optional[str] = None,
+    controlled_total: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Spatial lag or spatial error regression (PySAL spreg) with Lagrange
     multiplier diagnostics; replicate SEs when replicates are given.
+    Lag model: report ``effects`` (direct/indirect/total, with SEs and
+    intervals) first; its beta is not the marginal effect.
 
     Args:
         method: "gm" or "ml". Default: "gm" (GMM) for the lag model, "ml"
@@ -235,6 +240,15 @@ def spatial_regression(
             0.3, 0.6) for nominal 0.90, ML lag only 0.48 and 0.003. Error
             model: lambda is attenuated (either method); beta intervals
             hold. See the result notes.
+        correct_outcome_error: Error model only (default False). Corrects
+            lambda for the outcome's sampling error, using se_col (the
+            outcome's SE column) as known variances; assumes independent
+            errors across areas. method is then "reml" (default) or "ml".
+            Validated: lambda intervals covered 0.86-0.93. Warns for
+            population/household totals (negatively correlated errors).
+            At most 2,000 areas (dense O(n^3) fit); larger frames fail:
+            use counties or a regional subset. SEs of 0 are refused.
+        controlled_total: true flags the outcome as a controlled total.
 
     Example: spatial_regression("frame.parquet", "poverty_rate ~ median_rent", "tract", 2023, model="error")
     """
@@ -242,12 +256,26 @@ def spatial_regression(
 
     try:
         gdf, w = _weights_for(_with_boundaries(_load_frame(input_path), level, year), weights)
-        res = spatial.spatial_regression(formula, gdf, w, model=model, method=method, replicates=_release_replicates(_read_replicates(replicates_path), year))
+        res = spatial.spatial_regression(formula, gdf, w, model=model, method=method,
+                                         replicates=_release_replicates(_read_replicates(replicates_path), year),
+                                         correct_outcome_error=correct_outcome_error, se_col=se_col,
+                                         controlled_total=controlled_total)
     except _GEO_ERRORS as exc:
-        return _fail(errors.INVALID_INPUT, str(exc))
+        step = ""
+        if correct_outcome_error and f"limited to {spatial.CORRECTION_MAX_N} areas" in str(exc):
+            step = (f"refit at county level, or subset input_path to a region of at most "
+                    f"{spatial.CORRECTION_MAX_N} areas (one or a few states or metro areas) and rerun; or drop "
+                    "correct_outcome_error and report the attenuation caveat from the notes")
+        return _fail(errors.INVALID_INPUT, str(exc), step)
     out = res.to_dict()
-    return _ok(result_summary(res), "make_table or report coefficients with the LM diagnostics",
-               **{k: v for k, v in out.items() if k != "summary"})
+    step = ("report the effects table first (direct, indirect and total effects with their intervals: the "
+            "marginal effects; beta is not one), then rho and the LM diagnostics"
+            if res.effects is not None else
+            "report the corrected lambda with its interval and the independence assumption from the notes "
+            "(heed any controlled-total warning); compare with diagnostics.outcome_error_correction."
+            "lambda_uncorrected" if correct_outcome_error else
+            "make_table or report coefficients with the LM diagnostics")
+    return _ok(result_summary(res), step, **{k: v for k, v in out.items() if k != "summary"})
 
 
 def spatial_small_area_estimates(

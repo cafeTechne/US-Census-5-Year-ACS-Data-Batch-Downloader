@@ -42,9 +42,10 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-import requests
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+from census.http import polite_get  # noqa: E402
 OUT_DIR = os.path.join(ROOT, "data", "geo_crosswalks")
 
 NATIONAL_URL = (
@@ -65,7 +66,7 @@ CT_DOCS = [
 LAND_TOLERANCE = 0.10
 # Matches whose land area differs by more than this are listed in the sidecar.
 LAND_REPORT = 0.01
-USER_AGENT = "acs-batch-downloader/fetch_tract_relationships (research toolkit)"
+USER_AGENT = "census-research-engine/fetch_tract_relationships (research toolkit)"
 
 # Output column -> source column in the national file.
 NATIONAL_COLUMNS: List[Tuple[str, str]] = [
@@ -92,7 +93,7 @@ def download(url: str, local: Optional[str]) -> Tuple[bytes, Dict[str, Optional[
     if local:
         with open(local, "rb") as f:
             return f.read(), {"retrieved_from": "local copy of " + url, "last_modified": None}
-    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=300)
+    resp = polite_get(url, user_agent=USER_AGENT, timeout=300)
     resp.raise_for_status()
     ctype = resp.headers.get("Content-Type", "")
     if "html" in ctype.lower():

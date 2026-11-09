@@ -58,11 +58,12 @@ import pandas as pd
 
 from .api import PRODUCT_1YR, PRODUCT_5YR, normalize_product
 from .geo import STATE_FILES, STATE_MAPPING, get_resource_path
+from .http import adopt_manual_file, payload_problem, polite_get, quarantine
 from .results import (SOURCE_MODEL, SOURCE_SAMPLING_REPLICATE, ModelResult, check_refit_count,
                       check_replicate_policy, replicate_completeness)
 from .variance import REPLICATE_COUNT, REPLICATE_FACTOR, Z90
 
-USER_AGENT = "acs-batch-downloader/pums (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/pums (research toolkit; python-requests)"
 PUMS_DATA_BASE = "https://www2.census.gov/programs-surveys/acs/data/pums"
 PUMS_DOCS_BASE = "https://www2.census.gov/programs-surveys/acs/tech_docs/pums"
 PUMS_API_TEMPLATE = "https://api.census.gov/data/{year}/acs/{dataset}/pums"
@@ -195,13 +196,34 @@ def _write_sidecar(path: str, meta: Dict[str, Any]) -> None:
         json.dump(meta, f, indent=2)
 
 
-def read_cache_entry(path: str) -> Optional[Dict[str, Any]]:
+def _expected_member(url: str) -> Optional[str]:
+    """``.csv`` for the zipped PUMS files (state CSV zips); None for plain text files (dictionaries, CSV/TXT)."""
+    return ".csv" if url.lower().endswith(".zip") else None
+
+
+def _check_manual(url: str) -> Callable[[str], None]:
+    def check(path: str) -> None:
+        problem = payload_problem(path, _expected_member(url))
+        if problem:
+            raise PumsError(f"Manually placed file {path} is not usable: {problem}.")
+    return check
+
+
+def read_cache_entry(path: str, url: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Sidecar metadata if ``path`` exists and matches its recorded SHA-256.
+
+    With ``url``, a file placed at ``path`` by hand (no sidecar yet) is
+    adopted with ``source: "manual download"`` (census.http.adopt_manual_file)
+    after checking it is what the URL serves (a zip with a CSV member for
+    ``.zip`` URLs, not an HTML page); a file that fails is moved aside to
+    ``<path>.invalid`` and PumsError names both paths (no sidecar written).
 
     State PUMS zips run to hundreds of MB, so the full SHA-256 is recomputed
     only when the file's size or mtime differs from the values recorded in
     the sidecar (``size_bytes``, ``mtime_ns``); a verified hash refreshes them.
     """
+    if url is not None:
+        adopt_manual_file(path, url, _sidecar(path), validate=_check_manual(url))
     if not (os.path.exists(path) and os.path.exists(_sidecar(path))):
         return None
     try:
@@ -236,17 +258,11 @@ def write_cache_entry(path: str, raw: bytes, url: str, content_type: str = "") -
     return meta
 
 
-def _download(url: str, session: Any = None, timeout: float = 600.0) -> Tuple[bytes, str]:
-    import requests
-
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    except requests.RequestException as exc:  # pragma: no cover - network failure
-        raise PumsError(f"Download failed for {url}: {exc}") from exc
+def _download(url: str, session: Any = None, timeout: float = 600.0,
+              cache_path: Optional[str] = None) -> Tuple[bytes, str]:
+    resp = polite_get(url, user_agent=USER_AGENT, error=PumsError, session=session, timeout=timeout,
+                      cache_path=cache_path)
     raw = resp.content or b""
-    if b"Request Rejected" in raw[:2000]:
-        raise PumsError(f"census.gov rejected the request for {url}; wait and retry later")
     if resp.status_code == 404:
         raise PumsError(f"Not published (HTTP 404): {url}")
     if resp.status_code != 200:
@@ -256,11 +272,29 @@ def _download(url: str, session: Any = None, timeout: float = 600.0) -> Tuple[by
 
 def cached_download(url: str, subdir: str = "", *, cache_dir: Optional[str] = None, refresh: bool = False,
                     session: Any = None) -> Tuple[str, Dict[str, Any]]:
-    """Path and sidecar metadata of ``url`` in the PUMS cache, downloading if needed."""
+    """Path and sidecar metadata of ``url`` in the PUMS cache, downloading if needed.
+
+    Downloads are checked before they are cached (a zip with a CSV member for
+    ``.zip`` URLs; never an HTML page such as the census.gov firewall page);
+    a failing download raises PumsError and nothing is written. A cached file
+    whose content fails the same check (e.g. cached before the check existed)
+    is moved aside to ``<path>.invalid`` with a warning and downloaded again.
+    """
     path = os.path.join(cache_dir or pums_cache_dir(), subdir, url.rsplit("/", 1)[-1])
-    meta = None if refresh else read_cache_entry(path)
+    meta = None if refresh else read_cache_entry(path, url)
+    if meta is not None:
+        problem = payload_problem(path, _expected_member(url))
+        if problem:
+            dest = quarantine(path, _sidecar(path))
+            warnings.warn(f"cached PUMS file {path} is not usable ({problem}); moved aside to {dest} and "
+                          "downloading it again", UserWarning, stacklevel=2)
+            meta = None
     if meta is None:
-        raw, ctype = _download(url, session=session)
+        raw, ctype = _download(url, session=session, cache_path=path)
+        problem = payload_problem(raw, _expected_member(url))
+        if problem:
+            raise PumsError(f"{url} returned content that is not the data file: {problem}. Nothing was cached; "
+                            f"download it in a web browser and save it at {path}")
         meta = write_cache_entry(path, raw, url, ctype)
     return path, meta
 

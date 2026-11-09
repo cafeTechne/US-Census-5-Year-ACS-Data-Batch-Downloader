@@ -5,6 +5,45 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## 0.15.0 (Round 16): spatial methods validated under ACS sampling error
+
+- Project renamed **Census Research Engine** (github.com/cafeTechne/Census-Research-Engine);
+  the distribution name `census-acs-toolkit` is unchanged.
+- **Lag-model effects:** `spatial_regression(model="lag")` reports direct, indirect and
+  total effects first (delta-method and replicate SEs; verified against the S(W) algebra
+  and spreg's multipliers), with notes that beta is not the marginal effect and that a
+  rho = 0 test is not a specification test. Coverage and a heavy-tail caveat at high rho
+  are measured (`docs/audits/spatial_regression_validation.md`).
+- **New option `spatial_regression(model="error", correct_outcome_error=True, se_col=...)`:**
+  corrects lambda for outcome sampling error using spatial Fay-Herriot (REML). Lambda
+  coverage is 0.86-0.93 against 0.003-0.85 uncorrected, measured on the shipped estimator.
+  - Assumes errors independent across areas. Warns when errors are correlated, and when
+    the outcome is a controlled total, where the sign of the bias depends on the release.
+  - Limited to 2,000 areas.
+- **ACS sampling-error covariance measured from VRE replicates** (Michigan and New York,
+  2015-2019 and 2020-2024; `docs/audits/acs_sampling_covariance.md`):
+  - neighbour error correlation is about 0 for rates, shares, medians and most counts;
+  - controlled totals are correlated within county, with a sign that can differ by
+    release.
+- **LISA validation:** under ACS error (`docs/audits/lisa_validation.md`), with no default
+  change.
+  - The Round 15 "38%" caveat is corrected: it counts maps with at least one significant
+    area, not contiguous false clusters.
+  - Replicate stability and Fay-Herriot reruns are shown not to be false-positive checks.
+- **Common-factor and specification studies:** LR size measured in Juhl's design; Koley &
+  Bera score tests shown not to identify SEM vs SDM. All new studies are info-only and
+  run on demand.
+- **Polite census.gov downloads:** one shared helper (`census/http.py`) with
+  - backoff and Retry-After on 429/5xx;
+  - per-host pacing;
+  - a clear error for the firewall "Request Rejected" page, with the support ID and the
+    cache path for a manual download;
+  - validation of manually placed files.
+- **Literature:** full-text reading notes with verification levels
+  (`docs/literature/full_text_reading_notes.md`). Remote-access planner decisions are
+  recorded in `docs/remote_access_decisions.md`.
+- **CI:** the weekly live-validation cron moved off the hour (Mondays 06:17 UTC).
+
 ## 0.14.0 (Round 15): studies across releases, spatial coverage, 2020 Census
 
 - Confirmatory studies across releases: CPI conversion to a declared `dollar_year`, then

@@ -4,8 +4,8 @@
 Walks every page of the two listings (tab 'all'), fetches each note page and
 parses it with census.errata.parse_note. Writes the records and a sidecar
 (data/acs_errata.sidecar.json) with the listing URLs, the retrieval date, the
-record count and the SHA-256 of the data file. Requests are spaced (census.gov
-rejects rapid scripted requests).
+record count and the SHA-256 of the data file. Requests are spaced by --delay
+as a courtesy, on top of census.http's pacing and retries.
 
 Usage: python scripts/fetch_acs_errata.py [--delay 2] [--html-cache DIR]
 --html-cache keeps the raw pages (for re-parsing without re-fetching).
@@ -26,12 +26,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from census import errata  # noqa: E402
+from census.http import polite_get  # noqa: E402
 
 LISTINGS = {
     "errata": errata.ERRATA_LISTING_URL,
     "user_note": errata.USER_NOTES_LISTING_URL,
 }
-USER_AGENT = "acs-batch-downloader/errata (research toolkit; python-requests)"
+USER_AGENT = "census-research-engine/errata (research toolkit; python-requests)"
 MAX_PAGES = 40
 
 
@@ -50,7 +51,8 @@ class Fetcher:
                 with open(path, encoding="utf-8") as f:
                     return f.read()
         time.sleep(self.delay)
-        resp = self.session.get(url, timeout=60)
+        resp = polite_get(url, user_agent=USER_AGENT, error=requests.RequestException, session=self.session,
+                          timeout=60)
         resp.raise_for_status()
         resp.encoding = "utf-8"
         text = resp.text

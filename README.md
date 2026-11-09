@@ -1,4 +1,4 @@
-# US Census ACS 5-Year Data Batch Downloader
+# Census Research Engine
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23925301.svg)](https://doi.org/10.5281/zenodo.23925301)
 
@@ -22,8 +22,8 @@ All four interfaces share one pipeline and the same defaults.
 Tested on Python 3.10–3.12 (Linux and Windows CI).
 
 ```bash
-git clone https://github.com/cafeTechne/US-Census-5-Year-ACS-Data-Batch-Downloader
-cd US-Census-5-Year-ACS-Data-Batch-Downloader
+git clone https://github.com/cafeTechne/Census-Research-Engine
+cd Census-Research-Engine
 pip install -r requirements.txt
 ```
 
@@ -51,6 +51,7 @@ Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a
 | `CENSUS_PRICE_PARITY_DIR` | Alternate Regional Price Parity directory (default `data/price_parities/`); same treatment |
 | `BLS_USER_AGENT` | Identifying User-Agent for `scripts/update_price_indexes.py` |
 | `CENSUS_VRE_DIR` | Cache for downloaded Census Variance Replicate Estimate files (default `.cache/vre/`) |
+| `CENSUS_WWW2_MIN_INTERVAL` / `CENSUS_WWW2_ATTEMPTS` / `CENSUS_WWW2_BACKOFF_BASE` / `CENSUS_WWW2_REJECTED_RETRY_DELAY` | census.gov file downloads (`census/http.py`): seconds between requests to one host (default 1), attempts on HTTP 429/5xx or connection errors (4), backoff base in seconds (2; doubled per retry, capped at 60, honours `Retry-After`), and the wait before the single retry of a firewall "Request Rejected" page (30). A rejection that persists names the cache path where a browser-downloaded copy of the file is picked up |
 | `CENSUS_LIVE_TESTS=1` | Enable live API contract tests and the live validation battery |
 
 ## Quick start
@@ -238,7 +239,7 @@ Built on GeoPandas, Shapely (GEOS), pyogrio (GDAL), pyproj, and PySAL. Outputs a
 | Census boundaries matched to each ACS release | `census.boundaries.get_boundaries` / `get_boundaries` | Cartographic (1:500k) for maps, TIGER/Line for areal work; vintage mismatches are errors |
 | Journal maps that show uncertainty | `census.maps.choropleth` / `make_map` | Quantile classes by default; legend reports class separability (Sun and Wong 2010); low-reliability areas hatched; uncertainty and significance maps |
 | Spatial autocorrelation | `census.spatial.morans_i`, `local_morans` / `spatial_autocorrelation` | Reproduces PySAL references; replicate SE of Moran's I is conservative (coverage 0.987); local clusters use two-sided permutation p-values (9999 permutations, BH): false-positive rates at nominal under randomness |
-| Spatial regression | `census.spatial.spatial_regression` | Lag (GMM default) and error (ML default) models with LM diagnostics (spreg); simulated coverage under ACS outcome error: rho 0.89-0.90 (GMM lag), lambda attenuated |
+| Spatial regression | `census.spatial.spatial_regression` / `spatial_regression` | Lag (GMM default) and error (ML default) models with LM diagnostics (spreg); simulated coverage under ACS outcome error: rho 0.89-0.90 (GMM lag), lambda attenuated (0.003-0.85). Error model option `correct_outcome_error=True, se_col=...` corrects lambda for the outcome's sampling error (spatial Fay-Herriot likelihood, REML): lambda coverage 0.86-0.93. It assumes independent errors across areas, which ACS replicates support for rates, shares and medians ([covariance audit](docs/audits/acs_sampling_covariance.md)); it warns for population/household totals and is biased by positively correlated errors ([validation](docs/audits/spatial_regression_validation.md)) |
 | Spatial Fay–Herriot | `census.sae_spatial.spatial_fay_herriot` / `spatial_small_area_estimates` | Reproduces the R `sae` grapes example; coverage 0.891 |
 | Population-weighted tract crosswalks | `census.block_weights`, `harmonize_panel(weight="auto")` | Decennial block weights; Delaware test: mean error 444 vs 624 people with land-area weights |
 | Block groups and custom polygons | `geo_level="block group"`, `census.custom_areas` / `custom_area_mapping` | Area or block-population allocation |

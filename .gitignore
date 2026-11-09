@@ -44,3 +44,6 @@ docs/audits/*.csv
 
 # Agent git worktrees (local only)
 .claude/worktrees/
+
+# Literature PDFs downloaded by hand (copyrighted; never committed)
+literature_pdfs/

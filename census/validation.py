@@ -63,6 +63,7 @@ from census import metadata as _md
 from census import replicate as _replicate
 from census import decennial as _dec
 from census.api import BASE_URL, DATASETS, CensusAPIClient
+from census.http import polite_get
 from census.stats import CENSUS_SENTINELS, acs5_overlap_years, parse_variable_code, z_test
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,8 +75,10 @@ CHECK_IDS: Tuple[str, ...] = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F
 
 # Census API: at most 50 variables per request (NAME counts).
 MAX_GET_VARIABLES = 48
-USER_AGENT = "acs-batch-downloader/validation (research toolkit; python-requests)"
-WWW2_DELAY_SECONDS = 3.0  # census.gov firewall rejects rapid scripted requests
+USER_AGENT = "census-research-engine/validation (research toolkit; python-requests)"
+# Extra courtesy pause between this harness's www2 requests, on top of the
+# process-wide pacing, retries and firewall handling in census.http.
+WWW2_DELAY_SECONDS = 3.0
 
 SUMMARY_FILE_URL = (
     "https://www2.census.gov/programs-surveys/acs/summary_file/{year}/table-based-SF/data/"
@@ -678,13 +681,9 @@ class CensusSource:
             self.urls.append(url)
         if not self.live:
             return self.read_fixture(name)
-        import requests  # local: keeps the module importable offline without network deps
-
         self._www2_wait()
-        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=120)
+        resp = polite_get(url, user_agent=USER_AGENT, error=SourceError, timeout=120)
         body = resp.content or b""
-        if b"Request Rejected" in body[:2000]:
-            raise SourceError(f"census.gov rejected the request for {url} (firewall page); retry later.")
         if resp.status_code != 200:
             raise SourceError(f"HTTP {resp.status_code} for {url}")
         if self.record:
@@ -707,21 +706,19 @@ class CensusSource:
             text = gzip.decompress(self.read_fixture(name)).decode("utf-8")
             meta = self.fixture_meta(name)
             return _parse_sf(text.splitlines(), geo_ids, meta.get("byte_range", ""))
-        import requests  # local: keeps the module importable offline without network deps
-
         fetched = b""
         total = None
         while True:
             self._www2_wait()
             start = len(fetched)
-            resp = requests.get(
+            resp = polite_get(
                 url,
-                headers={"Range": f"bytes={start}-{start + SUMMARY_FILE_CHUNK - 1}", "User-Agent": USER_AGENT},
+                user_agent=USER_AGENT,
+                error=SourceError,
+                headers={"Range": f"bytes={start}-{start + SUMMARY_FILE_CHUNK - 1}"},
                 timeout=120,
             )
             body = resp.content or b""
-            if b"Request Rejected" in body[:2000]:
-                raise SourceError(f"census.gov rejected the request for {url} (firewall page); retry later.")
             if resp.status_code == 404:
                 raise SourceError(f"Not published (HTTP 404): {url}")
             if resp.status_code not in (200, 206):
