@@ -116,12 +116,13 @@ CORRELATED_ERROR_CAVEAT = (
     "neighbour correlation (docs/audits/acs_sampling_covariance.md)")
 CONTROLLED_TOTAL_CAVEAT = (
     "WARNING: the outcome looks like a controlled total (population, household or housing-unit count). ACS "
-    "weighting controls make the sampling errors of such totals negatively correlated among neighbouring tracts "
-    "in the same county (first-order r -0.08 to -0.04 for population, -0.03 to -0.015 for households; tract "
-    "population errors sum to about 0 within a county; docs/audits/acs_sampling_covariance.md), so the "
-    "independence assumption fails. Negative error correlation would likely pull the corrected lambda down; the "
-    "size of that bias was not simulated. Prefer a rate or share outcome, or report the corrected lambda as a "
-    "sensitivity analysis")
+    "weighting controls correlate the sampling errors of such totals among neighbouring tracts in the same "
+    "county, and the sign can differ by release (2020-2024: first-order r -0.08 to -0.04 for population, "
+    "-0.03 to -0.015 for households, tract population errors summing to about 0 within a county; 2015-2019: "
+    "households +0.01 to +0.03; docs/audits/acs_sampling_covariance.md), so the independence assumption fails. "
+    "Negative error correlation would likely pull the corrected lambda down and positive correlation push it up; "
+    "the size of that bias was not simulated. Prefer a rate or share outcome, or report the corrected lambda as "
+    "a sensitivity analysis")
 # Outcome columns treated as controlled totals: ACS cells of total population, households and housing units
 # (C: B01003_001 and B25003_001 measured; the others are the same totals in other tables).
 CONTROLLED_TOTAL_CELLS = ("B01003_001", "B01001_001", "B11001_001", "B25001_001", "B25002_001", "B25003_001")
