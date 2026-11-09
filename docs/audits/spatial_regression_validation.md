@@ -67,42 +67,50 @@ Principle (PLAN_ROUND_16 sec. 0): validation first. No estimator was added to th
 
 ### Results: lambda, independent errors (300 reps per cell; MC SE of coverage <= 0.029, of bias <= 0.02)
 
+**Rerun 2026-11-09 on the shipped estimator.** The SFH rows (both A1 studies) now call
+`census.spatial.error_model_known_variances`, the function behind `spatial_regression(correct_outcome_error=True)`
+(census.sae_spatial: A >= 0, |rho| <= 0.999, six starts, score-based convergence check), instead of the study-only
+`me_sem_fit` (log A parameterization, |lambda| <= 0.99, two starts, L-BFGS-B success flag), so the coverage below
+describes the tool. Full configuration, `--jobs 0`, 51.7 min. Every SFH number moved by at most 0.007 (the old run
+dropped its 0.6% non-converged fits; the shipped optimizer converged in all 8,100 fits per estimator); naive and
+oracle rows are unchanged.
+
 Coverage of nominal 90% intervals:
 
 | W | lambda | CV x | naive | SFH REML | SFH ML |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| rook | 0 | 1 | 0.920 | 0.889 | 0.865 |
-| rook | 0.3 | 0.5 / 1 / 2 | 0.790 / 0.533 / 0.247 | 0.873 / 0.879 / 0.872 | 0.860 / 0.880 / 0.876 |
-| rook | 0.6 | 0.5 / 1 / 2 | 0.657 / 0.140 / 0.003 | 0.912 / 0.863 / 0.863 | 0.909 / 0.869 / 0.883 |
-| queen | 0.3 | 0.5 / 1 / 2 | 0.823 / 0.683 / 0.420 | 0.899 / 0.893 / 0.884 | 0.879 / 0.883 / 0.896 |
-| queen | 0.6 | 0.5 / 1 / 2 | 0.690 / 0.343 / 0.033 | 0.880 / 0.933 / 0.899 | 0.880 / 0.933 / 0.906 |
-| kNN | 0.3 | 0.5 / 1 / 2 | 0.850 / 0.660 / 0.417 | 0.917 / 0.900 / 0.866 | 0.906 / 0.890 / 0.883 |
-| kNN | 0.6 | 0.5 / 1 / 2 | 0.757 / 0.330 / 0.017 | 0.883 / 0.886 / 0.919 | 0.892 / 0.886 / 0.920 |
+| rook | 0 | 1 | 0.920 | 0.890 | 0.867 |
+| rook | 0.3 | 0.5 / 1 / 2 | 0.790 / 0.533 / 0.247 | 0.873 / 0.880 / 0.873 | 0.860 / 0.880 / 0.877 |
+| rook | 0.6 | 0.5 / 1 / 2 | 0.657 / 0.140 / 0.003 | 0.913 / 0.863 / 0.863 | 0.910 / 0.870 / 0.883 |
+| queen | 0.3 | 0.5 / 1 / 2 | 0.823 / 0.683 / 0.420 | 0.900 / 0.893 / 0.883 | 0.877 / 0.883 / 0.893 |
+| queen | 0.6 | 0.5 / 1 / 2 | 0.690 / 0.343 / 0.033 | 0.880 / 0.933 / 0.897 | 0.880 / 0.927 / 0.907 |
+| kNN | 0.3 | 0.5 / 1 / 2 | 0.850 / 0.660 / 0.417 | 0.917 / 0.900 / 0.867 | 0.907 / 0.890 / 0.883 |
+| kNN | 0.6 | 0.5 / 1 / 2 | 0.757 / 0.330 / 0.017 | 0.880 / 0.887 / 0.920 | 0.893 / 0.883 / 0.920 |
 
 Bias (lambda-hat minus lambda) at CV x 1:
 
 | W | lambda | naive | SFH REML | SFH ML |
 | :--- | ---: | ---: | ---: | ---: |
 | rook | 0.3 / 0.6 | -0.175 / -0.274 | -0.025 / -0.017 | -0.045 / -0.035 |
-| queen | 0.3 / 0.6 | -0.178 / -0.254 | -0.020 / -0.031 | -0.053 / -0.056 |
-| kNN | 0.3 / 0.6 | -0.183 / -0.248 | -0.033 / -0.031 | -0.063 / -0.056 |
+| queen | 0.3 / 0.6 | -0.178 / -0.254 | -0.020 / -0.031 | -0.053 / -0.057 |
+| kNN | 0.3 / 0.6 | -0.183 / -0.248 | -0.033 / -0.031 | -0.064 / -0.055 |
 
 RMSE at CV x 1, lambda 0.6:
 
 | Estimator | rook | queen | kNN |
 | :--- | ---: | ---: | ---: |
 | naive | 0.294 | 0.286 | 0.283 |
-| SFH REML | 0.116 | 0.131 | 0.145 |
+| SFH REML | 0.116 | 0.131 | 0.144 |
 
-At lambda 0 the corrected estimators have larger RMSE than the naive one (rook 0.166 vs 0.105), the price of estimating one more variance component.
+At lambda 0 the corrected estimators have larger RMSE than the naive one (rook 0.165 vs 0.105), the price of estimating one more variance component.
 
 **Other observations:**
 - **Bias grows with the error.** Naive bias at lambda 0.6 is -0.12, -0.27 and -0.46 at CV x 0.5, 1 and 2 (rook).
 - **The tool's error-model beta is unaffected.** Its intervals covered 0.85-0.93 in every cell, corrected or not (the outcome error is independent of x).
 - **SE calibration.** The ratio mean SE / SD of the estimates is 0.84-1.08 for every estimator.
 - **Numerical stability.**
-  - Boundary estimates (|lambda| >= 0.98, or the variance component A at 0): 0 for naive. For SFH, 0 except at CV x 2 with lambda <= 0.3 on queen/kNN (0.3-2.0%).
-  - Non-convergence (L-BFGS-B not reporting success): REML 50 and ML 37 of 8,100 fits (0.6%). Naive: 0.
+  - Boundary estimates (|lambda| >= 0.98, or the variance component A at 0): 0 for naive. For SFH, 0 except at CV x 2 with lambda <= 0.3 on queen/kNN (0.7-2.0%).
+  - Non-convergence: 0 of 8,100 fits for REML and ML (shipped convergence rule: optimizer success or a projected, scaled score below 1e-3; the study-only `me_sem_fit` had 50 and 37 failures by its L-BFGS-B success flag). Naive: 0.
 
 ### Results: correlated errors (300 reps per cell)
 
@@ -110,15 +118,15 @@ Coverage of nominal 90% intervals:
 
 | W | lambda | gamma | naive | SFH REML | SFH ML | oracle (true Sigma) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| rook | 0 | 0.3 / 0.6 | 0.840 / 0.517 | 0.830 / 0.593 | 0.860 / 0.644 | 0.900 / 0.883 |
-| rook | 0.3 | 0.3 / 0.6 | 0.763 / 0.890 | 0.786 / 0.644 | 0.813 / 0.682 | 0.847 / 0.856 |
-| rook | 0.6 | 0.3 / 0.6 | 0.303 / 0.633 | 0.916 / 0.809 | 0.920 / 0.830 | 0.920 / 0.913 |
-| queen | 0 | 0.3 / 0.6 | 0.827 / 0.550 | 0.832 / 0.657 | 0.839 / 0.693 | 0.880 / 0.889 |
-| queen | 0.3 | 0.3 / 0.6 | 0.810 / 0.867 | 0.883 / 0.740 | 0.909 / 0.760 | 0.936 / 0.893 |
-| queen | 0.6 | 0.3 / 0.6 | 0.517 / 0.750 | 0.869 / 0.826 | 0.887 / 0.873 | 0.886 / 0.930 |
-| kNN | 0 | 0.3 / 0.6 | 0.820 / 0.517 | 0.803 / 0.600 | 0.836 / 0.643 | 0.863 / 0.897 |
-| kNN | 0.3 | 0.3 / 0.6 | 0.833 / 0.883 | 0.867 / 0.716 | 0.896 / 0.768 | 0.923 / 0.896 |
-| kNN | 0.6 | 0.3 / 0.6 | 0.487 / 0.717 | 0.870 / 0.796 | 0.876 / 0.817 | 0.890 / 0.857 |
+| rook | 0 | 0.3 / 0.6 | 0.840 / 0.517 | 0.830 / 0.593 | 0.860 / 0.643 | 0.900 / 0.883 |
+| rook | 0.3 | 0.3 / 0.6 | 0.763 / 0.890 | 0.787 / 0.647 | 0.813 / 0.683 | 0.847 / 0.856 |
+| rook | 0.6 | 0.3 / 0.6 | 0.303 / 0.633 | 0.913 / 0.810 | 0.920 / 0.830 | 0.920 / 0.913 |
+| queen | 0 | 0.3 / 0.6 | 0.827 / 0.550 | 0.833 / 0.657 | 0.840 / 0.693 | 0.880 / 0.889 |
+| queen | 0.3 | 0.3 / 0.6 | 0.810 / 0.867 | 0.880 / 0.740 | 0.910 / 0.760 | 0.936 / 0.893 |
+| queen | 0.6 | 0.3 / 0.6 | 0.517 / 0.750 | 0.870 / 0.827 | 0.887 / 0.873 | 0.886 / 0.930 |
+| kNN | 0 | 0.3 / 0.6 | 0.820 / 0.517 | 0.803 / 0.600 | 0.837 / 0.643 | 0.863 / 0.897 |
+| kNN | 0.3 | 0.3 / 0.6 | 0.833 / 0.883 | 0.867 / 0.717 | 0.897 / 0.770 | 0.923 / 0.896 |
+| kNN | 0.6 | 0.3 / 0.6 | 0.487 / 0.717 | 0.870 / 0.793 | 0.877 / 0.817 | 0.890 / 0.857 |
 
 Bias at lambda 0 with gamma 0.6:
 
@@ -132,7 +140,7 @@ Bias at lambda 0 with gamma 0.6:
 - **Spatially correlated sampling error is read as spatial dependence of the disturbances.** With no true dependence (lambda 0), both the naive estimate and the independence-based correction report lambda of about 0.2.
 - **The independence-based correction breaks under correlation**, as expected:
   - coverage 0.59-0.69 at gamma 0.6 and lambda 0;
-  - 0.64-0.77 at lambda 0.3.
+  - 0.65-0.77 at lambda 0.3.
 - **The naive coverage of 0.87-0.89 at lambda 0.3, gamma 0.6 is a coincidence**: attenuation from the error variance and inflation from the error correlation cancel.
 - **The oracle stays near nominal (0.847-0.936)**, so the failure comes from the covariance assumption, not from the estimator.
 - **beta intervals stayed at 0.85-0.94** in every correlated cell.
@@ -142,7 +150,7 @@ Bias at lambda 0 with gamma 0.6:
 - **Independent errors: the existing spatial Fay-Herriot model validates as the lambda correction.**
   - REML coverage 0.86-0.93 in every lambda > 0 cell (all W, CV x 0.5-2), vs 0.003-0.85 for the tool default; 0.83-0.89 at lambda 0 (lowest at CV x 2 on rook).
   - Bias at most 0.11 in magnitude (CV x 2), usually <= 0.035.
-  - Stable: 0.6% non-convergence, rare boundary fits.
+  - Stable: no non-convergence in 16,200 fits, rare boundary fits (at most 2% of a cell).
 - **It fails when sampling errors are spatially correlated.** Whether ACS errors are correlated enough to matter is the workstream C question (C1/C2).
 - **Not implemented as a default** (PLAN_ROUND_16 A1: proposal only; and its key assumption is untested for the ACS until C reports).
 - **Proposal for the owner:** expose `spatial_fay_herriot(...).provenance['rho']` / `rho_se` as the "lambda corrected for independent outcome sampling error" route, from `spatial_regression(model='error')`:

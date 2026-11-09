@@ -101,8 +101,9 @@ OUTCOME_ERROR_CORRECTION_NOTE = (
     "and their variances are known (= SE^2 from se_col). Evidence: docs/audits/acs_sampling_covariance.md found "
     "neighbour sampling-error correlation of about 0 (|r| <= 0.003 among tracts) for rates, shares, medians and "
     "most counts; docs/audits/spatial_regression_validation.md A1 (simulation 'spatial_error_attenuation', "
-    "independent errors, CV x 0.5-2, rook/queen/kNN): REML lambda intervals covered 0.86-0.93 at lambda 0.3 "
-    "and 0.6 (uncorrected ML: 0.003-0.85) and 0.83-0.89 at lambda 0; beta intervals 0.85-0.93")
+    "independent errors, CV x 0.5-2, rook/queen/kNN; the shipped estimator itself): REML lambda intervals "
+    "covered 0.86-0.93 at lambda 0.3 and 0.6 (uncorrected ML: 0.003-0.85) and 0.83-0.89 at lambda 0; beta "
+    "intervals 0.85-0.93")
 LAMBDA_MEANING_NOTE = (
     "lambda is the spatial autocorrelation of the disturbances (the diffusion of shocks through unmodelled, "
     "spatially clustered factors; Lacombe & LeSage 2015), not a spillover of y or x between areas; beta is the "
@@ -111,7 +112,7 @@ CORRELATED_ERROR_CAVEAT = (
     "Caveat (simulation 'spatial_error_attenuation_correlated'): positively correlated sampling errors between "
     "neighbours bias the correction upward, because the correlation is read as spatial dependence of the "
     "disturbances. With SAR(0.6)-correlated errors (mean neighbour error correlation 0.29-0.38) and true lambda "
-    "0 the corrected lambda averaged +0.19 to +0.22 and its 90% intervals covered 0.59-0.66 (0.64-0.74 at "
+    "0 the corrected lambda averaged +0.19 to +0.22 and its 90% intervals covered 0.59-0.66 (0.65-0.74 at "
     "lambda 0.3); with SAR(0.3) errors (0.11-0.17) 0.80-0.83 at lambda 0. ACS VRE replicates showed no positive "
     "neighbour correlation (docs/audits/acs_sampling_covariance.md)")
 CONTROLLED_TOTAL_CAVEAT = (
