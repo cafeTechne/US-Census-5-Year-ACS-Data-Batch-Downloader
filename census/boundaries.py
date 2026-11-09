@@ -57,6 +57,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import pandas as pd
 
 from .geo import get_resource_path
+from .http import adopt_manual_file, polite_get
 from .geo_crosswalk import tract_vintage
 
 USER_AGENT = "census-research-engine/boundaries (research toolkit; python-requests)"
@@ -352,9 +353,21 @@ def _sidecar(path: str) -> str:
     return path + ".json"
 
 
-def _read_cached(path: str) -> Optional[Dict[str, Any]]:
-    """Sidecar metadata if ``path`` exists and matches its SHA-256."""
+def _check_zip(path: str) -> None:
+    with open(path, "rb") as f:
+        if f.read(2) != b"PK":
+            raise BoundaryError(f"Manually placed file {path} is not a zip archive.")
+
+
+def _read_cached(path: str, url: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Sidecar metadata if ``path`` exists and matches its SHA-256.
+
+    With ``url``, a zip placed at ``path`` by hand (no sidecar yet) is adopted
+    with ``source: "manual download"`` (census.http.adopt_manual_file).
+    """
     side = _sidecar(path)
+    if url is not None:
+        adopt_manual_file(path, url, side, validate=_check_zip)
     if not (os.path.exists(path) and os.path.exists(side)):
         return None
     try:
@@ -381,17 +394,11 @@ def write_cache_entry(path: str, raw: bytes, url: str, content_type: str = "appl
     return meta
 
 
-def _download(url: str, session: Any = None, timeout: float = 300.0) -> Tuple[bytes, str]:
-    import requests
-
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    except requests.RequestException as exc:  # pragma: no cover - network failure
-        raise BoundaryError(f"Download failed for {url}: {exc}") from exc
+def _download(url: str, session: Any = None, timeout: float = 300.0,
+              cache_path: Optional[str] = None) -> Tuple[bytes, str]:
+    resp = polite_get(url, user_agent=USER_AGENT, error=BoundaryError, session=session, timeout=timeout,
+                      cache_path=cache_path)
     raw = resp.content or b""
-    if b"Request Rejected" in raw[:2000]:
-        raise BoundaryError(f"census.gov rejected the request for {url}; wait and retry later")
     if resp.status_code == 404:
         raise BoundaryError(f"Not published (HTTP 404): {url}")
     if resp.status_code != 200:
@@ -438,9 +445,9 @@ def get_boundaries(level: str, year: int, state: Optional[Union[str, int]] = Non
     file_state = st if LEVELS[lvl]["per_state"] else None
     url = boundary_url(lvl, year, file_state, detail)
     path = os.path.join(cache_dir or geo_cache_dir(), str(year), url.rsplit("/", 1)[-1])
-    meta = None if refresh else _read_cached(path)
+    meta = None if refresh else _read_cached(path, url)
     if meta is None:
-        raw, ctype = _download(url, session=session)
+        raw, ctype = _download(url, session=session, cache_path=path)
         meta = write_cache_entry(path, raw, url, ctype or "application/zip")
     gdf = gpd.read_file(path)
     gdf = _normalize_geoid_column(gdf)
@@ -448,7 +455,7 @@ def get_boundaries(level: str, year: int, state: Optional[Union[str, int]] = Non
         gdf = gdf[gdf["GEOID"].str.startswith(st)]
     gdf = gdf.sort_values("GEOID", kind="mergesort").reset_index(drop=True)
     gdf.attrs.update(level=lvl, year=year, detail=detail, state=st, source_url=url,
-                     sha256=meta.get("sha256"), cache_path=path,
+                     sha256=meta.get("sha256"), cache_path=path, acquisition=meta.get("source", "download"),
                      description=boundary_description(lvl, year, detail))
     return gdf
 

@@ -62,6 +62,7 @@ import numpy as np
 import pandas as pd
 
 from census.geo import get_resource_path
+from census.http import adopt_manual_file, polite_get
 from census.variance import (
     METHOD_REPLICATE,
     REPLICATE_COLUMNS,
@@ -623,9 +624,27 @@ def _sidecar_path(path: str) -> str:
     return path + ".json"
 
 
-def _read_cached(path: str) -> Optional[bytes]:
-    """Cached bytes if the file exists and matches its sidecar SHA-256."""
+def _read_cached(
+    path: str, url: Optional[str] = None, validate: Optional[Callable[[bytes], Any]] = None
+) -> Optional[bytes]:
+    """Cached bytes if the file exists and matches its sidecar SHA-256.
+
+    With ``url``, a file placed at ``path`` by hand (no sidecar yet, e.g. after
+    a firewall rejection) is adopted: ``validate(raw)`` must accept it, then a
+    sidecar with its SHA-256 and ``source: "manual download"`` is written.
+    """
     sidecar = _sidecar_path(path)
+    if url is not None:
+
+        def check(p: str) -> None:
+            if validate is not None:
+                with open(p, "rb") as f:
+                    try:
+                        validate(f.read())
+                    except Exception as exc:  # any parse failure: not the file the URL serves
+                        raise VREDownloadError(f"Manually placed file {p} is not usable: {exc}") from exc
+
+        adopt_manual_file(path, url, sidecar, validate=check)
     if not (os.path.exists(path) and os.path.exists(sidecar)):
         return None
     with open(path, "rb") as f:
@@ -656,22 +675,15 @@ def _write_cached(path: str, raw: bytes, url: str, content_type: str) -> Dict[st
     return meta
 
 
-def _download(url: str, session: Any = None, timeout: float = 300.0) -> Tuple[bytes, str]:
-    import requests  # local import keeps the pure functions importable without network deps
-
-    getter = session if session is not None else requests
-    try:
-        resp = getter.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    except requests.RequestException as exc:  # pragma: no cover - network failure
-        raise VREDownloadError(f"Download failed for {url}: {exc}") from exc
+def _download(
+    url: str, session: Any = None, timeout: float = 300.0, cache_path: Optional[str] = None
+) -> Tuple[bytes, str]:
+    # Retries, pacing and the census.gov firewall page ("Request Rejected",
+    # which can persist for one specific URL) are handled by census.http.
+    resp = polite_get(url, user_agent=USER_AGENT, error=VREDownloadError, session=session, timeout=timeout,
+                      cache_path=cache_path)
     raw = resp.content or b""
     content_type = str(resp.headers.get("Content-Type", ""))
-    if b"Request Rejected" in raw[:2000]:
-        # census.gov's firewall answers rapid scripted requests with this page.
-        raise VREDownloadError(
-            f"census.gov rejected the request for {url} (firewall 'Request Rejected' page). "
-            "Wait and retry later; do not retry in a tight loop."
-        )
     if resp.status_code == 404:
         raise VREDownloadError(f"Not published (HTTP 404): {url}")
     if resp.status_code != 200:
@@ -758,9 +770,9 @@ def vre_tables(
     if not url:
         return frozen
     path = os.path.join(cache_dir or vre_cache_dir(year), os.path.basename(url))
-    raw = None if refresh else _read_cached(path)
+    raw = None if refresh else _read_cached(path, url, _parse_table_list_csv)
     if raw is None and refresh:
-        raw, ctype = _download(url, session=session, timeout=60)
+        raw, ctype = _download(url, session=session, timeout=60, cache_path=path)
         _write_cached(path, raw, url, ctype)
     if raw is None:
         return frozen
@@ -939,12 +951,12 @@ def fetch_vre(
         raise ValueError(f"Summary level {sumlev} is not nested in states; omit state_code.")
     url = vre_url(table, year, sumlev, state)
     path = os.path.join(cache_dir or vre_cache_dir(year), sumlev, url.rsplit("/", 1)[-1])
-    raw = None if refresh else _read_cached(path)
+    raw = None if refresh else _read_cached(path, url, _decompress)
     meta: Dict[str, Any]
     if raw is None:
         if session is None and client is not None:
             session = getattr(client, "session", None)
-        raw, ctype = _download(url, session=session)
+        raw, ctype = _download(url, session=session, cache_path=path)
         _decompress(raw)  # validate before caching
         meta = _write_cached(path, raw, url, ctype)
     else:
@@ -962,6 +974,7 @@ def fetch_vre(
         source_url=url,
         sha256=meta.get("sha256"),
         cache_path=path,
+        acquisition=meta.get("source", "download"),
     )
     if check_moe:
         report = verify_published_moe(frame)

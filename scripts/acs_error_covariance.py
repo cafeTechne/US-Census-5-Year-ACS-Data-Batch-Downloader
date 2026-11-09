@@ -53,7 +53,7 @@ import census  # noqa: E402
 from census import replicate_covariance as rc  # noqa: E402
 from census.boundaries import boundary_vintage, equal_area_crs, get_boundaries  # noqa: E402
 from census.medians import _quantile_matrix, distribution_brackets  # noqa: E402
-from census.replicate import VREDownloadError, fetch_vre  # noqa: E402
+from census.replicate import VREDownloadError, fetch_vre, sumlev_for, vre_url  # noqa: E402
 from census.spatial import spatial_weights  # noqa: E402
 from census.variance import REPLICATE_COLUMNS, REPLICATE_COUNT  # noqa: E402
 
@@ -91,17 +91,32 @@ def log(msg):
 # ---------------------------------------------------------------------------
 
 
+def _unavailable_reason(exc):
+    """Short, path-free reason for the report (the exception text names the local cache path)."""
+    if getattr(exc, "rejected", False):
+        sid = getattr(exc, "support_id", "") or "none shown"
+        return f"census.gov firewall 'Request Rejected' page (support ID {sid}), also on the single delayed retry"
+    return str(exc).split("\n")[0]
+
+
 def _load_tables(year, level, state, files):
     frames = {}
     for t in TABLES:
         try:
             f = fetch_vre(t, year, level, state, check_moe=False)
-        except VREDownloadError as exc:  # e.g. census.gov firewall; reported, never retried in a loop
+        except (VREDownloadError, ValueError) as exc:  # skipped and reported; census.http never loops
             log(f"{year} {level} {state} {t}: not available ({exc})")
             frames.setdefault("_missing", []).append(t)
+            sumlev = sumlev_for(level)
+            files.append({"kind": "VRE", "year": year, "level": level, "state": state, "table": t,
+                          "url": getattr(exc, "url", None) or vre_url(t, year, level, state), "sha256": None,
+                          "unavailable": _unavailable_reason(exc),
+                          "manual_path": f"$CENSUS_VRE_DIR/{year}/{sumlev}/"
+                          + os.path.basename(vre_url(t, year, level, state))})
             continue
         files.append({"kind": "VRE", "year": year, "level": level, "state": state, "table": t,
-                      "url": f.attrs["source_url"], "sha256": f.attrs["sha256"]})
+                      "url": f.attrs["source_url"], "sha256": f.attrs["sha256"],
+                      "acquisition": f.attrs.get("acquisition", "download")})
         frames[t] = f
     return frames
 
@@ -271,8 +286,10 @@ def analyse(year, state, level, frames, geo, rng, do_holdout, out_rows, extras):
     for name, (vtype, _, _) in VARIABLES.items():
         needed = {VARIABLES[name][2].split("_")[0]} if VARIABLES[name][1] != "ratio" else {
             c.split("_")[0] for c in VARIABLES[name][2]}
-        if needed & set(frames.get("_missing", [])):
-            extras["skipped"].append(f"{year} {STATES[state]} {level} {name}: VRE file could not be downloaded")
+        missing = sorted(needed & set(frames.get("_missing", [])))
+        if missing:
+            extras["skipped"].append(f"{year} {STATES[state]} {level} {name}: VRE file "
+                                     f"{', '.join(missing)} unavailable (see Data: unavailable files)")
             continue
         est, reps, valid, info = variable_values(frames, name, gid, year)
         if name == "population" and level == "county":
@@ -490,11 +507,25 @@ def write_report(df, extras, files, years, elapsed, findings, conclusion):
     seen = set()
     rows = []
     for f in files:
-        if f["url"] in seen:
+        if f["url"] in seen or f.get("unavailable"):
             continue
         seen.add(f["url"])
-        rows.append([f["kind"], f["year"], f["level"], f"`{f['url'].rsplit('/', 1)[-1]}`", f"`{f['sha256']}`"])
+        name = f"`{f['url'].rsplit('/', 1)[-1]}`" + (" (manual download)" if f.get("acquisition") == "manual download"
+                                                     else "")
+        rows.append([f["kind"], f["year"], f["level"], name, f"`{f['sha256']}`"])
     L.append(_md_table(["kind", "year", "level", "file", "SHA-256"], rows) + "\n")
+    missing = [f for f in files if f.get("unavailable")]
+    if missing:
+        L.append("**Unavailable files** (skipped; the variables that need them are not analysed for that state "
+                 "and release, everything else is):\n")
+        L.append(_md_table(["year", "level", "state", "table", "URL", "reason"],
+                           [[f["year"], f["level"], STATES.get(f["state"], f["state"]), f["table"], f["url"],
+                             f["unavailable"]] for f in missing]) + "\n")
+        L.append("A rejection of one specific URL can persist while every other file in the same directory "
+                 "downloads normally, so it is not retried further. To include such a file, download it in a "
+                 "browser and save it as " + ", ".join(f"`{f['manual_path']}`" for f in missing)
+                 + " (default `$CENSUS_VRE_DIR` = `.cache/vre`); census.replicate then records its SHA-256 with "
+                 "source 'manual download' and the report marks it.\n")
     L.append("Versions: " + ", ".join(f"{k} {v}" for k, v in _versions().items()) + "\n")
     L.append("Areas analysed (after exclusions):\n")
     nrows = [[r["year"], r["state"], r["geography"], r["variable"], r["type"], r["n_areas"], r["n_valid"],
@@ -756,7 +787,8 @@ FINDINGS = """\
    households and 0.92 / 0.88 for the poverty count. Here the structure is real at the pair level too:
    split-half reliability of an individual neighbour pair's r is 0.6-0.67 for population and 0.2-0.34 for
    households (excess SD 0.13-0.16 and 0.06-0.08), i.e. strongly heterogeneous, with some neighbour pairs
-   far more negative than the mean (a few tracts sharing a county's controlled total).
+   far more negative than the mean (a few tracts sharing a county's controlled total). These are
+   2020-2024 numbers; in 2015-2019 population behaves the same but households do not (6).
 4. **A design-wide positive offset, not spatial covariance, at the county level.** County households
    (and New York county owner share in 2015-2019, +0.02-0.04) show mean r of about +0.03 at every order
    and distance - and
@@ -777,12 +809,30 @@ FINDINGS = """\
    scored on held-out replicates after removing the design directions, it is worse than independence
    for every variable (-25 to -50 nats for tracts). Without that projection it appeared to gain 30-90
    nats, entirely from the cross-half dependence created by the near-null design directions.
-6. **Stability across releases.** 2015-2019 tract VRE files could not be downloaded in this session
-   (census.gov answered with its firewall 'Request Rejected' page; the script is not retried in a loop),
-   so the release comparison covers counties only. County class means agree between 2015-2019 and
-   2020-2024 within about 1.5 combined SEs for every variable and order except New York owner share
-   beyond order 3 (+0.036 vs +0.012, difference -0.024, SE 0.011) - the same county-wide offset as in
-   (4), not a neighbour effect. Rerun with `--tract-years 2024 2019` when the tract files are reachable.
+6. **Stability across releases (tracts and counties, 2015-2019 vs 2020-2024).** One 2015-2019 file is
+   missing: Michigan tract total population (`2019/data/5-year/140/B01003_26.csv.zip`). census.gov's
+   firewall answered that one URL with its 'Request Rejected' page (support ID 13979921158196382640) on
+   the first request and on the single delayed retry, while every other 2019 tract file, including New
+   York's B01003_36 from the same directory, downloaded normally; the rejection is URL-specific, not
+   rate limiting (see Data: unavailable files). So the 2015-2019 tract comparison has no Michigan
+   population row; everything else was analysed. Results: (a) **Uncontrolled variables are stable.**
+   Poverty count, poverty rate, owner share and median income stay at 0 to within +/-0.005 at every order
+   in both states and releases; of 108 tract class comparisons for them, 3 differ by more than 2 combined
+   SEs (about 5 expected by chance; largest |z| 2.5, all differences <= 0.004). (b) **Population (New
+   York) is stable**: order 1 -0.039 [-0.060, -0.018] in 2015-2019 vs -0.040 [-0.060, -0.020] (within
+   county -0.042 vs -0.043), the same fast decay, a county aggregation ratio of 0.000 again (tract errors
+   sum to zero within a county), and split-half pair reliability 0.60 (2020-2024: 0.61). (c)
+   **Households change sign.** Occupied housing units (B25003_001) in 2015-2019 have *positive* mean r
+   between neighbouring tracts in the same county - Michigan order 1 +0.025 [0.016, 0.033] (within county
+   +0.028), New York +0.012 [0.003, 0.020] - against -0.025 and -0.015 in 2020-2024 (differences 8.4 and
+   4.7 combined SEs), still zero across county lines (+0.001 / -0.004) and beyond order 3. Their
+   aggregation ratio is 0.90 (Michigan) and 1.00 (New York) instead of 0.22 / 0.26: in 2015-2019 the tract
+   household errors are not constrained to (nearly) cancel within a county. The pair reliability (0.37 /
+   0.28) shows the pattern is real, not replicate noise. The study cannot say why from the replicates
+   alone; a change between the releases in how occupied-unit estimates relate to the weighting controls
+   is the obvious candidate, not verified here. (d) County class means agree within about 1.5 combined
+   SEs for every variable and order except New York owner share beyond order 3 (+0.036 vs +0.012,
+   difference -0.024, SE 0.011) - the county-wide offset in (4), not a neighbour effect.
 """
 
 CONCLUSION = """\
@@ -797,7 +847,8 @@ analyses map it is indistinguishable from zero.**
   covariance would only add noise (Ledoit-Wolf loses out of sample).
 * For controlled totals (population, households, and to a lesser degree counts tied to them) the
   structure is real and estimable: negative, confined to first- and second-order neighbours inside the
-  same county (order 1: -0.08 to -0.04 for population, -0.03 to -0.015 for households), and summarised
+  same county (order 1: -0.08 to -0.04 for population, -0.03 to -0.015 for households in 2020-2024;
+  population equally in 2015-2019, households there +0.01 to +0.03 instead, see Findings 6), and summarised
   far more precisely by the within-county aggregation ratio (population: tract errors sum to zero within
   a county). It is a linear constraint, not a smooth correlation function: a one-parameter-per-order
   model captures it out of sample, a full within-county correlation model is not positive definite.
@@ -809,13 +860,15 @@ analyses map it is indistinguishable from zero.**
   (e.g. SAR errors) has the wrong sign for them.
 * **For the LISA parameter grid (-0.2..0.5):** the data place ACS sampling-error neighbour correlation at
   about 0 (|rho| <= 0.003) for rates, shares and medians, and at -0.02 to -0.08 (95% bounds -0.11 to
-  -0.01) for controlled counts in tracts; no variable, geography or release showed a positive neighbour
-  correlation beyond the design-wide county offset of about +0.03. Grid values of +0.1..0.5 are therefore
+  -0.01) for controlled counts in tracts; the only positive neighbour correlations beyond the design-wide
+  county offset of about +0.03 are 2015-2019 tract households, +0.01 to +0.03 (95% bounds up to +0.033)
+  within county. The release matters for controlled counts. Grid values of +0.1..0.5 are therefore
   stress tests outside the observed range, not plausible ACS conditions for these variables; the
   realistic end of the grid is -0.1..0.05. Correlated-error scenarios with large positive rho should be
   stated as hypothetical (for example for variables or survey designs not studied here).
-* Limits: two states, one release at tract level, 80 replicates (about 77 effective), and counties as a
-  proxy for weighting areas. The 95% |r| of 0.23 for a single pair means no individual pair can be
+* Limits: two states, two releases at tract level (2015-2019 without Michigan population: firewall
+  rejection of that one file), 80 replicates (about 77 effective), and counties as a proxy for weighting
+  areas. The 95% |r| of 0.23 for a single pair means no individual pair can be
   flagged; only class means are evidence.
 """
 
