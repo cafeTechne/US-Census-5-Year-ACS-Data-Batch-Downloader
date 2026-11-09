@@ -1092,11 +1092,14 @@ def designs_config(fast: bool = True, **overrides: Any) -> SimConfig:
 
 
 def group_config(group: str, fast: bool) -> SimConfig:
-    """Configuration of a study group: "main" (FULL/FAST), "spatial" or "designs"."""
+    """Configuration of a study group: "main" (FULL/FAST), "spatial", "designs" or "spreg_validation"."""
     if group == "spatial":
         return spatial_config(fast=fast)
     if group == "designs":
         return designs_config(fast=fast)
+    if group == "spreg_validation":
+        from .simulation_spreg import spreg_validation_config
+        return spreg_validation_config(fast=fast)
     if group != "main":
         raise ValueError(f"unknown study group {group!r}")
     return FAST if fast else FULL
@@ -1231,3 +1234,16 @@ def serial_config(fast: bool = True, **overrides: Any) -> SimConfig:
     reps = {k: 0 for k in base.reps}
     reps.update(SERIAL_REPS_FAST if fast else SERIAL_REPS_FULL)
     return replace(base, reps=reps, **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Round 16 (PLAN_ROUND_16 workstream A): spatial regression validation
+# ---------------------------------------------------------------------------
+# Info-only studies in census.simulation_spreg (group "spreg_validation"),
+# registered with no default reps; run with
+# run_study(spreg_validation_config(fast=...), studies=[...]) or
+# scripts/inference_validation.py --studies NAME.
+
+from .simulation_spreg import SPREG_VALIDATION_STUDIES  # noqa: E402  (registers the studies)
+
+STUDIES.update(SPREG_VALIDATION_STUDIES)
