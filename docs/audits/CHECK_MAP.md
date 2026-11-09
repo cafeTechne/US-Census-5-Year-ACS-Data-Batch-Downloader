@@ -19,7 +19,8 @@ All commands use `.venv/bin/python` from the repository root.
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
 | Spatial lag / error regression, LM diagnostics (`census.spatial.spatial_regression`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `spatial_regression_coverage` (info, D15-1) |
-| Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1) |
+| Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1); `lisa_validation_null`, `lisa_validation_clusters` (info, on demand, Round 16) |
+| LISA validation prototypes (`census.lisa_validation`: correlated-error scenarios, replicate-stability filter, LISA on spatial FH EBLUPs, Wong 2021 heuristic) | `-m pytest -q tests/test_lisa_validation.py` | `lisa_validation_null`, `lisa_validation_clusters` (info, on demand) |
 | Multilevel, known variance (`census.multilevel`) | `-m pytest -q tests/test_multilevel.py` (includes the dense fixed-variance reference `TestKnownVarianceDenseReference`) | `multilevel_known_variance`, `multilevel_random_slope`, `multilevel_replicate` |
 | Difference-in-differences (`census.did`) | `-m pytest -q tests/test_did.py` (includes the hand-built differenced reference `TestTwoGroupDenseReference`) | `did_two_group`, `did_event`, `did_replicate`; serial correlation (info only): `did_ar1_sensitivity`, `did_serial` |
 | Release gate itself (`scripts/inference_validation.py`) | `-m pytest -q tests/test_validation_gate.py` | n/a |
@@ -94,10 +95,29 @@ Release studies:
   9999 permutations with BH at alpha 0.10: per-area rate 0.099 (previous
   default 0.196) and family-wise rate 0.088 (MC SE 0.009) under
   randomness; power for the hot spot 0.011; spatially patterned SEs still
-  give spurious clusters in 38% of maps (previous default 26%). The
+  give at least one significant area in 38% of maps (previous default
+  26%); those SEs are heterogeneous but independent, so this is not
+  evidence about spatially correlated errors (Round 16
+  `lisa_validation_*`). The
   previous behavior stays available (`method="ml"`;
   `permutations=999, sided="folded"`). LM tests' size 0.046-0.056 at
   0.05. Results and caveat text: `census.spatial`.
+- LISA under sampling error (PLAN_ROUND_16 workstream B):
+  `scripts/inference_validation.py --studies lisa_validation_null
+  lisa_validation_clusters --jobs 2` (group `lisa`, own configuration). Run
+  on demand only: not in the default report (each study takes about 20-30
+  min single-process, above the ~5 min budget for default-report studies),
+  not in `REQUIRED_STUDIES`, every row `info`. Five scenarios (no true
+  clustering with independent homogeneous, heterogeneous independent and
+  spatially correlated errors; a hot spot with independent and correlated
+  errors), the correlated errors parameterized by the mean rook-neighbour
+  error correlation r1 in -0.2 .. 0.5 (SAR structure, a stated assumption);
+  four methods on the same maps (tool-default LISA, LISA filtered by
+  `replicate_quadrant_share`, LISA on spatial Fay-Herriot EBLUPs, Wong 2021
+  heuristic hot/cold spots, the latter scored against its own target).
+  The prototypes live in `census.lisa_validation`; no tool default changed.
+  Design, metric definitions, results with MC SEs and proposals:
+  `docs/audits/lisa_validation.md`.
 - Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
   process, and `--jobs N` (0 = one per CPU) runs studies in parallel
   processes with output identical to a serial run (except the `seconds`

@@ -21,7 +21,8 @@ PLAN_ROUND_9.md workstream C. Built on PySAL (``libpysal``, ``esda``, ``spreg``)
   Default: two-sided p-values (2 x esda's folded p_sim) from 9999
   permutations. Simulation ('local_morans_size'): per-area and family-wise
   rates at nominal under randomness; little power on ~150 areas; spatially
-  patterned sampling error creates spurious clusters.
+  heterogeneous (independent) sampling error gives spurious significant
+  areas (Round 16 docs/audits/lisa_validation.md: correlated errors).
 * :func:`spatial_regression` - spatial lag / spatial error models by ML or
   GMM (spreg), returned as :class:`census.results.ModelResult` with the OLS
   Lagrange-multiplier diagnostics that suggest which model fits, and replicate
@@ -93,8 +94,10 @@ LOCAL_MORAN_CAVEAT = (
     "min(1, 2 p_sim), 9999 permutations, BH at alpha 0.10) kept the per-area rate of p_value <= 0.10 at "
     "0.099 and the family-wise rate (= FDR) at 0.088 under spatial randomness. It has little power: 1.1% of "
     "areas in a 4x4 hot spot raised by 1.5 SD were flagged, so no significant cluster is not evidence of no "
-    "clustering. Spatially patterned sampling error (CVs varying smoothly across the map) produced spurious "
-    "clusters in 38% of maps; check replicate_quadrant_share or rerun on Fay-Herriot estimates. p_sim is "
+    "clustering. Spatially heterogeneous but independent sampling errors (CVs varying smoothly across the map) "
+    "gave at least one significant area in 38% of maps (0.5% of areas); that study did not test spatially "
+    "correlated sampling errors (see docs/audits/lisa_validation.md). replicate_quadrant_share is a stability "
+    "check, not a probability that a cluster is real. p_sim is "
     "esda's folded (one-sided, observed-direction) pseudo p-value; sided='folded' with permutations=999 is "
     "the pre-Round 15 default (per-area rate of p_sim <= 0.10: 0.196)")
 _CACHE: Dict[str, Any] = {}
@@ -443,8 +446,9 @@ def local_morans(
     per-area rate of p_value <= 0.10 and the family-wise rate are at nominal
     (the folded 999-permutation reading used before: per-area 0.196, and a
     family-wise rate of 0.056 only because of its coarse p-value grid).
-    Power is low on ~150 areas, and spatially patterned sampling error
-    produces spurious clusters. About 0.6 s for 3,000 areas.
+    Power is low on ~150 areas, and spatially heterogeneous (independent)
+    sampling error produces spurious significant areas. About 0.6 s for
+    3,000 areas.
     """
     from esda.moran import Moran_Local
     from .multitest import adjust_pvalues
