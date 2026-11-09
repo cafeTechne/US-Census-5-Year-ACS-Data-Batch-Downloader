@@ -115,14 +115,30 @@ def rejection_support_id(body: bytes) -> Optional[str]:
 
 
 def _pace(host: str) -> None:
+    """Wait for this request's slot on ``host``: at least ``min_interval()`` after the previous slot.
+
+    The slot is reserved under the lock and the wait happens outside it, so a
+    thread waiting for one host never blocks requests to another host, and
+    concurrent requests to the same host get successive slots.
+    """
     gap = min_interval()
     with _pace_lock:
+        now = _monotonic()
         last = _last_request.get(host)
-        if last is not None and gap > 0:
-            wait = gap - (_monotonic() - last)
-            if wait > 0:
-                _sleep(wait)
-        _last_request[host] = _monotonic()
+        slot = now if last is None or gap <= 0 else max(now, last + gap)
+        _last_request[host] = slot
+    if slot > now:
+        _sleep(slot - now)
+
+
+def _close(resp: Any) -> None:
+    """Release a response that will not be returned (a streamed body would otherwise hold its connection)."""
+    close = getattr(resp, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - best effort; the retry proceeds either way
+            pass
 
 
 def _raise(error: Type[Exception], message: str, **attrs: Any) -> None:
@@ -195,12 +211,14 @@ def polite_get(
         if status in RETRY_STATUSES and attempt + 1 < n:
             hdrs = getattr(resp, "headers", None) or {}
             wait = retry_after_seconds(hdrs.get("Retry-After"))
+            _close(resp)
             _sleep(wait if wait is not None else backoff_delay(attempt))
             attempt += 1
             continue
         if not stream or "html" in str((getattr(resp, "headers", None) or {}).get("Content-Type", "")).lower():
             sid = rejection_support_id(resp.content or b"")
             if sid is not None:
+                _close(resp)
                 if rejected_retry is None:
                     rejected_retry = _env_float(ENV_REJECTED_RETRY_DELAY, DEFAULT_REJECTED_RETRY_DELAY)
                     _sleep(rejected_retry)
@@ -218,6 +236,56 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def payload_problem(source: Any, zip_member_suffix: Optional[str] = None) -> Optional[str]:
+    """Why ``source`` (bytes or a file path) is not the file a census.gov URL serves, or None.
+
+    With ``zip_member_suffix`` (e.g. ``".csv"``) it must be a zip archive with
+    a member whose name ends with that suffix; otherwise (text files) it must
+    not be an HTML/XML page: the firewall's 'Request Rejected' page, an error
+    page or a web page saved from a browser.
+    """
+    import io
+    import zipfile
+
+    if isinstance(source, (bytes, bytearray)):
+        head = bytes(source[:4000])
+    else:
+        with open(source, "rb") as f:
+            head = f.read(4000)
+    if not head:
+        return "the file is empty"
+    if rejection_support_id(head) is not None:
+        return "it is the census.gov firewall 'Request Rejected' page, not the data file"
+    text = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if text.startswith(b"<") or b"<html" in text[:500]:
+        return "it is an HTML/XML page (an error page or a saved web page), not the data file"
+    if zip_member_suffix is None:
+        return None
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(bytes(source)) if isinstance(source, (bytes, bytearray)) else source)
+    except (zipfile.BadZipFile, OSError) as exc:
+        return f"it is not a zip archive ({exc})"
+    with zf:
+        names = zf.namelist()
+    if not any(n.lower().endswith(zip_member_suffix.lower()) for n in names):
+        return f"the zip archive has no {zip_member_suffix} member (members: {names[:10]})"
+    return None
+
+
+def quarantine(path: str, sidecar: Optional[str] = None) -> str:
+    """Move an invalid cached file aside to ``<path>.invalid`` and drop its sidecar; return the new path.
+
+    The next run then downloads (or adopts) the file afresh instead of reusing
+    bad content forever.
+    """
+    dest = path + ".invalid"
+    os.replace(path, dest)
+    side = sidecar or path + ".json"
+    if os.path.exists(side):
+        os.remove(side)
+    return dest
+
+
 def adopt_manual_file(
     path: str,
     url: str,
@@ -229,7 +297,10 @@ def adopt_manual_file(
     Returns None when ``path`` does not exist or already has a sidecar (the
     caller's normal cache check applies). ``validate(path)`` may raise to
     refuse a file that is not what the URL serves (for example a saved HTML
-    page); the sidecar is then not written. The sidecar holds the source URL,
+    page); the sidecar is then not written, the file is moved aside to
+    ``<path>.invalid`` (:func:`quarantine`, so it does not block later runs)
+    and the validator's exception is re-raised with both paths named. The
+    sidecar holds the source URL,
     SHA-256, size and ``source: "manual download"``, so provenance records
     say the file was not fetched by the toolkit.
     """
@@ -237,7 +308,19 @@ def adopt_manual_file(
     if not os.path.isfile(path) or os.path.exists(side):
         return None
     if validate is not None:
-        validate(path)
+        try:
+            validate(path)
+        except Exception as exc:
+            dest = quarantine(path, side)
+            note = (f" The file was moved aside to {dest} (no sidecar written). Download {url} again in a web "
+                    f"browser and save it at {path}.")
+            try:
+                new = type(exc)(f"{exc}{note}")
+            except Exception:  # noqa: BLE001 - exception class with another signature: keep the original
+                raise exc
+            for k, v in getattr(exc, "__dict__", {}).items():
+                setattr(new, k, v)
+            raise new from exc
     meta = {
         "source_url": url,
         "sha256": _sha256_file(path),

@@ -25,7 +25,8 @@ Variables (types):
                 controlled to population estimates and have no sampling error),
                 B25003_001 occupied housing units, B17001_002 persons below poverty
     proportion  B17001_002 / B17001_001 poverty rate, B25003_002 / B25003_001 owner share
-                (evaluated on each replicate; zero replicate denominator -> 0, VRE doc. Example 7)
+                (evaluated on each replicate; an area with a zero denominator in any replicate is
+                excluded for that variable: the replicate ratio is undefined)
     median      household income, linearly interpolated from the B19001 replicate
                 distributions (census.medians); no published median table has VREs
 
@@ -140,9 +141,13 @@ def variable_values(frames, name, geoids, year):
         den, den_r, _ = _cell(frames, spec[1], geoids)
         with np.errstate(divide="ignore", invalid="ignore"):
             est = np.where(den > 0, num / den, np.nan)
-            reps = np.where(den_r > 0, num_r / den_r, 0.0)
+            # a zero denominator in any replicate leaves the ratio undefined there: the area is invalid for
+            # this variable (setting the replicate ratio to 0 would fabricate a huge deviation)
+            reps = np.where(den_r > 0, num_r / den_r, np.nan)
+        zero_den = np.isfinite(est) & (np.isfinite(den_r) & (den_r <= 0)).any(axis=1)
         valid = np.isfinite(est) & np.isfinite(reps).all(axis=1)
-        note = ""
+        note = (f"{int(zero_den.sum())} area(s) with a zero replicate denominator excluded" if zero_den.any()
+                else "")
     else:
         br = distribution_brackets(spec, year)
         lo = np.array([b[1] for b in br])
@@ -451,11 +456,13 @@ def write_report(df, extras, files, years, elapsed, findings, conclusion):
         "* **Variables.** Counts: total population B01003_001 (tracts only; county populations are "
         "controlled to the population estimates and have no sampling error), occupied housing units "
         "B25003_001, persons below poverty B17001_002. Proportions: poverty rate B17001_002/B17001_001 and "
-        "owner share B25003_002/B25003_001, recomputed on every replicate (zero replicate denominator -> 0, "
-        "VRE documentation Example 7). Median: household income linearly interpolated from the B19001 "
+        "owner share B25003_002/B25003_001, recomputed on every replicate. Median: household income linearly "
+        "interpolated from the B19001 "
         "replicate distributions (census.medians; no published median table has VRE files - checked against "
         "the 2019 and 2024 VRE table lists); areas whose median is top- or bottom-coded are excluded. Areas "
-        "with a zero estimate denominator, controlled estimates or zero replicate variance are excluded "
+        "with a zero estimate denominator, a zero denominator in any replicate (the replicate ratio is "
+        "undefined; the SE convention of VRE documentation Example 7, ratio 0, would fabricate a deviation of "
+        "minus the estimate), controlled estimates or zero replicate variance are excluded "
         "(their correlation is undefined).\n"
         "* **Pairs.** Contiguity from queen weights (libpysal via census.spatial.spatial_weights) on the "
         "Census cartographic boundary files of the release's vintage; orders 1-3 are graph distances in the "

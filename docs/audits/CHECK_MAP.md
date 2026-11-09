@@ -19,7 +19,7 @@ All commands use `.venv/bin/python` from the repository root.
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
 | Spatial lag / error regression, LM diagnostics (`census.spatial.spatial_regression`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `spatial_regression_coverage` (info, D15-1) |
-| Error model corrected for outcome sampling error (`spatial_regression(model='error', correct_outcome_error=True, se_col=...)`; spatial Fay-Herriot likelihood via `census.sae_spatial`) | `-m pytest -q tests/test_spatial_lambda_correction.py tests/test_workflows_geo.py` (tool path equals the A1 study estimator `me_sem_fit` and the study cell's own rows on its seeded draws, REML and ML; 20-draw coverage smoke check; warnings, boundary, non-convergence) | `spatial_error_attenuation` rows "spatial Fay-Herriot REML rho" (the tool's default; ML rows for `method='ml'`) and `spatial_error_attenuation_correlated` (info, on demand) |
+| Error model corrected for outcome sampling error (`spatial_regression(model='error', correct_outcome_error=True, se_col=...)`; spatial Fay-Herriot likelihood via `census.sae_spatial`) | `-m pytest -q tests/test_spatial_lambda_correction.py tests/test_workflows_geo.py` (the A1 study's diagonal-Sigma rows call the tool's own function `census.spatial.error_model_known_variances`, checked in `tests/test_review_fixes_r16.py`; it also equals the study-only `me_sem_fit` on the seeded draws, REML and ML; 20-draw coverage smoke check; warnings, boundary, non-convergence, SE = 0 and the `CORRECTION_MAX_N` size limit) | `spatial_error_attenuation` rows "spatial Fay-Herriot REML rho" (the tool's default; ML rows for `method='ml'`) and `spatial_error_attenuation_correlated` (info, on demand) |
 | Lag-model effects (direct/indirect/total; `census.spatial.lag_effects`, `report_tables.effects_table`) and the Round 16 study estimators (`census.simulation_spreg`) | `-m pytest -q tests/test_spatial_regression_validation.py` (effects vs S(W) algebra and spreg's multipliers; study likelihoods vs spreg and `census.sae_spatial`) | `spatial_dgp_recovery`, `spatial_error_attenuation`, `spatial_error_attenuation_correlated`, `common_factor_lr`, `common_factor_lr_acs` (info, on demand) |
 | Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1); `lisa_validation_null`, `lisa_validation_clusters` (info, on demand, Round 16) |
 | LISA validation prototypes (`census.lisa_validation`: correlated-error scenarios, replicate-stability filter, LISA on spatial FH EBLUPs, Wong 2021 heuristic) | `-m pytest -q tests/test_lisa_validation.py` | `lisa_validation_null`, `lisa_validation_clusters` (info, on demand) |
@@ -132,8 +132,9 @@ Release studies:
   independent and SAR-correlated outcome error, rook/queen/kNN. The
   spatial Fay-Herriot REML rows are the evidence for the owner-approved
   tool option `spatial_regression(model='error',
-  correct_outcome_error=True)`, whose estimator equals the study's
-  (`tests/test_spatial_lambda_correction.py`).
+  correct_outcome_error=True)`: those rows call the tool's own
+  estimator, `census.spatial.error_model_known_variances`
+  (`tests/test_review_fixes_r16.py`, `tests/test_spatial_lambda_correction.py`).
   `spatial_dgp_recovery`: SEM, SAR, SDM, omitted-covariate and Juhl DGPs
   fitted by all four estimators; effects coverage (delta-method and
   simulated intervals) and OLS RS test rejection rates.

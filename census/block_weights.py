@@ -71,6 +71,7 @@ extra mismatch.
 import io
 import json
 import os
+import warnings
 import zipfile
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -78,7 +79,7 @@ import numpy as np
 import pandas as pd
 
 from .api import BASE_URL, DEFAULT_API_KEY
-from .http import polite_get
+from .http import adopt_manual_file, payload_problem, polite_get, quarantine
 from .replicate import USER_AGENT, _read_cached, _sha256, _sidecar_path, _write_cached
 from .geo import get_resource_path
 
@@ -158,14 +159,42 @@ def _get(url: str, params: Optional[Dict[str, str]] = None, session: Any = None,
     return resp.content or b""
 
 
-def _cached_or_fetch(path: str, url: str, fetch: Any, content_type: str, adopt: bool = False) -> bytes:
-    """Cached bytes or ``fetch()``; with ``adopt``, a file placed at ``path`` by hand is used (raw downloads)."""
-    raw = _read_cached(path, url if adopt else None)
+def _cached_or_fetch(path: str, url: str, fetch: Any, content_type: str, adopt: bool = False,
+                     zip_member: Optional[str] = None) -> bytes:
+    """Cached bytes or ``fetch()``; with ``adopt``, a file placed at ``path`` by hand is used (raw downloads).
+
+    Raw downloads (``adopt``) are checked with census.http.payload_problem (a
+    zip with a ``zip_member`` member, never an HTML page): a manually placed
+    file that fails is moved aside to ``<path>.invalid`` (no sidecar) and
+    BlockDataError names it; a cached file that fails is moved aside and
+    fetched again; a fetched payload that fails raises before anything is
+    cached.
+    """
+    if adopt:
+        def check(p: str) -> None:
+            problem = payload_problem(p, zip_member)
+            if problem:
+                raise BlockDataError(f"Manually placed file {p} is not usable: {problem}.")
+
+        adopt_manual_file(path, url, _sidecar_path(path), validate=check)
+    raw = _read_cached(path)
+    if raw is not None and adopt:
+        problem = payload_problem(raw, zip_member)
+        if problem:
+            dest = quarantine(path, _sidecar_path(path))
+            warnings.warn(f"cached file {path} is not usable ({problem}); moved aside to {dest} and fetching it "
+                          "again", UserWarning, stacklevel=2)
+            raw = None
     if raw is not None:
         return raw
     if _offline():
         raise BlockDataError(f"{os.path.basename(path)} not cached and CENSUS_BLOCK_OFFLINE is set")
     raw = fetch()
+    if adopt:
+        problem = payload_problem(raw, zip_member)
+        if problem:
+            raise BlockDataError(f"{url} returned content that is not the data file: {problem}. Nothing was "
+                                 f"cached; download it in a web browser and save it at {path}")
     _write_cached(path, raw, url, content_type)
     return raw
 
@@ -206,7 +235,7 @@ def load_block_relationships(state: Any, session: Any = None) -> pd.DataFrame:
     url = REL_URL.format(state=st)
     path = os.path.join(block_cache_dir(), os.path.basename(url))
     raw = _cached_or_fetch(path, url, lambda: _get(url, session=session, cache_path=path), "application/zip",
-                           adopt=True)
+                           adopt=True, zip_member=".txt")
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
             name = next(n for n in zf.namelist() if n.lower().endswith(".txt"))
