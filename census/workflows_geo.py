@@ -188,8 +188,8 @@ def spatial_autocorrelation(
         local: Also return local clusters with multiple-comparison correction
             (two-sided p_value = 2 x p_sim from 9999 permutations, BH,
             alpha 0.10). Simulation: rates at nominal under randomness,
-            little power on ~150 areas, and spatially patterned sampling
-            error creates spurious clusters (see local_notes).
+            little power on ~150 areas, and spatially varying SEs create
+            spurious significant areas (see local_notes).
         replicates_path: Census replicates (build_analysis_frame) for a
             design-based SE of I. That SE is conservative (validated coverage
             0.987 for nominal 0.90).
