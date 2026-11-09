@@ -1,6 +1,6 @@
 # ACS sampling-error covariance between areas (VRE replicates)
 
-Generated 2026-11-09 06:19 UTC by `scripts/acs_error_covariance.py` (commit v0.14.0-22-g43b6c96-dirty, 7.8 min). PLAN_ROUND_16 workstream C (C1-C2). Status: **info** (gates nothing). Per-class numbers: `docs/audits/acs_sampling_covariance.csv` (written by the script; git-ignored like the other audit CSVs).
+Generated 2026-11-09 06:54 UTC by `scripts/acs_error_covariance.py` (commit v0.14.0-29-g1847007-dirty, 10.0 min). PLAN_ROUND_16 workstream C (C1-C2). Status: **info** (gates nothing). Per-class numbers: `docs/audits/acs_sampling_covariance.csv` (written by the script; git-ignored like the other audit CSVs).
 
 ## Question
 
@@ -9,7 +9,7 @@ Do the sampling errors of ACS 5-year estimates covary between areas (neighbourin
 ## Methods
 
 * **Covariance.** For estimates X (area i) and Y (area j) of one release, Cov = 4/80 sum_r (X_r - X)(Y_r - Y) over the 80 successive-difference replicates of the Census Variance Replicate Estimate (VRE) tables, the cross-product form of the VRE variance formula (census.replicate.VRE_DOCUMENTATION, formula 1). The 4/80 factor cancels in the correlation r, which is the cosine of the two replicate-deviation vectors. Implementation: `census/replicate_covariance.py`.
-* **Variables.** Counts: total population B01003_001 (tracts only; county populations are controlled to the population estimates and have no sampling error), occupied housing units B25003_001, persons below poverty B17001_002. Proportions: poverty rate B17001_002/B17001_001 and owner share B25003_002/B25003_001, recomputed on every replicate (zero replicate denominator -> 0, VRE documentation Example 7). Median: household income linearly interpolated from the B19001 replicate distributions (census.medians; no published median table has VRE files - checked against the 2019 and 2024 VRE table lists); areas whose median is top- or bottom-coded are excluded. Areas with a zero estimate denominator, controlled estimates or zero replicate variance are excluded (their correlation is undefined).
+* **Variables.** Counts: total population B01003_001 (tracts only; county populations are controlled to the population estimates and have no sampling error), occupied housing units B25003_001, persons below poverty B17001_002. Proportions: poverty rate B17001_002/B17001_001 and owner share B25003_002/B25003_001, recomputed on every replicate. Median: household income linearly interpolated from the B19001 replicate distributions (census.medians; no published median table has VRE files - checked against the 2019 and 2024 VRE table lists); areas whose median is top- or bottom-coded are excluded. Areas with a zero estimate denominator, a zero denominator in any replicate (the replicate ratio is undefined; the SE convention of VRE documentation Example 7, ratio 0, would fabricate a deviation of minus the estimate), controlled estimates or zero replicate variance are excluded (their correlation is undefined).
 * **Pairs.** Contiguity from queen weights (libpysal via census.spatial.spatial_weights) on the Census cartographic boundary files of the release's vintage; orders 1-3 are graph distances in the queen contiguity graph (order 1 split into rook = shared edge vs queen-only = corner). Tracts: all pairs of order 1-3; tract pairs in the same county beyond order 3 (random sample of at most 150,000); and a random sample of 100,000 draws of tract pairs in different counties beyond order 3. Counties: all pairs in the state. Distance = centroid distance in an equal-area projection (EPSG:5070).
 * **Structured summaries, not pairwise matrices.** The replicate covariance of n areas has rank <= 80, and one pairwise r from 80 replicates has null SD 1/sqrt(80). So only class summaries are reported: mean and median r per contiguity order, within vs across county, distance band. Their uncertainty: a bootstrap over the 80 replicate columns (200 draws; replicate noise; approximate because SDR deviations are not exactly iid across replicates) and a delete-one-county jackknife (drops every pair touching the county; area heterogeneity plus replicate noise). Intervals are mean +/- 1.96 x the larger of the two SEs.
 * **Noise floor.** Analytic: if one deviation vector is spherically symmetric in R^80 and independent of the other, (1 + r)/2 ~ Beta(39.5, 39.5): SD 0.112, two-sided 5% critical |r| 0.219 (40 replicates: SD 0.158, critical 0.308). Empirical: (a) replicate-index derangements applied to the second area of each far pair; (b) Michigan x New York area pairs, whose samples are independent, so their correlations show the real null spread of SDR replicate correlations.
@@ -71,13 +71,13 @@ Areas analysed (after exclusions):
 | 2024 | Michigan | tract | households | count | 2971 | 2897 | 74 |  |
 | 2024 | Michigan | tract | poverty_count | count | 2971 | 2893 | 78 |  |
 | 2024 | Michigan | tract | poverty_rate | proportion | 2971 | 2887 | 13 |  |
-| 2024 | Michigan | tract | owner_share | proportion | 2971 | 2865 | 32 |  |
+| 2024 | Michigan | tract | owner_share | proportion | 2971 | 2865 | 31 | 1 area(s) with a zero replicate denominator excluded |
 | 2024 | Michigan | tract | median_hh_income | median | 2971 | 2870 | 6 | 20 top/bottom-coded medians excluded |
 | 2024 | New York | tract | population | count | 5394 | 5289 | 91 |  |
 | 2024 | New York | tract | households | count | 5394 | 5251 | 129 |  |
 | 2024 | New York | tract | poverty_count | count | 5394 | 5242 | 138 |  |
-| 2024 | New York | tract | poverty_rate | proportion | 5394 | 5239 | 23 |  |
-| 2024 | New York | tract | owner_share | proportion | 5394 | 5145 | 106 |  |
+| 2024 | New York | tract | poverty_rate | proportion | 5394 | 5238 | 22 | 2 area(s) with a zero replicate denominator excluded |
+| 2024 | New York | tract | owner_share | proportion | 5394 | 5145 | 105 | 1 area(s) with a zero replicate denominator excluded |
 | 2024 | New York | tract | median_hh_income | median | 5394 | 5053 | 11 | 186 top/bottom-coded medians excluded |
 | 2024 | Michigan | county | households | count | 83 | 83 | 0 |  |
 | 2024 | Michigan | county | poverty_count | count | 83 | 83 | 0 |  |
@@ -97,8 +97,8 @@ Areas analysed (after exclusions):
 | 2019 | New York | tract | population | count | 4906 | 4854 | 52 |  |
 | 2019 | New York | tract | households | count | 4906 | 4828 | 78 |  |
 | 2019 | New York | tract | poverty_count | count | 4906 | 4811 | 95 |  |
-| 2019 | New York | tract | poverty_rate | proportion | 4906 | 4807 | 29 |  |
-| 2019 | New York | tract | owner_share | proportion | 4906 | 4748 | 80 |  |
+| 2019 | New York | tract | poverty_rate | proportion | 4906 | 4806 | 28 | 2 area(s) with a zero replicate denominator excluded |
+| 2019 | New York | tract | owner_share | proportion | 4906 | 4747 | 80 | 1 area(s) with a zero replicate denominator excluded |
 | 2019 | New York | tract | median_hh_income | median | 4906 | 4745 | 16 | 66 top/bottom-coded medians excluded |
 | 2019 | Michigan | county | households | count | 83 | 83 | 0 |  |
 | 2019 | Michigan | county | poverty_count | count | 83 | 83 | 0 |  |
@@ -130,7 +130,7 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 | New York | population | -0.040 [-0.060, -0.020] (n=15821) | -0.009 [-0.013, -0.004] (n=37762) | -0.003 [-0.004, -0.002] (n=65290) | -0.001 [-0.002, -0.001] (n=230255) |
 | New York | households | -0.015 [-0.022, -0.008] (n=15668) | -0.003 [-0.006, -0.001] (n=37281) | -0.002 [-0.003, -0.001] (n=64393) | -0.001 [-0.001, -0.000] (n=227670) |
 | New York | poverty_count | -0.002 [-0.003, 0.000] (n=15646) | -0.001 [-0.002, 0.001] (n=37221) | 0.000 [-0.001, 0.001] (n=64288) | -0.000 [-0.001, 0.001] (n=226711) |
-| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=15634) | 0.000 [-0.001, 0.001] (n=37172) | 0.000 [-0.001, 0.001] (n=64189) | 0.000 [-0.001, 0.001] (n=226493) |
+| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=15627) | -0.000 [-0.001, 0.001] (n=37151) | 0.000 [-0.001, 0.001] (n=64145) | 0.000 [-0.001, 0.001] (n=226417) |
 | New York | owner_share | -0.001 [-0.002, 0.001] (n=15121) | 0.000 [-0.001, 0.001] (n=35819) | 0.001 [-0.000, 0.002] (n=61842) | 0.000 [-0.000, 0.001] (n=217364) |
 | New York | median_hh_income | 0.000 [-0.002, 0.002] (n=14672) | 0.001 [-0.000, 0.002] (n=34551) | -0.000 [-0.001, 0.001] (n=59637) | 0.001 [0.000, 0.001] (n=210794) |
 
@@ -162,7 +162,7 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 | New York | population | -0.043 [-0.065, -0.020] (n=14769) | 0.002 [-0.006, 0.009] (n=1052) | -0.010 [-0.016, -0.005] (n=31951) | 0.001 [-0.003, 0.005] (n=5811) | -0.001 [-0.002, -0.001] (n=140773) | -0.001 [-0.002, 0.000] (n=89482) |
 | New York | households | -0.016 [-0.024, -0.008] (n=14624) | -0.000 [-0.011, 0.011] (n=1044) | -0.004 [-0.008, -0.001] (n=31575) | 0.002 [-0.002, 0.006] (n=5706) | -0.001 [-0.002, -0.001] (n=139403) | 0.000 [-0.001, 0.001] (n=88267) |
 | New York | poverty_count | -0.002 [-0.004, -0.000] (n=14606) | 0.004 [-0.005, 0.013] (n=1040) | -0.000 [-0.002, 0.001] (n=31514) | -0.002 [-0.006, 0.002] (n=5707) | -0.000 [-0.002, 0.002] (n=138746) | 0.000 [-0.001, 0.001] (n=87965) |
-| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=14594) | 0.003 [-0.007, 0.013] (n=1040) | 0.000 [-0.001, 0.001] (n=31467) | -0.002 [-0.006, 0.003] (n=5705) | -0.000 [-0.002, 0.002] (n=138610) | 0.000 [-0.000, 0.001] (n=87883) |
+| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=14588) | 0.003 [-0.007, 0.013] (n=1039) | 0.000 [-0.001, 0.001] (n=31453) | -0.002 [-0.006, 0.003] (n=5698) | -0.000 [-0.002, 0.002] (n=138557) | 0.000 [-0.000, 0.001] (n=87860) |
 | New York | owner_share | -0.001 [-0.003, 0.001] (n=14105) | 0.004 [-0.007, 0.015] (n=1016) | 0.000 [-0.001, 0.001] (n=30292) | -0.000 [-0.005, 0.004] (n=5527) | 0.000 [-0.000, 0.001] (n=132456) | 0.001 [-0.000, 0.001] (n=84908) |
 | New York | median_hh_income | 0.000 [-0.002, 0.003] (n=13668) | 0.000 [-0.009, 0.010] (n=1004) | 0.001 [0.000, 0.003] (n=29082) | -0.001 [-0.006, 0.003] (n=5469) | 0.001 [0.000, 0.001] (n=129020) | 0.001 [-0.001, 0.002] (n=81774) |
 
@@ -181,7 +181,7 @@ Tracts:
 | New York | population | -0.043 [-0.065, -0.022] (n=13919) | -0.014 [-0.024, -0.003] (n=1902) |
 | New York | households | -0.016 [-0.023, -0.008] (n=13778) | -0.010 [-0.017, -0.002] (n=1890) |
 | New York | poverty_count | -0.002 [-0.004, -0.000] (n=13753) | 0.003 [-0.003, 0.008] (n=1893) |
-| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=13741) | 0.002 [-0.003, 0.007] (n=1893) |
+| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=13736) | 0.002 [-0.003, 0.007] (n=1891) |
 | New York | owner_share | -0.001 [-0.003, 0.001] (n=13308) | 0.001 [-0.004, 0.006] (n=1813) |
 | New York | median_hh_income | -0.000 [-0.003, 0.002] (n=12911) | 0.004 [-0.003, 0.011] (n=1761) |
 
@@ -215,7 +215,7 @@ Tracts:
 | New York | population | -0.006 [-0.013, 0.001] (n=45076) | -0.008 [-0.015, -0.001] (n=59683) | -0.005 [-0.010, 0.000] (n=74890) | -0.002 [-0.004, -0.000] (n=58714) | -0.002 [-0.004, -0.000] (n=40629) | 0.000 [-0.002, 0.002] (n=14459) | -0.001 [-0.002, -0.000] (n=55677) |
 | New York | households | -0.002 [-0.005, 0.001] (n=44716) | -0.003 [-0.006, 0.000] (n=58849) | -0.003 [-0.005, -0.001] (n=74152) | -0.002 [-0.003, -0.001] (n=58039) | -0.002 [-0.004, 0.000] (n=40143) | 0.001 [-0.002, 0.004] (n=14253) | -0.000 [-0.001, 0.001] (n=54860) |
 | New York | poverty_count | -0.000 [-0.001, 0.001] (n=44676) | -0.001 [-0.002, 0.001] (n=58855) | 0.000 [-0.001, 0.002] (n=73813) | -0.000 [-0.003, 0.002] (n=57668) | -0.001 [-0.002, 0.001] (n=39943) | 0.001 [-0.002, 0.004] (n=14232) | 0.000 [-0.002, 0.002] (n=54679) |
-| New York | poverty_rate | 0.000 [-0.001, 0.001] (n=44640) | -0.001 [-0.002, 0.001] (n=58783) | 0.001 [-0.001, 0.002] (n=73740) | -0.000 [-0.002, 0.001] (n=57571) | -0.000 [-0.002, 0.001] (n=39915) | 0.002 [-0.001, 0.004] (n=14226) | 0.001 [-0.001, 0.002] (n=54613) |
+| New York | poverty_rate | 0.000 [-0.001, 0.001] (n=44632) | -0.001 [-0.002, 0.001] (n=58704) | 0.001 [-0.001, 0.002] (n=73705) | -0.000 [-0.002, 0.001] (n=57560) | -0.000 [-0.002, 0.001] (n=39911) | 0.002 [-0.001, 0.004] (n=14225) | 0.001 [-0.001, 0.002] (n=54603) |
 | New York | owner_share | 0.000 [-0.001, 0.001] (n=42025) | 0.001 [-0.000, 0.002] (n=56058) | 0.001 [-0.001, 0.002] (n=70722) | -0.000 [-0.001, 0.001] (n=55345) | 0.000 [-0.001, 0.002] (n=38968) | -0.000 [-0.003, 0.003] (n=13816) | 0.000 [-0.001, 0.002] (n=53212) |
 | New York | median_hh_income | 0.001 [-0.001, 0.003] (n=41976) | 0.001 [-0.000, 0.002] (n=54594) | 0.001 [-0.000, 0.001] (n=68456) | 0.000 [-0.001, 0.002] (n=53399) | 0.000 [-0.001, 0.002] (n=36338) | 0.001 [-0.001, 0.004] (n=12913) | 0.000 [-0.001, 0.002] (n=51978) |
 
@@ -256,7 +256,7 @@ Michigan x New York pairs (independent samples):
 | tract | population | 50000 | -0.0009 (0.0004) | 0.115 | 0.229 | 0.060 |
 | tract | households | 50000 | 0.0006 (0.0004) | 0.116 | 0.230 | 0.060 |
 | tract | poverty_count | 50000 | 0.0008 (0.0005) | 0.116 | 0.236 | 0.064 |
-| tract | poverty_rate | 50000 | 0.0002 (0.0005) | 0.115 | 0.232 | 0.062 |
+| tract | poverty_rate | 50000 | -0.0003 (0.0005) | 0.115 | 0.231 | 0.062 |
 | tract | owner_share | 50000 | 0.0009 (0.0005) | 0.116 | 0.231 | 0.062 |
 | tract | median_hh_income | 50000 | 0.0011 (0.0004) | 0.115 | 0.226 | 0.058 |
 | county | households | 5146 | 0.0320 (0.0032) | 0.121 | 0.243 | 0.077 |
@@ -278,7 +278,7 @@ Derangement null on far pairs (same state, beyond order 3):
 | New York | tract | population | 230255 | 0.0000 | 0.112 | 0.219 |
 | New York | tract | households | 227670 | 0.0003 | 0.112 | 0.219 |
 | New York | tract | poverty_count | 226711 | 0.0001 | 0.112 | 0.219 |
-| New York | tract | poverty_rate | 226493 | 0.0001 | 0.112 | 0.219 |
+| New York | tract | poverty_rate | 226417 | 0.0001 | 0.112 | 0.219 |
 | New York | tract | owner_share | 217364 | 0.0005 | 0.112 | 0.219 |
 | New York | tract | median_hh_income | 210794 | 0.0008 | 0.112 | 0.220 |
 | Michigan | county | households | 2452 | 0.0311 | 0.123 | 0.248 |
@@ -335,10 +335,10 @@ Spread of pairwise r per class: SD, excess SD over the analytic null (sqrt(SD^2 
 | Michigan | tract | poverty_count | order 2 | 0.116 | 0.032 | 0.011 | 0.066 |
 | Michigan | tract | poverty_count | order 3 | 0.116 | 0.031 | 0.008 | 0.064 |
 | Michigan | tract | poverty_count | beyond order 3 | 0.115 | 0.027 | 0.000 | 0.064 |
-| Michigan | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.000 | 0.065 |
-| Michigan | tract | poverty_rate | order 2 | 0.116 | 0.032 | 0.015 | 0.065 |
-| Michigan | tract | poverty_rate | order 3 | 0.116 | 0.032 | 0.015 | 0.063 |
-| Michigan | tract | poverty_rate | beyond order 3 | 0.115 | 0.027 | 0.000 | 0.062 |
+| Michigan | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.006 | 0.065 |
+| Michigan | tract | poverty_rate | order 2 | 0.116 | 0.032 | 0.017 | 0.065 |
+| Michigan | tract | poverty_rate | order 3 | 0.116 | 0.032 | 0.017 | 0.063 |
+| Michigan | tract | poverty_rate | beyond order 3 | 0.115 | 0.027 | 0.006 | 0.062 |
 | Michigan | tract | owner_share | order 1 | 0.115 | 0.028 | 0.000 | 0.061 |
 | Michigan | tract | owner_share | order 2 | 0.117 | 0.033 | 0.012 | 0.062 |
 | Michigan | tract | owner_share | order 3 | 0.115 | 0.029 | 0.000 | 0.060 |
@@ -359,10 +359,10 @@ Spread of pairwise r per class: SD, excess SD over the analytic null (sqrt(SD^2 
 | New York | tract | poverty_count | order 1 | 0.115 | 0.028 | 0.000 | 0.064 |
 | New York | tract | poverty_count | order 3 | 0.115 | 0.028 | 0.000 | 0.066 |
 | New York | tract | poverty_count | beyond order 3 | 0.115 | 0.029 | 0.000 | 0.065 |
-| New York | tract | poverty_rate | order 2 | 0.115 | 0.028 | 0.000 | 0.063 |
-| New York | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.000 | 0.065 |
-| New York | tract | poverty_rate | order 3 | 0.115 | 0.028 | 0.000 | 0.063 |
-| New York | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.010 | 0.064 |
+| New York | tract | poverty_rate | order 2 | 0.115 | 0.028 | 0.007 | 0.063 |
+| New York | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.002 | 0.065 |
+| New York | tract | poverty_rate | order 3 | 0.115 | 0.028 | 0.008 | 0.063 |
+| New York | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.013 | 0.064 |
 | New York | tract | owner_share | order 2 | 0.115 | 0.028 | 0.000 | 0.060 |
 | New York | tract | owner_share | order 1 | 0.115 | 0.028 | 0.000 | 0.060 |
 | New York | tract | owner_share | order 3 | 0.115 | 0.029 | 0.000 | 0.061 |
@@ -454,10 +454,10 @@ Per class: half-A and half-B class means (random split), and the reliability of 
 | New York | tract | poverty_count | order 1 | 15646 | -0.001 | -0.002 | 0.05 / 0.05 / -0.02 |
 | New York | tract | poverty_count | order 3 | 64288 | 0.001 | -0.000 | 0.06 / 0.05 / -0.00 |
 | New York | tract | poverty_count | beyond order 3 | 226711 | -0.000 | 0.000 | 0.06 / 0.06 / -0.00 |
-| New York | tract | poverty_rate | order 2 | 37172 | 0.001 | -0.001 | 0.06 / 0.04 / 0.01 |
-| New York | tract | poverty_rate | order 1 | 15634 | 0.001 | -0.001 | 0.04 / 0.03 / -0.02 |
-| New York | tract | poverty_rate | order 3 | 64189 | 0.000 | -0.000 | 0.05 / 0.05 / 0.00 |
-| New York | tract | poverty_rate | beyond order 3 | 226493 | 0.000 | 0.000 | 0.07 / 0.06 / 0.00 |
+| New York | tract | poverty_rate | order 2 | 37151 | 0.001 | -0.001 | 0.06 / 0.04 / 0.01 |
+| New York | tract | poverty_rate | order 1 | 15627 | 0.001 | -0.001 | 0.04 / 0.03 / -0.02 |
+| New York | tract | poverty_rate | order 3 | 64145 | 0.000 | -0.000 | 0.05 / 0.05 / 0.00 |
+| New York | tract | poverty_rate | beyond order 3 | 226417 | 0.000 | 0.000 | 0.07 / 0.06 / 0.00 |
 | New York | tract | owner_share | order 2 | 35819 | -0.001 | 0.001 | 0.05 / 0.04 / -0.00 |
 | New York | tract | owner_share | order 1 | 15121 | -0.001 | -0.000 | 0.06 / 0.06 / -0.02 |
 | New York | tract | owner_share | order 3 | 61842 | 0.001 | 0.001 | 0.06 / 0.06 / -0.01 |
@@ -520,7 +520,7 @@ Per class: half-A and half-B class means (random split), and the reliability of 
 | New York | tract | population | 5289 | 16.85 | 17.15 | -244.21 (projected) | -36.87 | -0.040 | 0.869 | 0.928 | 80 / 5289 |
 | New York | tract | households | 5251 | 2.20 | 2.27 | -373.56 (projected) | -37.33 | -0.015 | 0.870 | 0.929 | 80 / 5251 |
 | New York | tract | poverty_count | 5242 | -0.04 | -0.10 | -0.10 | -37.16 | -0.002 | 0.870 | 0.927 | 80 / 5242 |
-| New York | tract | poverty_rate | 5239 | -0.09 | -0.13 | -0.13 | -38.21 | 0.000 | 0.870 | 0.927 | 80 / 5239 |
+| New York | tract | poverty_rate | 5238 | -0.09 | -0.13 | -0.13 | -38.19 | 0.000 | 0.870 | 0.927 | 80 / 5238 |
 | New York | tract | owner_share | 5145 | -0.02 | -0.06 | -0.06 | -40.09 | -0.001 | 0.869 | 0.928 | 80 / 5145 |
 | New York | tract | median_hh_income | 5053 | -0.04 | -0.08 | -0.09 | -49.58 | -0.001 | 0.872 | 0.927 | 80 / 5053 |
 | Michigan | county | households | 83 | -0.10 | - | - | -0.17 | -0.000 | 0.910 | 0.764 | 80 / 83 |
@@ -550,8 +550,8 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 | New York | population | -0.039 [-0.060, -0.018] (n=14629) | -0.008 [-0.013, -0.003] (n=35303) | -0.002 [-0.004, -0.001] (n=61223) | -0.001 [-0.002, -0.000] (n=236096) |
 | New York | households | 0.012 [0.003, 0.020] (n=14502) | 0.005 [0.002, 0.008] (n=34948) | 0.002 [0.001, 0.004] (n=60587) | -0.000 [-0.001, 0.001] (n=234210) |
 | New York | poverty_count | -0.003 [-0.005, -0.001] (n=14431) | -0.000 [-0.002, 0.001] (n=34710) | -0.001 [-0.002, 0.000] (n=60162) | 0.000 [-0.000, 0.001] (n=232610) |
-| New York | poverty_rate | -0.001 [-0.002, 0.001] (n=14408) | 0.000 [-0.001, 0.001] (n=34651) | -0.001 [-0.002, 0.001] (n=60067) | 0.000 [-0.000, 0.001] (n=232188) |
-| New York | owner_share | 0.000 [-0.002, 0.002] (n=14035) | 0.000 [-0.001, 0.002] (n=33732) | 0.000 [-0.001, 0.002] (n=58445) | 0.000 [-0.000, 0.001] (n=225587) |
+| New York | poverty_rate | -0.001 [-0.002, 0.001] (n=14378) | -0.000 [-0.001, 0.001] (n=34613) | -0.001 [-0.002, 0.001] (n=60035) | 0.000 [-0.000, 0.001] (n=232123) |
+| New York | owner_share | 0.000 [-0.002, 0.002] (n=14033) | 0.000 [-0.001, 0.002] (n=33723) | 0.000 [-0.001, 0.002] (n=58430) | 0.000 [-0.000, 0.001] (n=225550) |
 | New York | median_hh_income | 0.002 [-0.001, 0.004] (n=14048) | 0.000 [-0.001, 0.002] (n=33653) | 0.001 [-0.001, 0.002] (n=58491) | 0.000 [-0.000, 0.001] (n=227384) |
 
 ### Counties: contiguity order
@@ -581,8 +581,8 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 | New York | population | -0.042 [-0.065, -0.018] (n=13624) | 0.000 [-0.008, 0.009] (n=1005) | -0.010 [-0.016, -0.004] (n=29760) | -0.000 [-0.004, 0.004] (n=5543) | -0.002 [-0.002, -0.001] (n=145264) | 0.000 [-0.001, 0.001] (n=90832) |
 | New York | households | 0.013 [0.003, 0.022] (n=13506) | -0.004 [-0.013, 0.006] (n=996) | 0.007 [0.004, 0.009] (n=29494) | -0.003 [-0.010, 0.003] (n=5454) | -0.001 [-0.002, 0.000] (n=144341) | 0.001 [-0.001, 0.003] (n=89869) |
 | New York | poverty_count | -0.003 [-0.005, -0.001] (n=13441) | 0.004 [-0.006, 0.013] (n=990) | -0.000 [-0.002, 0.001] (n=29280) | 0.000 [-0.004, 0.004] (n=5430) | -0.000 [-0.001, 0.001] (n=143413) | 0.000 [-0.001, 0.001] (n=89197) |
-| New York | poverty_rate | -0.001 [-0.003, 0.001] (n=13418) | 0.003 [-0.008, 0.013] (n=990) | -0.000 [-0.001, 0.001] (n=29223) | 0.000 [-0.003, 0.004] (n=5428) | 0.000 [-0.001, 0.001] (n=143139) | 0.000 [-0.001, 0.001] (n=89049) |
-| New York | owner_share | 0.000 [-0.002, 0.002] (n=13063) | 0.001 [-0.009, 0.011] (n=972) | 0.000 [-0.001, 0.002] (n=28443) | 0.002 [-0.003, 0.006] (n=5289) | 0.001 [-0.000, 0.001] (n=138644) | 0.000 [-0.001, 0.002] (n=86943) |
+| New York | poverty_rate | -0.001 [-0.003, 0.001] (n=13388) | 0.003 [-0.008, 0.013] (n=990) | -0.000 [-0.001, 0.001] (n=29185) | 0.000 [-0.003, 0.004] (n=5428) | 0.000 [-0.001, 0.001] (n=143103) | 0.000 [-0.001, 0.001] (n=89020) |
+| New York | owner_share | 0.000 [-0.002, 0.002] (n=13062) | 0.001 [-0.009, 0.011] (n=971) | 0.000 [-0.001, 0.002] (n=28439) | 0.002 [-0.003, 0.006] (n=5284) | 0.001 [-0.000, 0.001] (n=138644) | 0.000 [-0.001, 0.002] (n=86906) |
 | New York | median_hh_income | 0.001 [-0.001, 0.003] (n=13070) | 0.009 [-0.003, 0.021] (n=978) | 0.000 [-0.001, 0.002] (n=28295) | 0.000 [-0.004, 0.005] (n=5358) | 0.000 [-0.001, 0.001] (n=140550) | 0.000 [-0.001, 0.001] (n=86834) |
 
 ### Rook (shared edge) vs queen-only (corner) first-order neighbours
@@ -599,8 +599,8 @@ Tracts:
 | New York | population | -0.043 [-0.065, -0.021] (n=12901) | -0.009 [-0.018, 0.001] (n=1728) |
 | New York | households | 0.013 [0.003, 0.022] (n=12783) | 0.004 [-0.004, 0.012] (n=1719) |
 | New York | poverty_count | -0.003 [-0.005, -0.000] (n=12720) | -0.005 [-0.010, 0.001] (n=1711) |
-| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=12699) | -0.004 [-0.010, 0.002] (n=1709) |
-| New York | owner_share | -0.001 [-0.003, 0.002] (n=12369) | 0.008 [0.000, 0.015] (n=1666) |
+| New York | poverty_rate | -0.000 [-0.002, 0.002] (n=12672) | -0.004 [-0.010, 0.002] (n=1706) |
+| New York | owner_share | -0.001 [-0.003, 0.002] (n=12368) | 0.008 [0.000, 0.015] (n=1665) |
 | New York | median_hh_income | 0.002 [-0.001, 0.004] (n=12379) | 0.001 [-0.008, 0.009] (n=1669) |
 
 Counties:
@@ -632,8 +632,8 @@ Tracts:
 | New York | population | -0.005 [-0.013, 0.003] (n=41793) | -0.008 [-0.015, -0.001] (n=60659) | -0.004 [-0.008, 0.000] (n=77159) | -0.002 [-0.005, -0.000] (n=58451) | -0.002 [-0.004, -0.000] (n=39904) | -0.001 [-0.003, 0.001] (n=14162) | -0.000 [-0.002, 0.002] (n=55123) |
 | New York | households | 0.006 [-0.001, 0.013] (n=41584) | 0.005 [0.000, 0.009] (n=60046) | 0.000 [-0.002, 0.003] (n=76635) | -0.002 [-0.003, -0.000] (n=57971) | -0.001 [-0.002, 0.001] (n=39492) | 0.000 [-0.004, 0.004] (n=13996) | 0.001 [-0.001, 0.003] (n=54523) |
 | New York | poverty_count | -0.001 [-0.002, 0.000] (n=41371) | -0.001 [-0.002, 0.000] (n=59777) | -0.000 [-0.001, 0.001] (n=76082) | -0.001 [-0.002, 0.000] (n=57471) | -0.000 [-0.001, 0.001] (n=39165) | 0.000 [-0.004, 0.005] (n=13940) | 0.001 [-0.000, 0.002] (n=54107) |
-| New York | poverty_rate | -0.001 [-0.002, 0.000] (n=41303) | 0.000 [-0.001, 0.001] (n=59679) | 0.000 [-0.001, 0.001] (n=75931) | -0.001 [-0.002, 0.001] (n=57350) | 0.000 [-0.001, 0.001] (n=39114) | 0.000 [-0.005, 0.005] (n=13927) | 0.001 [-0.000, 0.002] (n=54010) |
-| New York | owner_share | 0.001 [-0.001, 0.002] (n=39501) | 0.001 [-0.001, 0.002] (n=57517) | 0.000 [-0.001, 0.001] (n=73646) | 0.000 [-0.001, 0.002] (n=55908) | 0.001 [-0.001, 0.002] (n=38487) | -0.001 [-0.003, 0.002] (n=13693) | 0.000 [-0.001, 0.002] (n=53047) |
+| New York | poverty_rate | -0.001 [-0.002, 0.000] (n=41258) | 0.000 [-0.001, 0.001] (n=59610) | 0.000 [-0.001, 0.001] (n=75907) | -0.001 [-0.002, 0.001] (n=57343) | 0.000 [-0.001, 0.001] (n=39104) | 0.000 [-0.005, 0.005] (n=13925) | 0.001 [-0.000, 0.002] (n=54002) |
+| New York | owner_share | 0.001 [-0.001, 0.002] (n=39501) | 0.001 [-0.001, 0.002] (n=57517) | 0.000 [-0.001, 0.001] (n=73645) | 0.000 [-0.001, 0.002] (n=55901) | 0.001 [-0.001, 0.002] (n=38467) | -0.001 [-0.003, 0.002] (n=13691) | 0.000 [-0.001, 0.002] (n=53014) |
 | New York | median_hh_income | 0.001 [-0.000, 0.003] (n=40628) | 0.001 [-0.000, 0.001] (n=58252) | 0.000 [-0.001, 0.001] (n=74411) | -0.000 [-0.001, 0.001] (n=55926) | 0.001 [-0.001, 0.002] (n=37726) | -0.001 [-0.004, 0.002] (n=13563) | 0.000 [-0.001, 0.002] (n=53070) |
 
 Counties:
@@ -671,8 +671,8 @@ Michigan x New York pairs (independent samples):
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | tract | households | 50000 | 0.0003 (0.0005) | 0.116 | 0.229 | 0.060 |
 | tract | poverty_count | 50000 | -0.0005 (0.0004) | 0.115 | 0.231 | 0.062 |
-| tract | poverty_rate | 50000 | -0.0007 (0.0005) | 0.115 | 0.232 | 0.062 |
-| tract | owner_share | 50000 | 0.0008 (0.0005) | 0.115 | 0.226 | 0.058 |
+| tract | poverty_rate | 50000 | -0.0007 (0.0004) | 0.116 | 0.234 | 0.063 |
+| tract | owner_share | 50000 | -0.0002 (0.0004) | 0.115 | 0.226 | 0.058 |
 | tract | median_hh_income | 50000 | 0.0014 (0.0005) | 0.116 | 0.227 | 0.059 |
 | county | households | 5146 | 0.0285 (0.0028) | 0.120 | 0.240 | 0.078 |
 | county | poverty_count | 5146 | 0.0055 (0.0020) | 0.116 | 0.228 | 0.061 |
@@ -692,8 +692,8 @@ Derangement null on far pairs (same state, beyond order 3):
 | New York | tract | population | 236096 | -0.0001 | 0.112 | 0.219 |
 | New York | tract | households | 234210 | 0.0004 | 0.113 | 0.221 |
 | New York | tract | poverty_count | 232610 | 0.0001 | 0.112 | 0.219 |
-| New York | tract | poverty_rate | 232188 | 0.0001 | 0.112 | 0.219 |
-| New York | tract | owner_share | 225587 | 0.0009 | 0.112 | 0.219 |
+| New York | tract | poverty_rate | 232123 | 0.0001 | 0.112 | 0.219 |
+| New York | tract | owner_share | 225550 | 0.0009 | 0.112 | 0.219 |
 | New York | tract | median_hh_income | 227384 | 0.0008 | 0.112 | 0.219 |
 | Michigan | county | households | 2452 | 0.0265 | 0.118 | 0.236 |
 | Michigan | county | poverty_count | 2452 | 0.0023 | 0.112 | 0.218 |
@@ -718,8 +718,8 @@ Replicate design spectrum (lowest eigenvalues relative to the mean; Marchenko-Pa
 | New York | tract | population | 0.047 0.054 0.086 0.421 (0.760) | 3 | 77 | 0.114 |
 | New York | tract | households | 0.043 0.045 0.072 0.414 (0.759) | 3 | 77 | 0.114 |
 | New York | tract | poverty_count | 0.024 0.025 0.052 0.421 (0.759) | 3 | 77 | 0.114 |
-| New York | tract | poverty_rate | 0.025 0.027 0.053 0.419 (0.759) | 3 | 77 | 0.114 |
-| New York | tract | owner_share | 0.029 0.030 0.062 0.410 (0.757) | 3 | 77 | 0.114 |
+| New York | tract | poverty_rate | 0.025 0.027 0.053 0.418 (0.759) | 3 | 77 | 0.114 |
+| New York | tract | owner_share | 0.028 0.029 0.062 0.410 (0.757) | 3 | 77 | 0.114 |
 | New York | tract | median_hh_income | 0.062 0.069 0.089 0.409 (0.757) | 3 | 77 | 0.114 |
 | Michigan | county | households | 0.001 0.001 0.001 0.004 (-) | not tested (too few areas) | - | - |
 | Michigan | county | poverty_count | 0.000 0.001 0.002 0.003 (-) | not tested (too few areas) | - | - |
@@ -745,13 +745,13 @@ Spread of pairwise r per class: SD, excess SD over the analytic null (sqrt(SD^2 
 | Michigan | tract | poverty_count | order 3 | 0.115 | 0.029 | 0.007 | 0.064 |
 | Michigan | tract | poverty_count | beyond order 3 | 0.116 | 0.031 | 0.013 | 0.064 |
 | Michigan | tract | poverty_rate | order 1 | 0.114 | 0.023 | 0.000 | 0.060 |
-| Michigan | tract | poverty_rate | order 2 | 0.116 | 0.030 | 0.010 | 0.062 |
-| Michigan | tract | poverty_rate | order 3 | 0.116 | 0.030 | 0.010 | 0.062 |
-| Michigan | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.012 | 0.063 |
+| Michigan | tract | poverty_rate | order 2 | 0.116 | 0.030 | 0.000 | 0.062 |
+| Michigan | tract | poverty_rate | order 3 | 0.116 | 0.030 | 0.000 | 0.062 |
+| Michigan | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.005 | 0.063 |
 | Michigan | tract | owner_share | order 1 | 0.115 | 0.027 | 0.000 | 0.058 |
 | Michigan | tract | owner_share | order 2 | 0.115 | 0.025 | 0.000 | 0.058 |
-| Michigan | tract | owner_share | order 3 | 0.115 | 0.028 | 0.005 | 0.059 |
-| Michigan | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.008 | 0.059 |
+| Michigan | tract | owner_share | order 3 | 0.115 | 0.028 | 0.006 | 0.059 |
+| Michigan | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.009 | 0.059 |
 | Michigan | tract | median_hh_income | order 1 | 0.113 | 0.019 | 0.000 | 0.055 |
 | Michigan | tract | median_hh_income | order 2 | 0.116 | 0.032 | 0.009 | 0.060 |
 | Michigan | tract | median_hh_income | order 3 | 0.116 | 0.029 | 0.000 | 0.058 |
@@ -768,14 +768,14 @@ Spread of pairwise r per class: SD, excess SD over the analytic null (sqrt(SD^2 
 | New York | tract | poverty_count | order 3 | 0.115 | 0.027 | 0.000 | 0.062 |
 | New York | tract | poverty_count | order 2 | 0.116 | 0.029 | 0.008 | 0.064 |
 | New York | tract | poverty_count | beyond order 3 | 0.115 | 0.029 | 0.007 | 0.064 |
-| New York | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.000 | 0.065 |
+| New York | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.000 | 0.066 |
 | New York | tract | poverty_rate | order 3 | 0.115 | 0.027 | 0.000 | 0.062 |
-| New York | tract | poverty_rate | order 2 | 0.115 | 0.029 | 0.007 | 0.062 |
-| New York | tract | poverty_rate | beyond order 3 | 0.115 | 0.029 | 0.007 | 0.063 |
+| New York | tract | poverty_rate | order 2 | 0.115 | 0.029 | 0.000 | 0.062 |
+| New York | tract | poverty_rate | beyond order 3 | 0.115 | 0.029 | 0.000 | 0.063 |
 | New York | tract | owner_share | order 1 | 0.115 | 0.025 | 0.000 | 0.059 |
-| New York | tract | owner_share | order 3 | 0.116 | 0.029 | 0.008 | 0.059 |
-| New York | tract | owner_share | order 2 | 0.115 | 0.028 | 0.000 | 0.059 |
-| New York | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.007 | 0.059 |
+| New York | tract | owner_share | order 3 | 0.116 | 0.029 | 0.009 | 0.059 |
+| New York | tract | owner_share | order 2 | 0.115 | 0.028 | 0.003 | 0.059 |
+| New York | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.008 | 0.059 |
 | New York | tract | median_hh_income | order 1 | 0.115 | 0.029 | 0.000 | 0.059 |
 | New York | tract | median_hh_income | order 3 | 0.115 | 0.028 | 0.000 | 0.057 |
 | New York | tract | median_hh_income | order 2 | 0.115 | 0.027 | 0.000 | 0.057 |
@@ -859,14 +859,14 @@ Per class: half-A and half-B class means (random split), and the reliability of 
 | New York | tract | poverty_count | order 3 | 60162 | 0.000 | -0.002 | 0.06 / 0.05 / -0.01 |
 | New York | tract | poverty_count | order 2 | 34710 | 0.000 | -0.001 | 0.06 / 0.05 / 0.01 |
 | New York | tract | poverty_count | beyond order 3 | 232610 | 0.000 | -0.000 | 0.07 / 0.06 / 0.01 |
-| New York | tract | poverty_rate | order 1 | 14408 | -0.001 | -0.000 | 0.06 / 0.07 / 0.01 |
-| New York | tract | poverty_rate | order 3 | 60067 | 0.000 | -0.001 | 0.06 / 0.05 / -0.01 |
-| New York | tract | poverty_rate | order 2 | 34651 | 0.000 | -0.000 | 0.06 / 0.05 / -0.00 |
-| New York | tract | poverty_rate | beyond order 3 | 232188 | 0.000 | -0.000 | 0.07 / 0.06 / 0.01 |
-| New York | tract | owner_share | order 1 | 14035 | 0.001 | -0.000 | 0.05 / 0.05 / -0.02 |
-| New York | tract | owner_share | order 3 | 58445 | 0.000 | 0.001 | 0.06 / 0.06 / 0.02 |
-| New York | tract | owner_share | order 2 | 33732 | 0.000 | 0.000 | 0.04 / 0.07 / 0.01 |
-| New York | tract | owner_share | beyond order 3 | 225587 | 0.001 | 0.000 | 0.06 / 0.05 / 0.02 |
+| New York | tract | poverty_rate | order 1 | 14378 | -0.001 | -0.000 | 0.06 / 0.07 / 0.01 |
+| New York | tract | poverty_rate | order 3 | 60035 | 0.000 | -0.001 | 0.06 / 0.05 / -0.01 |
+| New York | tract | poverty_rate | order 2 | 34613 | 0.000 | -0.000 | 0.06 / 0.05 / -0.00 |
+| New York | tract | poverty_rate | beyond order 3 | 232123 | 0.000 | -0.000 | 0.07 / 0.06 / 0.01 |
+| New York | tract | owner_share | order 1 | 14033 | 0.001 | -0.000 | 0.05 / 0.05 / -0.02 |
+| New York | tract | owner_share | order 3 | 58430 | 0.000 | 0.001 | 0.06 / 0.06 / 0.02 |
+| New York | tract | owner_share | order 2 | 33723 | 0.000 | 0.000 | 0.04 / 0.07 / 0.01 |
+| New York | tract | owner_share | beyond order 3 | 225550 | 0.001 | 0.000 | 0.06 / 0.05 / 0.02 |
 | New York | tract | median_hh_income | order 1 | 14048 | 0.002 | 0.001 | 0.05 / 0.07 / 0.05 |
 | New York | tract | median_hh_income | order 3 | 58491 | 0.000 | 0.001 | 0.06 / 0.05 / 0.03 |
 | New York | tract | median_hh_income | order 2 | 33653 | 0.001 | 0.000 | 0.06 / 0.07 / 0.01 |
@@ -1014,7 +1014,7 @@ Mean r per class in each release (different tract vintages: 2010 tracts in 2015-
 | New York | tract | poverty_count | order 1 / across county | 0.004 [-0.006, 0.013] | 0.004 [-0.005, 0.013] | 0.000 (0.007) |
 | New York | tract | poverty_count | beyond order 3 / within county | -0.000 [-0.001, 0.001] | -0.000 [-0.002, 0.002] | -0.000 (0.001) |
 | New York | tract | poverty_count | beyond order 3 / across county | 0.000 [-0.001, 0.001] | 0.000 [-0.001, 0.001] | -0.000 (0.001) |
-| New York | tract | poverty_rate | order 2 | 0.000 [-0.001, 0.001] | 0.000 [-0.001, 0.001] | -0.000 (0.001) |
+| New York | tract | poverty_rate | order 2 | -0.000 [-0.001, 0.001] | -0.000 [-0.001, 0.001] | 0.000 (0.001) |
 | New York | tract | poverty_rate | order 1 | -0.001 [-0.002, 0.001] | -0.000 [-0.002, 0.002] | 0.001 (0.001) |
 | New York | tract | poverty_rate | order 3 | -0.001 [-0.002, 0.001] | 0.000 [-0.001, 0.001] | 0.001 (0.001) |
 | New York | tract | poverty_rate | beyond order 3 | 0.000 [-0.000, 0.001] | 0.000 [-0.001, 0.001] | -0.000 (0.001) |
