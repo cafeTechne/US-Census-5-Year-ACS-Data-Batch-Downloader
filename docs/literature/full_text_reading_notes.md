@@ -194,6 +194,75 @@ SSRN 4252849 preprint; the journal version is *Spatial Economic Analysis* 19(1):
 - **They do not identify the SEM.** Under an SEM DGP the SDM representation has γ = −βλ ≠ 0, so RS*_γ is expected to reject and point toward an SDM. That is my derivation, not shown in the paper. The SEM-versus-SDM decision therefore still needs the common-factor test (Juhl's bootstrap or the LR test).
 - **They are already in spreg 1.9.1** (`lm_wx`, `lm_spdurbin`, `rlm_wx`, `rlm_durlag`). If the tool adds them, use spreg's implementation and verify it with the paper's additivity identity, not a reimplementation.
 
+## 9. Lorincz-Comi, Ajayakumar, J. Curtis, Zhang, A. Curtis & Lovell (2021): "Addressing uncertainty in census estimates"
+
+*Spatial Statistics* 45:100523. Owner-supplied PDF, main text read in full. The supplement (estimator variances, multivariable extension, simulation generators) was **NOT READ**.
+
+**VERIFIED:**
+- **Scope:** this is a method-of-moments measurement-error correction for **geographically weighted regression**, with location-weighted moments.
+  - Classical model: x = X + u, y = Y + q, with errors normal around the truth.
+  - The naive slope is attenuated by κ = σ²X/(σ²X + σ²u) when σXu = σuq = 0 (Eq. 2). The correction solves for β₁.
+  - It allows "nonclassical" σXu ≠ 0 (error correlated with the true value), in which case the bias can go either way (Fig. 1), and correlated x/y errors σuq.
+- **Inputs:** σu² is the distance-weighted mean of (MOE/1.645)².
+- **Corrected correlation** (Eq. 3) and a **corrected Moran's I** (Eq. 4), which subtracts the error covariance between locations σuq and the error variance σu² from the cross- and own-moments.
+- **Inference:** variances of the corrected estimators are only in the supplement (a proposed jackknife). The authors state that existing variance estimators "cannot be applied".
+- **What it does not do:** it addresses neither spatial error / lag models nor λ.
+
+**ADAPTATION / implications:**
+- **A1:** confirms that this paper is **not** a λ correction. Its global (non-GWR) analogue is the engine's existing `regression_calibration`.
+- **Eq. 4 corrected Moran's I:** the between-area error covariance term is exactly what workstream C estimates from replicates. This makes a corrected global Moran's I a candidate for a later round. Do not implement before: its variance/inference is verified from the supplement (unread), and a simulation validates it under independent and correlated errors.
+
+## 10. Jung, Thill & Issel (2019): spatial autocorrelation and ACS data uncertainty, a critique
+
+*IJGIS* 33(6):1155-1175, doi 10.1080/13658816.2018.1554811. Owner-supplied PDF, read in full.
+
+**VERIFIED:**
+- **Global Moran's I is attenuated by reliability:** with independent errors, uncorrelated with the truth, observed I ≈ [Var(θ)/Var(x)] × true I (Eq. 4). This is regression dilution.
+- **Ground truth:** Mecklenburg County tract teen birth rates against 2010 census plus birth-certificate counts. Global I was 0.46 on the census-based rates, against 0.128 and 0.025 on the ACS-based rates, matching their reliability ratios of 15.23% and 0.43%.
+- **Local Moran's I:** mostly **deflated** in true hot and cold spots, so clusters were missed. Two spurious hot spots appeared. Tests used 10,000 permutations with queen contiguity.
+- **Remedies:** empirical Bayes and small-area estimation (the Fay-Herriot family).
+
+**My reading (not established):**
+- **Eq. 9:** the extra local term diag(WΩ)/Var(ε) is zero when Ω (the error covariance) is diagonal, because W has a zero diagonal. So under the paper's own independence assumption, heteroscedastic errors change the *variance*, not the *expected value*, of local I. The term is non-zero only when **neighbouring errors are correlated**: diag(WΩ)ᵢ = Σⱼ wᵢⱼ Cov(εᵢ, εⱼ).
+- This matches workstream B: independent errors mainly cost power, while correlated errors add false structure. It also ties directly to C's covariance estimates.
+
+## 11. Rogerson (2025): "Testing Hypotheses When You Have More Than a Few"
+
+*Geographical Analysis* 57(2):175-190, doi 10.1111/gean.12412. Owner-supplied PDF, read (closing pages skimmed).
+
+**VERIFIED:**
+- **Family-wise error rate (FWER) methods:** Bonferroni, Šidák, Holm (step-down), Hochberg (step-up, which needs independence or positive dependence).
+- **FDR control:** Benjamini-Hochberg (BH) controls the FDR under independence or positive dependence. It notes that nearby local statistics "will almost always be positively correlated". Benjamini-Yekutieli covers general dependence.
+- **Ignored autocorrelation inflates FDR:** if spatial autocorrelation is ignored in the individual tests, the realized FDR exceeds the nominal level (an algebraic argument).
+- **Estimating the number of true nulls (m₀):** Schweder-Spjøtvoll, Nettleton et al., Storey's λ estimator (λ = 0.5 "usually serves well"). **Adaptive two-stage BH** (Benjamini et al. 2006) uses m₀ for more power.
+- **Cluster-level testing** (Heller et al. 2006; Pacifico et al. 2004; Chumbley & Friston 2009) "should often replace" area-level perspectives.
+  - Example: one 95-unit true cluster plus 5 false units gives an area-level FDR of 5% but a cluster-level FDR of 83%.
+  - q = 0.2-0.3 "might conceivably be tolerable" for clusters.
+- **Illustration:** Gi* on a 55×55 grid. FDR adds rejections over Bonferroni, and adaptive BH adds one more.
+
+**ADAPTATION / implications:**
+- **B:** the current Local Moran's I default uses BH, which is valid under positive dependence. Adaptive (Storey) BH is a candidate for more power and is cheap.
+- **Cluster-level reporting:** our "false-cluster map rate" is a step toward it. Report flagged results as clusters with a cluster-level error rate. Proposal only, to be validated with B's harness.
+
+## 12. Lacombe & LeSage (2015): Bayesian posterior model probabilities and omitted variables
+
+*Papers in Regional Science* 94(2):365-384, doi 10.1111/pirs.12070. Owner-supplied PDF, read (Monte Carlo tables and appendix skimmed).
+
+**VERIFIED:**
+- **Omitted variables decide the model:**
+  - an omitted variable uncorrelated with x gives an SEM, with no spillovers; OLS is consistent for β, but its inference is not valid;
+  - spatially dependent disturbances plus an omitted variable correlated with x give an SDM, y = ρWy + x(β + γ) + Wx(−ρβ) + ε (Eqs. 10-13).
+- **γ is identified:** β = θ/(−ρ), then γ = ϕ − β. A significant γ is a test for omitted-variable bias on that variable. They also suggest the t-statistics of the **indirect effects** as a simpler analogous test.
+- **SEM disturbances are "diffusion of shocks", not spillovers.**
+- **Bayesian model comparison** (LeSage & Parent 2007) gets SEM against SDM right at correlation ≈ 0 and ≈ 0.7 between x and the omitted variable. In between it depends on n: at correlation ≈ 0.2 it points to the SEM at n = 506 and to the SDM at n = 3,107 and 10,000.
+- **Biases:** the SEM overestimates ρ when the omitted variable is correlated with x. ML ρ is biased downward in small samples (citing Bao & Ullah 2007).
+- **Census data:** variables at county, tract and block-group level show spatial dependence of 0.75-0.95 (citing Pace et al. 2012).
+
+**ADAPTATION / implications:**
+- **A3:** the omitted-correlated-covariate DGP is the central stress test. The Juhl grid already uses this DGP, with γ the same parameter.
+- **A4:** evaluate the common-factor/γ route next to LR and the bootstrap. Bayesian model probabilities need a production SDM estimator and a marginal-likelihood implementation, neither of which the engine has, so they stay a proposal.
+- **Interpretation:** the lag tool's notes should say that SEM disturbances are diffusion of shocks, not spillovers. This matches the corrected λ wording.
+
 ---
 
 ## Consequences for Round 16
@@ -207,4 +276,10 @@ SSRN 4252849 preprint; the journal version is *Spatial Economic Analysis* 19(1):
   3. replicate stability.
 
   Evaluate Wong's method against its own target, and record its larger-SE-larger-cluster property and its sensitivity to correlated errors. Rename our false-cluster metric, or define it explicitly against Sun et al.'s FCR. Arthur is out of scope for Local Moran's I.
+- **Between-area error covariance** (added after sections 9-12) is the common thread. It is:
+  - the σuq term in the corrected Moran's I (Lorincz-Comi Eq. 4);
+  - the only source of a non-zero expectation shift in local Moran's I (Jung et al. Eq. 9, as I read it);
+  - what makes Fay-Herriot smoothing create false clusters (workstream B).
+
+  C's estimates therefore decide which of these corrections is usable.
 - **C:** none of these papers estimates between-area sampling covariance; all assume diagonal error covariance. Measuring it from VRE replicates fills a gap the literature leaves open (Donegan et al. name the possibility).
