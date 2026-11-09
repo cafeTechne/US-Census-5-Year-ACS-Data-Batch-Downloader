@@ -64,6 +64,12 @@ class TestGeoWorkflows(unittest.TestCase):
         self.guided(res)
         self.assertIn("GMM", res["method"])
         self.assertIn("the default for the lag model", " ".join(res["notes"]))
+        # PLAN_ROUND_16 A2: effects come before the coefficients, and beta is labelled as not the marginal effect
+        keys = list(res)
+        self.assertLess(keys.index("effects"), keys.index("coefficients"))
+        self.assertEqual({r["effect"] for r in res["effects"]}, {"direct", "indirect", "total"})
+        self.assertIn("NOT its marginal effect", res["notes"][0])
+        self.assertIn("effects table first", res["next_step"])
         res = g.spatial_regression(self.path, "rate ~ x", "tract", 2023, method="ml")
         self.guided(res)
         self.assertIn("ML lag intervals for rho covered 0.48", " ".join(res["notes"]))

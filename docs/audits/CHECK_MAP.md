@@ -19,6 +19,7 @@ All commands use `.venv/bin/python` from the repository root.
 | Linear trend test (`census.trends`) | `-m pytest -q tests/test_trends.py` | `linear_trend` (gated) |
 | Moran's I replicate SE (`census.spatial`) | `-m pytest -q tests/test_spatial.py` | `morans_i_replicate_se` (info) |
 | Spatial lag / error regression, LM diagnostics (`census.spatial.spatial_regression`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `spatial_regression_coverage` (info, D15-1) |
+| Lag-model effects (direct/indirect/total; `census.spatial.lag_effects`, `report_tables.effects_table`) and the Round 16 study estimators (`census.simulation_spreg`) | `-m pytest -q tests/test_spatial_regression_validation.py` (effects vs S(W) algebra and spreg's multipliers; study likelihoods vs spreg and `census.sae_spatial`) | `spatial_dgp_recovery`, `spatial_error_attenuation`, `spatial_error_attenuation_correlated`, `common_factor_lr`, `common_factor_lr_acs` (info, on demand) |
 | Local Moran's I / LISA (`census.spatial.local_morans`) | `-m pytest -q tests/test_spatial.py tests/test_workflows_geo.py` | `local_morans_size` (info, D15-1); `lisa_validation_null`, `lisa_validation_clusters` (info, on demand, Round 16) |
 | LISA validation prototypes (`census.lisa_validation`: correlated-error scenarios, replicate-stability filter, LISA on spatial FH EBLUPs, Wong 2021 heuristic) | `-m pytest -q tests/test_lisa_validation.py` | `lisa_validation_null`, `lisa_validation_clusters` (info, on demand) |
 | Multilevel, known variance (`census.multilevel`) | `-m pytest -q tests/test_multilevel.py` (includes the dense fixed-variance reference `TestKnownVarianceDenseReference`) | `multilevel_known_variance`, `multilevel_random_slope`, `multilevel_replicate` |
@@ -118,6 +119,23 @@ Release studies:
   The prototypes live in `census.lisa_validation`; no tool default changed.
   Design, metric definitions, results with MC SEs and proposals:
   `docs/audits/lisa_validation.md`.
+- Spatial regression validation (PLAN_ROUND_16 workstream A): five
+  info-only studies in `census.simulation_spreg` (group
+  `spreg_validation`), run only when named, e.g.
+  `scripts/inference_validation.py --studies spatial_dgp_recovery --out
+  /tmp/r16a.md` (do not overwrite `docs/audits/inference_validation.md`).
+  They are not in the default full report and not in `REQUIRED_STUDIES`
+  (each takes more than 5 min single-process).
+  `spatial_error_attenuation` / `_correlated`: lambda of the tool's ML
+  error model vs the spatial Fay-Herriot rho (REML and ML) under
+  independent and SAR-correlated outcome error, rook/queen/kNN.
+  `spatial_dgp_recovery`: SEM, SAR, SDM, omitted-covariate and Juhl DGPs
+  fitted by all four estimators; effects coverage (delta-method and
+  simulated intervals) and OLS RS test rejection rates.
+  `common_factor_lr`: LR common-factor test in Juhl's (2021) design
+  (queen 7x7-20x20) with chi-square and residual-bootstrap critical values;
+  `common_factor_lr_acs`: the same under ACS-like outcome error. Designs,
+  results and conclusions: `docs/audits/spatial_regression_validation.md`.
 - Runtime (PLAN_ROUND_13 C3): the script pins BLAS/OpenMP to one thread per
   process, and `--jobs N` (0 = one per CPU) runs studies in parallel
   processes with output identical to a serial run (except the `seconds`

@@ -24,6 +24,11 @@ group add 5.2 min (spatial_regression_coverage) and ~3.6 min
 --jobs output is identical to the serial output at the same seed except the
 "seconds" column (wall time per study).
 
+The Round 16 spatial regression validation studies (spatial_error_attenuation,
+spatial_error_attenuation_correlated, spatial_dgp_recovery, common_factor_lr,
+common_factor_lr_acs; info rows only) take 5-25 min each and run only when named with --studies
+(docs/audits/spatial_regression_validation.md).
+
 Report versus gate (PLAN_ROUND_12 decision P12-3): by default the command is a
 report generator and always exits 0. With --gate it exits 1 when any gated
 row has status FAIL or a required study (REQUIRED_STUDIES) produced no gated
@@ -71,6 +76,7 @@ sys.path.insert(0, ROOT)
 from census.lisa_validation import LISA_STUDIES  # noqa: E402
 from census.simulation import (BAND, CV_PROFILES, DESIGN_STUDIES, FAST, FULL, NOMINAL, SPATIAL_STUDIES,  # noqa: E402
                                STUDIES, group_config, run_study, run_study_job)
+from census.simulation_spreg import SPREG_VALIDATION_STUDIES  # noqa: E402
 
 OUT_MD = os.path.join(ROOT, "docs", "audits", "inference_validation.md")
 
@@ -261,7 +267,8 @@ def main() -> int:
     if unknown:
         ap.error(f"unknown studies: {', '.join(unknown)} (choose from {', '.join(STUDIES)})")
     main_studies = None if args.studies is None else [
-        s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES and s not in LISA_STUDIES]
+        s for s in args.studies if s not in SPATIAL_STUDIES and s not in DESIGN_STUDIES and s not in LISA_STUDIES
+        and s not in SPREG_VALIDATION_STUDIES]
     groups = []
     if main_studies is None or main_studies:
         groups.append(("main", main_studies))
@@ -275,6 +282,11 @@ def main() -> int:
     lisa = [] if args.studies is None else [s for s in args.studies if s in LISA_STUDIES]
     if lisa:  # Round 16 LISA validation studies: on demand only (info rows)
         groups.append(("lisa", lisa))
+    # Round 16 workstream A (info only): 10-20 min each in the full configuration,
+    # so they run only when named with --studies (docs/audits/CHECK_MAP.md)
+    spreg16 = [s for s in SPREG_VALIDATION_STUDIES if args.studies is not None and s in args.studies]
+    if spreg16:
+        groups.append(("spreg_validation", spreg16))
     frames = _run_groups(groups, args.fast, jobs, lambda m: print(m, flush=True))
     frames = [f for f in frames if f is not None and len(f)]
     df = _pd.concat(frames, ignore_index=True) if frames else _pd.DataFrame(
