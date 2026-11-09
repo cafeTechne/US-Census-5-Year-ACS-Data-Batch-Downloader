@@ -1,6 +1,6 @@
 # ACS sampling-error covariance between areas (VRE replicates)
 
-Generated 2026-11-09 06:54 UTC by `scripts/acs_error_covariance.py` (commit v0.14.0-29-g1847007-dirty, 10.0 min). PLAN_ROUND_16 workstream C (C1-C2). Status: **info** (gates nothing). Per-class numbers: `docs/audits/acs_sampling_covariance.csv` (written by the script; git-ignored like the other audit CSVs).
+Generated 2026-11-09 15:28 UTC by `scripts/acs_error_covariance.py` (commit v0.15.0-1-g981e832-dirty, 9.2 min). PLAN_ROUND_16 workstream C (C1-C2). Status: **info** (gates nothing). Per-class numbers: `docs/audits/acs_sampling_covariance.csv` (written by the script; git-ignored like the other audit CSVs).
 
 ## Question
 
@@ -38,6 +38,7 @@ Releases 2020-2024, 2015-2019; states Michigan (26) and New York (36). Files (ca
 | VRE | 2024 | county | `B17001.csv.zip` | `3d24fa18e9f005b3c9455d3bda4a4ab843eb8f443d423b56b00496b58ad0c605` |
 | VRE | 2024 | county | `B19001.csv.zip` | `95cb48eabcaef5c44fc68377f8b596f31cbb079d846bbea9c6bf7e83ba896d0f` |
 | boundary | 2024 | county | `cb_2024_us_county_500k.zip` | `da4051717caec55c75e3748c3608c2a3dbde8d1ff401bbaf4f952e3c3fb63ef1` |
+| VRE | 2019 | tract | `B01001_26.csv.zip` (substitute for `B01003_26.csv.zip`) | `4ef59dbb65e02ce8de6779cd40d382f3e143a17079b1ffa56dd886f60d72970a` |
 | VRE | 2019 | tract | `B25003_26.csv.zip` | `0b6a3f85d252700385d92a435396f24750d659b89f114e3d6006e525231317d4` |
 | VRE | 2019 | tract | `B17001_26.csv.zip` | `8f6e7fb8d21f80e605d03ce4fab11fc3a372184cb1e550d64b84cf779569d729` |
 | VRE | 2019 | tract | `B19001_26.csv.zip` | `0cd0858b255228c403627e3bd08094950a56e3d15d414446fd77a719ecf99168` |
@@ -53,15 +54,15 @@ Releases 2020-2024, 2015-2019; states Michigan (26) and New York (36). Files (ca
 | VRE | 2019 | county | `B19001.csv.zip` | `56374faae955dd44c9eec5f45c7b2d145781b6271028d714eae6ebafc2f260d3` |
 | boundary | 2019 | county | `cb_2019_us_county_500k.zip` | `1c4b703cd34c3f5e5e6368f91f1bd80de9281ef81ad91e005844848df9976c4b` |
 
-**Unavailable files** (skipped; the variables that need them are not analysed for that state and release, everything else is):
+**Substituted files** (census.replicate.fetch_vre, `VRE_TOTAL_FALLBACKS`):
 
-| year | level | state | table | URL | reason |
+| year | level | state | requested | reason | used instead |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 2019 | tract | Michigan | B01003 | https://www2.census.gov/programs-surveys/acs/replicate_estimates/2019/data/5-year/140/B01003_26.csv.zip | census.gov firewall 'Request Rejected' page (support ID 13979921158196382640), also on the single delayed retry |
+| 2019 | tract | Michigan | https://www2.census.gov/programs-surveys/acs/replicate_estimates/2019/data/5-year/140/B01003_26.csv.zip | census.gov firewall 'Request Rejected' page (support ID 13979921158196382640) | B01003_001 = B01001_001 of https://www2.census.gov/programs-surveys/acs/replicate_estimates/2019/data/5-year/140/B01001_26.csv.zip |
 
-A rejection of one specific URL can persist while every other file in the same directory downloads normally, so it is not retried further. To include such a file, download it in a browser and save it as `$CENSUS_VRE_DIR/2019/140/B01003_26.csv.zip` (default `$CENSUS_VRE_DIR` = `.cache/vre`); census.replicate then records its SHA-256 with source 'manual download' and the report marks it.
+Basis: B01003 line 1 (Total population) equals B01001 line 1 (Total:) cell for cell: verified 2026-11-09 on the 2015-2019 New York tract VRE files (4,918 tracts; ESTIMATE, MOE and Var_Rep1-80 identical, 0 differing cells); re-checked by tests/test_replicate_live.py (CENSUS_LIVE_TESTS=1). The substitute file's SHA-256 is the one listed above.
 
-Versions: census-acs-toolkit 0.14.0, python 3.14.4, numpy 2.5.4, scipy 1.18.1, pandas 3.1.1, geopandas 1.2.0, libpysal 4.15.1
+Versions: census-acs-toolkit 0.15.1, python 3.14.4, numpy 2.5.4, scipy 1.18.1, pandas 3.1.1, geopandas 1.2.0, libpysal 4.15.1
 
 Areas analysed (after exclusions):
 
@@ -89,6 +90,7 @@ Areas analysed (after exclusions):
 | 2024 | New York | county | poverty_rate | proportion | 62 | 62 | 0 |  |
 | 2024 | New York | county | owner_share | proportion | 62 | 62 | 0 |  |
 | 2024 | New York | county | median_hh_income | median | 62 | 62 | 0 | 0 top/bottom-coded medians excluded |
+| 2019 | Michigan | tract | population | count | 2772 | 2754 | 18 |  |
 | 2019 | Michigan | tract | households | count | 2772 | 2738 | 34 |  |
 | 2019 | Michigan | tract | poverty_count | count | 2772 | 2736 | 36 |  |
 | 2019 | Michigan | tract | poverty_rate | proportion | 2772 | 2734 | 8 |  |
@@ -111,7 +113,7 @@ Areas analysed (after exclusions):
 | 2019 | New York | county | owner_share | proportion | 62 | 62 | 0 |  |
 | 2019 | New York | county | median_hh_income | median | 62 | 62 | 0 | 0 top/bottom-coded medians excluded |
 
-Skipped: 2024 Michigan county population: 83 controlled (no sampling error); 2024 New York county population: 62 controlled (no sampling error); 2019 Michigan tract population: VRE file B01003 unavailable (see Data: unavailable files); 2019 Michigan county population: 83 controlled (no sampling error); 2019 New York county population: 62 controlled (no sampling error).
+Skipped: 2024 Michigan county population: 83 controlled (no sampling error); 2024 New York county population: 62 controlled (no sampling error); 2019 Michigan county population: 83 controlled (no sampling error); 2019 New York county population: 62 controlled (no sampling error).
 
 ## Results 2020-2024
 
@@ -542,6 +544,7 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 
 | state | variable | order 1 | order 2 | order 3 | beyond order 3 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | population | -0.066 [-0.088, -0.044] (n=8661) | -0.014 [-0.017, -0.011] (n=20170) | -0.004 [-0.005, -0.003] (n=34283) | -0.000 [-0.001, -0.000] (n=235969) |
 | Michigan | households | 0.025 [0.016, 0.033] (n=8614) | 0.006 [0.000, 0.013] (n=20000) | 0.001 [-0.002, 0.005] (n=33974) | -0.000 [-0.001, 0.001] (n=234537) |
 | Michigan | poverty_count | -0.004 [-0.007, -0.001] (n=8601) | -0.002 [-0.004, 0.000] (n=19957) | 0.000 [-0.002, 0.002] (n=33911) | -0.000 [-0.000, 0.000] (n=234178) |
 | Michigan | poverty_rate | -0.000 [-0.003, 0.003] (n=8581) | -0.001 [-0.003, 0.001] (n=19916) | 0.000 [-0.002, 0.002] (n=33847) | 0.000 [-0.001, 0.001] (n=233863) |
@@ -573,6 +576,7 @@ Mean pairwise r [95% interval] (number of pairs) by queen contiguity order.
 
 | state | variable | order 1 / within county | order 1 / across county | order 2 / within county | order 2 / across county | beyond order 3 / within county | beyond order 3 / across county |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | population | -0.075 [-0.103, -0.046] (n=7608) | -0.005 [-0.014, 0.004] (n=1053) | -0.019 [-0.026, -0.013] (n=14988) | 0.001 [-0.003, 0.005] (n=5182) | -0.001 [-0.001, 0.000] (n=146947) | -0.000 [-0.001, 0.001] (n=89022) |
 | Michigan | households | 0.028 [0.020, 0.035] (n=7563) | 0.001 [-0.012, 0.014] (n=1051) | 0.008 [0.001, 0.016] (n=14828) | 0.001 [-0.003, 0.005] (n=5172) | -0.001 [-0.003, 0.002] (n=146625) | 0.000 [-0.001, 0.001] (n=87912) |
 | Michigan | poverty_count | -0.005 [-0.008, -0.002] (n=7549) | 0.001 [-0.007, 0.010] (n=1052) | -0.001 [-0.003, 0.001] (n=14793) | -0.003 [-0.008, 0.001] (n=5164) | 0.000 [-0.000, 0.001] (n=146388) | -0.001 [-0.002, 0.000] (n=87790) |
 | Michigan | poverty_rate | -0.000 [-0.003, 0.002] (n=7531) | 0.001 [-0.007, 0.009] (n=1050) | 0.000 [-0.002, 0.003] (n=14758) | -0.003 [-0.007, 0.002] (n=5158) | 0.001 [0.000, 0.001] (n=146203) | -0.001 [-0.002, 0.000] (n=87660) |
@@ -591,6 +595,7 @@ Tracts:
 
 | state | variable | order 1 rook (shared edge) | order 1 queen-only (corner) |
 | :--- | :--- | :--- | :--- |
+| Michigan | population | -0.075 [-0.099, -0.051] (n=7076) | -0.028 [-0.035, -0.020] (n=1585) |
 | Michigan | households | 0.025 [0.017, 0.034] (n=7033) | 0.021 [0.009, 0.033] (n=1581) |
 | Michigan | poverty_count | -0.005 [-0.008, -0.001] (n=7018) | -0.002 [-0.008, 0.004] (n=1583) |
 | Michigan | poverty_rate | -0.000 [-0.003, 0.003] (n=7001) | 0.001 [-0.006, 0.007] (n=1580) |
@@ -624,6 +629,7 @@ Tracts:
 
 | state | variable | 0-2 km | 2-5 km | 5-10 km | 10-20 km | 20-50 km | 50-100 km | 100-inf km |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | population | -0.039 [-0.078, 0.001] (n=3830) | -0.021 [-0.050, 0.008] (n=19110) | -0.008 [-0.019, 0.003] (n=35824) | -0.002 [-0.005, 0.001] (n=69777) | -0.001 [-0.004, 0.002] (n=91586) | -0.000 [-0.003, 0.002] (n=20557) | -0.000 [-0.001, 0.001] (n=58399) |
 | Michigan | households | 0.032 [0.006, 0.058] (n=3786) | 0.014 [0.005, 0.023] (n=18947) | 0.003 [0.001, 0.006] (n=35548) | -0.002 [-0.005, 0.002] (n=69531) | -0.001 [-0.003, 0.000] (n=91378) | -0.001 [-0.004, 0.002] (n=20313) | 0.001 [-0.001, 0.002] (n=57622) |
 | Michigan | poverty_count | -0.003 [-0.010, 0.004] (n=3789) | -0.002 [-0.005, 0.001] (n=18945) | -0.001 [-0.002, -0.000] (n=35516) | 0.000 [-0.001, 0.001] (n=69418) | 0.000 [-0.000, 0.001] (n=91157) | -0.000 [-0.003, 0.002] (n=20216) | -0.000 [-0.002, 0.001] (n=57606) |
 | Michigan | poverty_rate | 0.001 [-0.006, 0.008] (n=3778) | -0.001 [-0.002, 0.001] (n=18895) | -0.001 [-0.002, 0.000] (n=35416) | 0.001 [-0.000, 0.001] (n=69298) | 0.000 [-0.000, 0.001] (n=91079) | -0.001 [-0.003, 0.002] (n=20196) | -0.000 [-0.002, 0.001] (n=57545) |
@@ -655,6 +661,7 @@ Counties:
 
 | state | variable | counties | tracts | pooled ratio (SE) | median county ratio | implied mean within-county r (SE) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | population | 83 | 2754 | 0.000 (0.000) | 0.000 | -0.0046 (0.0000) |
 | Michigan | households | 82 | 2737 | 0.902 (0.053) | 0.798 | -0.0006 (0.0003) |
 | Michigan | poverty_count | 83 | 2736 | 0.886 (0.043) | 0.939 | -0.0006 (0.0002) |
 | New York | population | 62 | 4854 | 0.000 (0.000) | 0.000 | -0.0032 (0.0000) |
@@ -669,11 +676,12 @@ Michigan x New York pairs (independent samples):
 
 | geography | variable | pairs | mean r (SE) | SD of r | 95% |r| | share |r| > analytic critical |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| tract | households | 50000 | 0.0003 (0.0005) | 0.116 | 0.229 | 0.060 |
-| tract | poverty_count | 50000 | -0.0005 (0.0004) | 0.115 | 0.231 | 0.062 |
-| tract | poverty_rate | 50000 | -0.0007 (0.0004) | 0.116 | 0.234 | 0.063 |
-| tract | owner_share | 50000 | -0.0002 (0.0004) | 0.115 | 0.226 | 0.058 |
-| tract | median_hh_income | 50000 | 0.0014 (0.0005) | 0.116 | 0.227 | 0.059 |
+| tract | population | 50000 | -0.0006 (0.0006) | 0.115 | 0.224 | 0.056 |
+| tract | households | 50000 | 0.0000 (0.0004) | 0.116 | 0.228 | 0.060 |
+| tract | poverty_count | 50000 | 0.0000 (0.0004) | 0.116 | 0.234 | 0.064 |
+| tract | poverty_rate | 50000 | -0.0001 (0.0005) | 0.116 | 0.232 | 0.063 |
+| tract | owner_share | 50000 | 0.0001 (0.0005) | 0.115 | 0.224 | 0.056 |
+| tract | median_hh_income | 50000 | 0.0004 (0.0004) | 0.115 | 0.223 | 0.056 |
 | county | households | 5146 | 0.0285 (0.0028) | 0.120 | 0.240 | 0.078 |
 | county | poverty_count | 5146 | 0.0055 (0.0020) | 0.116 | 0.228 | 0.061 |
 | county | poverty_rate | 5146 | 0.0055 (0.0020) | 0.116 | 0.229 | 0.063 |
@@ -684,6 +692,7 @@ Derangement null on far pairs (same state, beyond order 3):
 
 | state | geography | variable | pairs | mean | SD | 95% |r| |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | tract | population | 235969 | 0.0000 | 0.112 | 0.219 |
 | Michigan | tract | households | 234537 | 0.0004 | 0.113 | 0.222 |
 | Michigan | tract | poverty_count | 234178 | 0.0002 | 0.112 | 0.219 |
 | Michigan | tract | poverty_rate | 233863 | 0.0003 | 0.112 | 0.219 |
@@ -710,6 +719,7 @@ Replicate design spectrum (lowest eigenvalues relative to the mean; Marchenko-Pa
 
 | state | geography | variable | lowest 4 eigenvalues (MP edge) | near-null | effective replicates | null SD 1/sqrt(eff.) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | tract | population | 0.042 0.050 0.077 0.432 (0.688) | 3 | 77 | 0.114 |
 | Michigan | tract | households | 0.052 0.054 0.078 0.400 (0.687) | 3 | 77 | 0.114 |
 | Michigan | tract | poverty_count | 0.025 0.025 0.052 0.410 (0.687) | 3 | 77 | 0.114 |
 | Michigan | tract | poverty_rate | 0.026 0.026 0.054 0.409 (0.687) | 3 | 77 | 0.114 |
@@ -736,50 +746,54 @@ Spread of pairwise r per class: SD, excess SD over the analytic null (sqrt(SD^2 
 
 | state | geography | variable | class | SD of r | excess SD (analytic) | excess SD (cross-state) | share |r| > crit |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | tract | population | order 1 | 0.185 | 0.148 | 0.145 | 0.163 |
+| Michigan | tract | population | order 2 | 0.126 | 0.059 | 0.053 | 0.076 |
+| Michigan | tract | population | order 3 | 0.119 | 0.040 | 0.031 | 0.063 |
+| Michigan | tract | population | beyond order 3 | 0.115 | 0.028 | 0.012 | 0.058 |
 | Michigan | tract | households | order 1 | 0.140 | 0.085 | 0.079 | 0.115 |
-| Michigan | tract | households | order 2 | 0.124 | 0.054 | 0.044 | 0.076 |
-| Michigan | tract | households | order 3 | 0.119 | 0.041 | 0.026 | 0.066 |
-| Michigan | tract | households | beyond order 3 | 0.117 | 0.034 | 0.011 | 0.061 |
+| Michigan | tract | households | order 2 | 0.124 | 0.054 | 0.043 | 0.076 |
+| Michigan | tract | households | order 3 | 0.119 | 0.041 | 0.025 | 0.066 |
+| Michigan | tract | households | beyond order 3 | 0.117 | 0.034 | 0.010 | 0.061 |
 | Michigan | tract | poverty_count | order 1 | 0.114 | 0.024 | 0.000 | 0.061 |
-| Michigan | tract | poverty_count | order 2 | 0.116 | 0.030 | 0.010 | 0.064 |
-| Michigan | tract | poverty_count | order 3 | 0.115 | 0.029 | 0.007 | 0.064 |
-| Michigan | tract | poverty_count | beyond order 3 | 0.116 | 0.031 | 0.013 | 0.064 |
+| Michigan | tract | poverty_count | order 2 | 0.116 | 0.030 | 0.000 | 0.064 |
+| Michigan | tract | poverty_count | order 3 | 0.115 | 0.029 | 0.000 | 0.064 |
+| Michigan | tract | poverty_count | beyond order 3 | 0.116 | 0.031 | 0.008 | 0.064 |
 | Michigan | tract | poverty_rate | order 1 | 0.114 | 0.023 | 0.000 | 0.060 |
 | Michigan | tract | poverty_rate | order 2 | 0.116 | 0.030 | 0.000 | 0.062 |
 | Michigan | tract | poverty_rate | order 3 | 0.116 | 0.030 | 0.000 | 0.062 |
-| Michigan | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.005 | 0.063 |
-| Michigan | tract | owner_share | order 1 | 0.115 | 0.027 | 0.000 | 0.058 |
+| Michigan | tract | poverty_rate | beyond order 3 | 0.116 | 0.030 | 0.006 | 0.063 |
+| Michigan | tract | owner_share | order 1 | 0.115 | 0.027 | 0.010 | 0.058 |
 | Michigan | tract | owner_share | order 2 | 0.115 | 0.025 | 0.000 | 0.058 |
-| Michigan | tract | owner_share | order 3 | 0.115 | 0.028 | 0.006 | 0.059 |
-| Michigan | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.009 | 0.059 |
+| Michigan | tract | owner_share | order 3 | 0.115 | 0.028 | 0.013 | 0.059 |
+| Michigan | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.014 | 0.059 |
 | Michigan | tract | median_hh_income | order 1 | 0.113 | 0.019 | 0.000 | 0.055 |
-| Michigan | tract | median_hh_income | order 2 | 0.116 | 0.032 | 0.009 | 0.060 |
-| Michigan | tract | median_hh_income | order 3 | 0.116 | 0.029 | 0.000 | 0.058 |
-| Michigan | tract | median_hh_income | beyond order 3 | 0.115 | 0.027 | 0.000 | 0.057 |
-| New York | tract | population | order 1 | 0.173 | 0.133 | - | 0.122 |
-| New York | tract | population | order 3 | 0.118 | 0.038 | - | 0.060 |
-| New York | tract | population | order 2 | 0.124 | 0.053 | - | 0.069 |
-| New York | tract | population | beyond order 3 | 0.115 | 0.029 | - | 0.058 |
+| Michigan | tract | median_hh_income | order 2 | 0.116 | 0.032 | 0.019 | 0.060 |
+| Michigan | tract | median_hh_income | order 3 | 0.116 | 0.029 | 0.015 | 0.058 |
+| Michigan | tract | median_hh_income | beyond order 3 | 0.115 | 0.027 | 0.009 | 0.057 |
+| New York | tract | population | order 1 | 0.173 | 0.133 | 0.130 | 0.122 |
+| New York | tract | population | order 3 | 0.118 | 0.038 | 0.028 | 0.060 |
+| New York | tract | population | order 2 | 0.124 | 0.053 | 0.046 | 0.069 |
+| New York | tract | population | beyond order 3 | 0.115 | 0.029 | 0.013 | 0.058 |
 | New York | tract | households | order 1 | 0.131 | 0.067 | 0.059 | 0.090 |
-| New York | tract | households | order 3 | 0.118 | 0.038 | 0.021 | 0.065 |
-| New York | tract | households | order 2 | 0.120 | 0.044 | 0.030 | 0.069 |
-| New York | tract | households | beyond order 3 | 0.117 | 0.033 | 0.009 | 0.061 |
-| New York | tract | poverty_count | order 1 | 0.115 | 0.028 | 0.005 | 0.063 |
+| New York | tract | households | order 3 | 0.118 | 0.038 | 0.020 | 0.065 |
+| New York | tract | households | order 2 | 0.120 | 0.044 | 0.029 | 0.069 |
+| New York | tract | households | beyond order 3 | 0.117 | 0.033 | 0.006 | 0.061 |
+| New York | tract | poverty_count | order 1 | 0.115 | 0.028 | 0.000 | 0.063 |
 | New York | tract | poverty_count | order 3 | 0.115 | 0.027 | 0.000 | 0.062 |
-| New York | tract | poverty_count | order 2 | 0.116 | 0.029 | 0.008 | 0.064 |
-| New York | tract | poverty_count | beyond order 3 | 0.115 | 0.029 | 0.007 | 0.064 |
+| New York | tract | poverty_count | order 2 | 0.116 | 0.029 | 0.000 | 0.064 |
+| New York | tract | poverty_count | beyond order 3 | 0.115 | 0.029 | 0.000 | 0.064 |
 | New York | tract | poverty_rate | order 1 | 0.115 | 0.027 | 0.000 | 0.066 |
 | New York | tract | poverty_rate | order 3 | 0.115 | 0.027 | 0.000 | 0.062 |
 | New York | tract | poverty_rate | order 2 | 0.115 | 0.029 | 0.000 | 0.062 |
 | New York | tract | poverty_rate | beyond order 3 | 0.115 | 0.029 | 0.000 | 0.063 |
-| New York | tract | owner_share | order 1 | 0.115 | 0.025 | 0.000 | 0.059 |
-| New York | tract | owner_share | order 3 | 0.116 | 0.029 | 0.009 | 0.059 |
-| New York | tract | owner_share | order 2 | 0.115 | 0.028 | 0.003 | 0.059 |
-| New York | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.008 | 0.059 |
-| New York | tract | median_hh_income | order 1 | 0.115 | 0.029 | 0.000 | 0.059 |
-| New York | tract | median_hh_income | order 3 | 0.115 | 0.028 | 0.000 | 0.057 |
-| New York | tract | median_hh_income | order 2 | 0.115 | 0.027 | 0.000 | 0.057 |
-| New York | tract | median_hh_income | beyond order 3 | 0.115 | 0.027 | 0.000 | 0.058 |
+| New York | tract | owner_share | order 1 | 0.115 | 0.025 | 0.003 | 0.059 |
+| New York | tract | owner_share | order 3 | 0.116 | 0.029 | 0.014 | 0.059 |
+| New York | tract | owner_share | order 2 | 0.115 | 0.028 | 0.012 | 0.059 |
+| New York | tract | owner_share | beyond order 3 | 0.115 | 0.029 | 0.014 | 0.059 |
+| New York | tract | median_hh_income | order 1 | 0.115 | 0.029 | 0.014 | 0.059 |
+| New York | tract | median_hh_income | order 3 | 0.115 | 0.028 | 0.011 | 0.057 |
+| New York | tract | median_hh_income | order 2 | 0.115 | 0.027 | 0.008 | 0.057 |
+| New York | tract | median_hh_income | beyond order 3 | 0.115 | 0.027 | 0.009 | 0.058 |
 | Michigan | county | households | order 1 | 0.124 | 0.054 | 0.032 | 0.096 |
 | Michigan | county | households | order 3 | 0.115 | 0.027 | 0.000 | 0.064 |
 | Michigan | county | households | order 2 | 0.117 | 0.033 | 0.000 | 0.062 |
@@ -827,6 +841,10 @@ Per class: half-A and half-B class means (random split), and the reliability of 
 
 | state | geography | variable | class | pairs | mean (half A) | mean (half B) | reliability (random / odd-even / first-last) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | tract | population | order 1 | 8661 | -0.067 | -0.064 | 0.64 / 0.65 / 0.64 |
+| Michigan | tract | population | order 2 | 20170 | -0.013 | -0.015 | 0.21 / 0.22 / 0.22 |
+| Michigan | tract | population | order 3 | 34283 | -0.005 | -0.004 | 0.12 / 0.11 / 0.10 |
+| Michigan | tract | population | beyond order 3 | 235969 | -0.001 | -0.000 | 0.06 / 0.06 / 0.03 |
 | Michigan | tract | households | order 1 | 8614 | 0.022 | 0.027 | 0.37 / 0.37 / 0.35 |
 | Michigan | tract | households | order 2 | 20000 | 0.005 | 0.007 | 0.19 / 0.19 / 0.20 |
 | Michigan | tract | households | order 3 | 33974 | 0.001 | 0.002 | 0.11 / 0.12 / 0.13 |
@@ -918,6 +936,18 @@ Mean r per class in each release (different tract vintages: 2010 tracts in 2015-
 
 | state | geography | variable | class | 2019 | 2024 | difference (SE) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Michigan | tract | population | order 1 | -0.066 [-0.088, -0.044] | -0.071 [-0.090, -0.052] | -0.004 (0.015) |
+| Michigan | tract | population | order 2 | -0.014 [-0.017, -0.011] | -0.014 [-0.017, -0.011] | 0.000 (0.002) |
+| Michigan | tract | population | order 3 | -0.004 [-0.005, -0.003] | -0.004 [-0.005, -0.003] | 0.000 (0.001) |
+| Michigan | tract | population | beyond order 3 | -0.000 [-0.001, -0.000] | -0.001 [-0.001, 0.000] | -0.000 (0.000) |
+| Michigan | tract | population | order 1 / within county | -0.075 [-0.103, -0.046] | -0.081 [-0.106, -0.056] | -0.006 (0.019) |
+| Michigan | tract | population | order 2 / within county | -0.019 [-0.026, -0.013] | -0.018 [-0.024, -0.012] | 0.001 (0.005) |
+| Michigan | tract | population | order 2 / across county | 0.001 [-0.003, 0.005] | -0.001 [-0.005, 0.002] | -0.002 (0.003) |
+| Michigan | tract | population | order 1 / across county | -0.005 [-0.014, 0.004] | 0.003 [-0.007, 0.014] | 0.008 (0.007) |
+| Michigan | tract | population | order 3 / across county | -0.000 [-0.003, 0.002] | 0.001 [-0.001, 0.003] | 0.001 (0.001) |
+| Michigan | tract | population | order 3 / within county | -0.007 [-0.009, -0.004] | -0.007 [-0.009, -0.006] | -0.001 (0.001) |
+| Michigan | tract | population | beyond order 3 / within county | -0.001 [-0.001, 0.000] | -0.001 [-0.001, -0.000] | -0.000 (0.000) |
+| Michigan | tract | population | beyond order 3 / across county | -0.000 [-0.001, 0.001] | 0.000 [-0.001, 0.001] | 0.000 (0.001) |
 | Michigan | tract | households | order 1 | 0.025 [0.016, 0.033] | -0.025 [-0.033, -0.017] | -0.050 (0.006) |
 | Michigan | tract | households | order 2 | 0.006 [0.000, 0.013] | -0.008 [-0.011, -0.004] | -0.014 (0.004) |
 | Michigan | tract | households | order 3 | 0.001 [-0.002, 0.005] | -0.003 [-0.005, -0.002] | -0.005 (0.002) |
@@ -1151,19 +1181,27 @@ stated). r is the replicate correlation of two areas' sampling errors.
    scored on held-out replicates after removing the design directions, it is worse than independence
    for every variable (-25 to -50 nats for tracts). Without that projection it appeared to gain 30-90
    nats, entirely from the cross-half dependence created by the near-null design directions.
-6. **Stability across releases (tracts and counties, 2015-2019 vs 2020-2024).** One 2015-2019 file is
-   missing: Michigan tract total population (`2019/data/5-year/140/B01003_26.csv.zip`). census.gov's
-   firewall answered that one URL with its 'Request Rejected' page (support ID 13979921158196382640) on
-   the first request and on the single delayed retry, while every other 2019 tract file, including New
-   York's B01003_36 from the same directory, downloaded normally; the rejection is URL-specific, not
-   rate limiting (see Data: unavailable files). So the 2015-2019 tract comparison has no Michigan
-   population row; everything else was analysed. Results: (a) **Uncontrolled variables are stable.**
+6. **Stability across releases (tracts and counties, 2015-2019 vs 2020-2024).** One 2015-2019 file,
+   Michigan tract total population (`2019/data/5-year/140/B01003_26.csv.zip`), is refused by census.gov's
+   firewall ('Request Rejected', support ID 13979921158196382640) for every client, while every other
+   2019 tract file, including New York's B01003_36 from the same directory, downloads normally. Its only
+   line is read instead from line 1 ("Total:") of the same release's Michigan tract B01001 file
+   (B01001_26; see Data: substituted files). The two lines are the same total population: in the New York
+   2015-2019 tract files B01003 line 1 and B01001 line 1 agree in ESTIMATE, MOE and all 80 replicates for
+   all 4,918 tracts (0 differing cells), a check re-run by tests/test_replicate_live.py. All variables are
+   therefore analysed in both states and releases. Results: (a) **Uncontrolled variables are stable.**
    Poverty count, poverty rate, owner share and median income stay at 0 to within +/-0.005 at every order
    in both states and releases; of 108 tract class comparisons for them, 3 differ by more than 2 combined
-   SEs (about 5 expected by chance; largest |z| 2.5, all differences <= 0.004). (b) **Population (New
-   York) is stable**: order 1 -0.039 [-0.060, -0.018] in 2015-2019 vs -0.040 [-0.060, -0.020] (within
-   county -0.042 vs -0.043), the same fast decay, a county aggregation ratio of 0.000 again (tract errors
-   sum to zero within a county), and split-half pair reliability 0.60 (2020-2024: 0.61). (c)
+   SEs (about 5 expected by chance; largest |z| 2.5, all differences <= 0.004). (b) **Population is stable
+   in both states.** New York: order 1 -0.039 [-0.060, -0.018] in 2015-2019 vs -0.040 [-0.060, -0.020]
+   (within county -0.042 vs -0.043), the same fast decay, a county aggregation ratio of 0.000 again (tract
+   errors sum to zero within a county), and split-half pair reliability 0.60 (2020-2024: 0.61). Michigan
+   (B01001 line 1): order 1 -0.066 [-0.088, -0.044] vs -0.071 [-0.090, -0.052]; within county -0.075
+   [-0.103, -0.046] vs -0.081 [-0.106, -0.056]; across county -0.005 [-0.014, 0.004] vs +0.003 [-0.007,
+   0.014]; order 2 within county -0.019 vs -0.018; rook vs corner-only -0.075 vs -0.028 (2020-2024: -0.080
+   vs -0.029); aggregation ratio 0.000 in both releases; split-half pair reliability at order 1 0.64
+   (2020-2024: 0.67). Every Michigan population class difference between releases is at most 0.008
+   (order 1 across county, 1.1 combined SEs). As in 2020-2024, Michigan's within-county order-1 correlation is nearly twice New York's. (c)
    **Households change sign.** Occupied housing units (B25003_001) in 2015-2019 have *positive* mean r
    between neighbouring tracts in the same county - Michigan order 1 +0.025 [0.016, 0.033] (within county
    +0.028), New York +0.012 [0.003, 0.020] - against -0.025 and -0.015 in 2020-2024 (differences 8.4 and
@@ -1209,8 +1247,8 @@ analyses map it is indistinguishable from zero.**
   stress tests outside the observed range, not plausible ACS conditions for these variables; the
   realistic end of the grid is -0.1..0.05. Correlated-error scenarios with large positive rho should be
   stated as hypothetical (for example for variables or survey designs not studied here).
-* Limits: two states, two releases at tract level (2015-2019 without Michigan population: firewall
-  rejection of that one file), 80 replicates (about 77 effective), and counties as a proxy for weighting
+* Limits: two states, two releases at tract level (2015-2019 Michigan population read from B01001 line
+  1, verified identical to B01003 line 1; Findings 6), 80 replicates (about 77 effective), and counties as a proxy for weighting
   areas. The 95% |r| of 0.23 for a single pair means no individual pair can be
   flagged; only class means are evidence.
 
