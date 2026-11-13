@@ -1,0 +1,17 @@
+{
+  "scope": "Post-hoc single-case integration follow-up; separate from the original frozen four-run experiment",
+  "reason": "Gemma returned exact correct fields wrapped in Markdown fences in both original runs",
+  "change": "JSON-object response mode requested only for final phase; original settings, token limit, question and scorer retained",
+  "model": "gemma4:e4b",
+  "case": "false_diagonal_formula",
+  "attempts": 1,
+  "source_sha256": {
+    "census/verification.py": "b6dc94fad321578b39729eb826cc7fc716b2161ca78980824547bb9f3b954c50",
+    "census/workflows_verification.py": "885840bba5db63c27616da523c58ee9739085989bc1cf71cede7ae13eed23f1a",
+    "census/mcp_profiles.py": "64f38dd7e614d6e246c05e9ebe7e5c40787f6edb30b8eb3a1620006f5f768904",
+    "mcp_server.py": "8b0c11c399d6de8a39e2ab2decd08fb3c1e77da2745852a8a391c3555b2bde4c",
+    "scripts/verification_eval.py": "b33da2dbdd817950e4fba7b8bd58669a4c96050e81761553e5fb5e45ac6d0525",
+    "scripts/verification_live.py": "96717f7dadd1c320ab7842d3739a1412e1720c2fc7c352f801580a1fe84ab40e",
+    "scripts/local_model_eval.py": "610ebee6e6e4ed389e0ea7ade1681888f395c01859cee1ff651d21c145946546"
+  }
+}

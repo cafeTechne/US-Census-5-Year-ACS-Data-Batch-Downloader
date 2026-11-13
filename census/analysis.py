@@ -64,11 +64,17 @@ def _read(source: Union[str, pd.DataFrame]) -> pd.DataFrame:
     if ext == ".parquet":
         df = pd.read_parquet(path)  # keeps the attrs written by the extraction (decennial evidence)
     elif ext in (".xlsx", ".xls"):
-        df = pd.read_excel(path, dtype={"GEOID": str, "GEO_ID": str})
+        df = pd.read_excel(path, dtype={"GEOID": str, "geoid": str, "GEO_ID": str})
     else:
-        df = pd.read_csv(path, dtype={"GEOID": str, "GEO_ID": str}, low_memory=False)
-    if not _attrs_decennial(df.attrs):
-        df.attrs.update(_extraction_attrs(path))
+        df = pd.read_csv(path, dtype={"GEOID": str, "geoid": str, "GEO_ID": str}, low_memory=False)
+    saved = _extraction_attrs(path)
+    if saved:
+        # Parquet attrs and the extraction sidecar are both explicit evidence;
+        # neither may silently overwrite a conflicting ACS product.
+        identity = pd.DataFrame()
+        identity.attrs = saved
+        _source_identity([df, identity])
+        df.attrs = {**saved, **df.attrs}
     return df
 
 
@@ -79,13 +85,48 @@ def _attrs_decennial(attrs: Mapping[str, Any]) -> bool:
                 or attrs.get("dataset") in DECENNIAL_DATASETS)
 
 
+def _acs_product(attrs: Mapping[str, Any], releases=()) -> Optional[str]:
+    """ACS product from explicit attrs/release labels, or None for legacy inputs."""
+    from .api import dataset_product, normalize_product, require_same_product
+    from .decennial import DECENNIAL_DATASETS, PRODUCT_DECENNIAL
+
+    products = []
+    if attrs.get("product") not in (None, PRODUCT_DECENNIAL):
+        products.append(normalize_product(attrs["product"]))
+    if attrs.get("dataset") and attrs["dataset"] not in DECENNIAL_DATASETS:
+        products.append(dataset_product(attrs["dataset"]))
+    for label in [attrs.get("release"), *list(releases)]:
+        match = re.fullmatch(r"acs([15])_\d{4}(?:\+dec_2020)?", str(label))
+        if match:
+            products.append("1-year" if match[1] == "1" else "5-year")
+    return require_same_product(*products) if products else None
+
+
+def _source_identity(frames: Sequence[pd.DataFrame]) -> Dict[str, Any]:
+    """Keep agreed product identity when stacking/joining source tables."""
+    from .api import require_same_product
+
+    products = [_acs_product(f.attrs, f["release"] if "release" in f else ()) for f in frames]
+    known = [p for p in products if p is not None]
+    attrs: Dict[str, Any] = {"product": require_same_product(*known)} if known else {}
+    # Decennial provenance is tracked per column below; marking a mixed frame
+    # globally decennial would misclassify unrelated caller-supplied counts.
+    datasets = {f.attrs["dataset"] for f, p in zip(frames, products) if p and f.attrs.get("dataset")}
+    if len(datasets) == 1:
+        attrs["dataset"] = datasets.pop()
+    return attrs
+
+
 def _extraction_attrs(path: str) -> Dict[str, Any]:
-    """Decennial attrs for a file written by a decennial run_batch: its ``*_extraction_metadata.json``
-    (in the file's folder or the one above) lists the file among its outputs and names a decennial
-    product; the codebook maps the panel slugs to their codes. Empty for anything else."""
+    """Product attrs from metadata explicitly listing this extraction output.
+
+    For decennial outputs the codebook also identifies count slugs. File names
+    and GEOID lengths alone never establish the ACS product.
+    """
     from .decennial import DECENNIAL_DATASETS, PRODUCT_DECENNIAL
     target = os.path.abspath(path)
     folder = os.path.dirname(target)
+    matched: List[Dict[str, Any]] = []
     for d in (folder, os.path.dirname(folder)):
         for meta_path in sorted(glob.glob(os.path.join(glob.escape(d), "*_extraction_metadata.json"))):
             try:
@@ -96,9 +137,12 @@ def _extraction_attrs(path: str) -> Dict[str, Any]:
             rel = os.path.relpath(target, d).replace(os.sep, "/")
             if not isinstance(meta, dict) or rel not in (meta.get("output_files") or {}):
                 continue
+            out: Dict[str, Any] = {k: meta[k] for k in ("product", "dataset") if meta.get(k)}
             if meta.get("product") != PRODUCT_DECENNIAL and meta.get("dataset") not in DECENNIAL_DATASETS:
-                return {}
-            out: Dict[str, Any] = {"product": PRODUCT_DECENNIAL, "dataset": meta.get("dataset")}
+                _acs_product(out)  # reject inconsistent product/dataset declarations
+                matched.append(out)
+                continue
+            out["product"] = PRODUCT_DECENNIAL
             book = os.path.join(d, os.path.basename(str((meta.get("outputs") or {}).get("codebook") or "")))
             if os.path.isfile(book):
                 try:
@@ -108,8 +152,14 @@ def _extraction_attrs(path: str) -> Dict[str, Any]:
                                              and (parse_variable_code(c) or ("", ""))[1] == "N"}
                 except (OSError, ValueError, KeyError):
                     pass
-            return out
-    return {}
+            matched.append(out)
+    identities = []
+    for attrs in matched:
+        identity = pd.DataFrame()
+        identity.attrs = attrs
+        identities.append(identity)
+    _source_identity(identities)  # conflicting associated sidecars are not resolved by file order
+    return matched[0] if matched else {}
 
 
 def load_source(source: Source) -> pd.DataFrame:
@@ -123,6 +173,7 @@ def load_source(source: Source) -> pd.DataFrame:
     if not items:
         raise ValueError("no source given")
     frames = [_read(s) for s in items]
+    identity = _source_identity(frames)
     dec_columns: List[str] = []
     dec_codes: Dict[str, str] = {}
     for f in frames:
@@ -130,7 +181,7 @@ def load_source(source: Source) -> pd.DataFrame:
             dec_columns += [str(c) for c in f.columns if str(c) not in dec_columns]
             dec_codes.update({str(k): str(v) for k, v in (f.attrs.get("variable_codes") or {}).items()})
     df = pd.concat(frames, ignore_index=True, sort=False)
-    df.attrs = {"decennial_columns": dec_columns, "decennial_codes": dec_codes}
+    df.attrs = {**identity, "decennial_columns": dec_columns, "decennial_codes": dec_codes}
     if "GEOID" not in df.columns:
         if "GEO_ID" in df.columns:
             df["GEOID"] = df["GEO_ID"]
@@ -301,9 +352,10 @@ def analysis_frame(
     codes or analysis-variable names; each entry ``name`` becomes a variable.
     ``keep_columns`` are copied through unchanged (e.g. error-free covariates).
 
-    Provenance: ``release`` column (``acs5_<Year>`` when Year is present, or
-    the ``release`` argument), and ``frame.attrs["variables"]`` recording each
-    variable's source columns, method and concept ID.
+    Provenance: ``release`` uses the explicit argument, existing release column,
+    or the source's ACS product and Year (legacy unlabelled inputs default to
+    ``acs5_<Year>``). Conflicting explicit ACS products are refused.
+    ``frame.attrs["variables"]`` records source columns, method and concept ID.
 
     2020 Census counts are not sample-based: their ``_se`` and ``_cv`` are NaN
     (undefined, never 0) and their method is ``not_sample_based``; release is
@@ -319,6 +371,9 @@ def analysis_frame(
     (``P1_001``).
     """
     df = load_source(source)
+    product = _acs_product(df.attrs, [release] if release else ())
+    if product:
+        df.attrs["product"] = product
     if variables is None:
         var_map: Dict[str, Any] = _default_variables(df, decennial)
     elif isinstance(variables, Mapping):
@@ -370,17 +425,24 @@ def analysis_frame(
 
         notes.append(MIXED_NOTE)
     decennial_only = bool(n_decennial) and n_decennial == len(var_map)
-    if "Year" in out.columns or release or decennial_only:
+    if "Year" in out.columns or release or "release" in df.columns or decennial_only:
         from .decennial import DECENNIAL_YEAR
 
         if decennial_only and ("Year" in out.columns or not release):
             label: Any = f"dec_{DECENNIAL_YEAR}"  # the 2020 Census, whatever the Year column holds
+        elif release:
+            label = release
+        elif "release" in df.columns:
+            label = df["release"].to_numpy()
         elif "Year" not in out.columns:
             label = release
         else:
-            label = "acs5_" + out["Year"].astype(str) + ("+dec_2020" if n_decennial else "")
+            prefix = "acs1_" if product == "1-year" else "acs5_"
+            label = prefix + out["Year"].astype(str) + ("+dec_2020" if n_decennial else "")
         out.insert(len([c for c in ID_COLUMNS if c in out.columns]), "release", label)
     out = out.reset_index(drop=True)
+    if product:
+        out.attrs["product"] = product
     out.attrs["variables"] = info
     out.attrs["notes"] = notes
     out.attrs["derive"] = [dict(e) for e in (derive or [])]
@@ -494,6 +556,11 @@ def attach_replicates(
     ``v_se``/``v_cv`` become exact replicate values and ``v_method`` becomes
     ``replicate`` for every row where replicates exist.
     """
+    from .replicate import check_vre_product
+
+    product = _acs_product(frame.attrs, frame["release"] if "release" in frame else ())
+    if product:
+        check_vre_product(product)
     reps = _replicate_long(replicates)
     keys = _units(frame, reps)
     available = set(reps["variable"])
@@ -531,8 +598,12 @@ def attach_replicates(
         if name in out.columns:
             diff = np.abs(cube[0] - out[name].to_numpy(float))
             scale = np.maximum(np.abs(out[name].to_numpy(float)), 1.0)
-            if np.nanmax(np.where(has, diff / scale, 0.0), initial=0.0) > 1e-6:
-                notes.append(f"{name}: replicate-table estimate differs from the frame estimate for some rows")
+            # Published values are rounded independently; tolerate half a
+            # displayed unit, as geographical aggregation already does.
+            mismatch = has & (diff > 0.5 + 1e-9 * scale)
+            if mismatch.any():
+                raise ValueError(f"{name}: replicate-table estimate differs from the frame estimate; "
+                                 "check the product, release and any value adjustments")
         if replace_se and name in out.columns:
             se = replicate_se(cube[0], cube[1:].T)
             est = out[name].to_numpy(float)

@@ -17,8 +17,10 @@ import hashlib
 import json
 import math
 import shutil
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -93,6 +95,43 @@ def latex_escape(text: Any) -> str:
     return "".join(_LATEX_ESC.get(c, c) for c in str(text))
 
 
+def _artifact_name(name: str) -> None:
+    """Require one portable filename component; labels never select a path."""
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    reserved.update(f"{prefix}{number}" for prefix in ("COM", "LPT") for number in "123456789¹²³")
+    if (not isinstance(name, str) or not name or name in (".", "..")
+            or name.endswith((".", " "))
+            or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF or c in '/\\<>:"|?*' for c in name)
+            or name.split(".")[0].upper() in reserved):
+        raise ValueError(f"Artifact name {name!r} must be one portable filename component")
+
+
+def _artifact_names(items: Mapping[str, Any]) -> None:
+    seen = set()
+    for name in items:
+        _artifact_name(name)
+        key = name.casefold()
+        if key in seen:
+            raise ValueError(f"Artifact names collide on a case-insensitive filesystem: {name!r}")
+        seen.add(key)
+
+
+def _figure_files(name, output):
+    if not isinstance(output.name, str) or not output.name:
+        raise ValueError("FigureOutput.name must identify its source filename prefix")
+    files = {}
+    for kind, path in output.paths.items():
+        source = Path(path)
+        if not source.name.startswith(output.name):
+            raise ValueError(f"Figure file {source.name!r} does not match source name {output.name!r}")
+        target = f"{name}{source.name[len(output.name):]}"
+        _artifact_name(target)
+        if not source.is_file():
+            raise FileNotFoundError(f"Figure source file not found: {source}")
+        files[kind] = (source, target)
+    return files
+
+
 @dataclass
 class ReportTable:
     """``display`` (strings) is rendered; ``data`` (numbers) goes to CSV."""
@@ -143,6 +182,7 @@ class ReportTable:
         return out
 
     def write(self, folder: Union[str, Path], name: str) -> Dict[str, str]:
+        _artifact_name(name)
         out = Path(folder)
         out.mkdir(parents=True, exist_ok=True)
         paths = {}
@@ -392,6 +432,15 @@ def correlation_table(
 FigureSpec = Union[Any, Tuple[Callable[..., Any], Mapping[str, Any]]]
 
 
+def _require_empty_bundle(folder: Union[str, Path]) -> Path:
+    """Refuse existing artifacts before any part of a new bundle is written."""
+    root = Path(folder)
+    if root.exists() and (not root.is_dir() or next(root.iterdir(), None) is not None):
+        raise ValueError(f"Results bundle destination must be fresh or empty: {root}. "
+                         "Choose a new folder; existing files are preserved.")
+    return root
+
+
 def results_bundle(
     folder: Union[str, Path], *, tables: Optional[Mapping[str, ReportTable]] = None,
     figures: Optional[Mapping[str, FigureSpec]] = None, methods: Optional[str] = None,
@@ -406,31 +455,54 @@ def results_bundle(
     ``methods.md`` (when given), ``results/<name>.json`` (``to_dict()`` of
     result objects), and ``bundle.json`` listing every file with its SHA-256,
     the citation and ``provenance``. Returns the bundle manifest.
+
+    The destination must be fresh or empty. A completed or partially written
+    bundle is never reused, so omitted outputs cannot survive from an earlier
+    run and unrelated files are neither adopted nor deleted.
+    Artifact names are portable filename components, not relative paths;
+    case-insensitive name collisions are rejected before any output is written.
+    Figures are prepared in temporary folders and their final destination names
+    are checked together before bundle writes. Only the root bundle.json is
+    excluded from the SHA-256 inventory, not same-named payloads below it.
     """
-    root = Path(folder)
-    root.mkdir(parents=True, exist_ok=True)
-    written: Dict[str, Dict[str, str]] = {"tables": {}, "figures": {}, "results": {}}
-    for name, table in (tables or {}).items():
-        if citation and not table.citation:
-            table.citation = citation
-        written["tables"][name] = table.write(root / "tables", name)
-    captions = []
+    for items in (tables, figures, results):
+        _artifact_names(items or {})
+    root = _require_empty_bundle(folder)
     fig_dir = root / "figures"
-    for name, spec in (figures or {}).items():
-        if isinstance(spec, tuple):
-            func, kwargs = spec
-            out = func(**dict(kwargs, out_dir=fig_dir, name=name))
-        else:
-            out = spec
+    # Render into private temporary folders: returned filenames cannot overwrite
+    # earlier figures before we have validated the complete destination inventory.
+    with ExitStack() as scratch:
+        prepared, occupied = [], set()
+        for name, spec in (figures or {}).items():
+            if isinstance(spec, tuple):
+                func, kwargs = spec
+                staging = Path(scratch.enter_context(TemporaryDirectory(prefix="census-bundle-figure-")))
+                out = func(**dict(kwargs, out_dir=staging, name=name))
+            else:
+                out = spec
+            files_for_figure = _figure_files(name, out)
+            for source, target in files_for_figure.values():
+                if target.casefold() in occupied:
+                    raise ValueError(f"Figure destination filename collision: {target!r}")
+                occupied.add(target.casefold())
+            prepared.append((name, out.caption, files_for_figure))
+        root.mkdir(parents=True, exist_ok=True)
+        written: Dict[str, Dict[str, str]] = {"tables": {}, "figures": {}, "results": {}}
+        for name, table in (tables or {}).items():
+            if citation and not table.citation:
+                table.citation = citation
+            written["tables"][name] = table.write(root / "tables", name)
+        captions = []
+        for name, caption, figure_files in prepared:
             fig_dir.mkdir(parents=True, exist_ok=True)
-            for p in out.paths.values():
-                src = Path(p)
-                dst = fig_dir / f"{name}{src.name[len(out.name):]}"
+            for src, target in figure_files.values():
+                dst = fig_dir / target
                 if src.resolve() != dst.resolve():
                     shutil.copyfile(src, dst)
-        written["figures"][name] = {k: str(fig_dir / f"{name}{Path(v).name[len(out.name):]}")
-                                    for k, v in out.paths.items()}
-        captions.append(f"**Figure: {name}.** {out.caption}")
+            written["figures"][name] = {kind: str(fig_dir / target)
+                                        for kind, (_, target) in figure_files.items()}
+            if caption:
+                captions.append(f"**Figure: {name}.** {caption}")
     if captions:
         (root / "captions.md").write_text("\n\n".join(captions) + "\n", encoding="utf-8", newline="\n")
     if methods:
@@ -445,7 +517,7 @@ def results_bundle(
         written["results"][name] = str(p)
     files = {}
     for p in sorted(root.rglob("*")):
-        if p.is_file() and p.name != "bundle.json":
+        if p.is_file() and p != root / "bundle.json":
             files[p.relative_to(root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
     manifest = {"citation": citation, "provenance": dict(provenance or {}),
                 "tables": sorted(written["tables"]), "figures": sorted(written["figures"]),

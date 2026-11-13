@@ -1,5 +1,41 @@
 # Inference check map (PLAN_ROUND_12 A2)
 
+Round 17 exact proposition contracts and checked matrix rules (not a
+statistical coverage claim): run `python -m pytest -q
+tests/test_proposition_verification.py tests/test_verification_contract.py
+tests/test_workflows_verification.py tests/test_verification_release.py`.
+These deterministic tests run in ordinary offline CI and in the tag job
+before publication; the tag job rejects missing/skipped verification tests.
+The operator-pinned workflow and trust boundary are in
+[verification.md](../verification.md). Product identity, fresh bundle
+destinations, numerical input guards and redaction regressions are in
+`tests/test_review_fixes_r17_{product,bundle,boundaries}.py`.
+The bundle checks include path traversal, portable artifact names and
+case-insensitive collision rejection before any output is created, plus
+preservation of outside files and valid labels.
+They also cover nested `bundle.json` payload hashes, final figure destination
+collisions (including mixed render/copy and case-insensitive cases), mismatched
+source prefixes, and temporary-render cleanup without partial bundle output.
+Benchmark transport failures and bounded fake tool loops are covered by
+`tests/test_local_model_eval_protocol.py`; this invokes no model runtime and
+does not measure model accuracy.
+`tests/test_verification_eval.py` checks offline frozen prompts and transcript
+scoring: wrong-claim evidence, forged flags, review changes, exact final
+references, duplicates, diagnostic-only outcomes and non-overwriting CLI output.
+It exercises no model runtime. Live client evaluation remains conditional.
+`tests/test_verification_client.py` exercises the injected async client with
+fake transports: two phases, actual MCP schema preflight, shared deadline and
+tool cancellation, duplicate suppression, cache revocation, forged evidence
+and rejection before dispatch. No service or model timing study is involved.
+`tests/test_verification_live.py` uses fake HTTP/MCP contexts to check runtime
+wiring, loopback restrictions, opt-in, final tool choice, error/truncation
+retention and exclusive output. Actual model integration records are separate.
+`tests/test_workflows_verification.py` also checks the actual local MCP stdio
+transport, including strict schema versions, wrong-claim binding and review
+revocation within one session. It requires local subprocess/pipe support;
+it contacts no network endpoint. Do not replace this with a skipped test in
+release validation because a restrictive development sandbox blocks it.
+
 Which check to run when an inference method changes. Tiers follow
 PLAN_ROUND_11 section 12: run the focused offline test (T1/T2, seconds) on
 every change; run the applicable seeded study (T3, minutes to an hour) only

@@ -1,0 +1,21 @@
+{
+  "scope": "Small bounded integration experiment; one attempt per model/case, not a reliability estimate or controlled comparison with older protocols",
+  "models": [
+    "gemma4:e4b",
+    "qwen3.5:4b"
+  ],
+  "cases": [
+    "false_diagonal_formula",
+    "zero_diagonal"
+  ],
+  "timeout_seconds_per_case": 600,
+  "max_model_requests_per_case": 2,
+  "temperature": 0,
+  "max_tokens": 1500,
+  "approval": "Local model calls explicitly authorized by user; request reviews are automated sample-template fixtures, not independent human attestations",
+  "scoring": "r17-offline-verification-2",
+  "client": "r17-two-phase-client-1",
+  "retention": "Raw bounded HTTP entity bodies, HTTP metadata, parsed MCP result and complete client reports retained locally; no sanitization or upload; truncation is marked",
+  "original_record_count": 74,
+  "original_aggregate_sha256": "fc20a1a689c38a569ea2e8729dfaea3e866d4705b418a1a5dde7058928cba9a0"
+}

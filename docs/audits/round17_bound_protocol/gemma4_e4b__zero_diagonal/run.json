@@ -1,0 +1,238 @@
+{
+  "client_protocol_version": "r17-two-phase-client-1",
+  "tool_schema_digest": "8c2cc45e8003c9b909911f71efdaaf223bba3c71e6052892f82de90674f8b3d1",
+  "prompt_digest": "c403ccc34f211034df4f01bfac48a4a361408db8adcc8342532f7fde36437004",
+  "model_requests": 2,
+  "tool_executions": 1,
+  "duplicate_requests_suppressed": 0,
+  "elapsed_seconds": 41.652862145914696,
+  "timeout_seconds": 599.9890455310233,
+  "transcript": {
+    "schema_version": 1,
+    "calls": [
+      {
+        "tool": "verify_proposition",
+        "arguments": {
+          "assumptions_digest": "50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774",
+          "expression_digest": "3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780",
+          "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+          "schema_version": 1
+        },
+        "result": {
+          "success": true,
+          "verification": {
+            "schema_version": 1,
+            "method_version": "bounded-matrix-1",
+            "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+            "expression_digest": "3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780",
+            "assumptions_digest": "50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774",
+            "proposition": {
+              "assumptions": [
+                {
+                  "kind": "diagonal",
+                  "symbol": "Omega"
+                },
+                {
+                  "kind": "zero_diagonal",
+                  "symbol": "W"
+                }
+              ],
+              "definitions": {},
+              "domain": "matrix_identity_v1",
+              "expression": {
+                "left": {
+                  "arg": {
+                    "left": {
+                      "name": "W",
+                      "op": "symbol"
+                    },
+                    "op": "matmul",
+                    "right": {
+                      "name": "Omega",
+                      "op": "symbol"
+                    }
+                  },
+                  "op": "diag"
+                },
+                "op": "equality",
+                "right": {
+                  "op": "zero_vector"
+                }
+              },
+              "original_text": "For every zero-diagonal square W and diagonal Omega, is diag(W Omega) the zero vector?",
+              "provenance": {},
+              "quantifiers": {
+                "indices": [],
+                "min_n": 1,
+                "scope": "universal"
+              },
+              "schema_version": 1,
+              "symbols": {
+                "Omega": "matrix",
+                "W": "matrix"
+              }
+            },
+            "formalization_status": "approved",
+            "formalization_review": {
+              "decision": "approved",
+              "policy_version": 1,
+              "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+              "reviewer": "AUTOMATED FROZEN BENCHMARK TEMPLATE - NOT HUMAN APPROVAL"
+            },
+            "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+            "success": true,
+            "verification_status": "proved",
+            "claim_holds": true,
+            "evidence_verified": true,
+            "evidence": {
+              "kind": "checked_index_derivation",
+              "rule": "zero_diagonal",
+              "steps": [
+                "(W Omega)[i,i] = sum_j W[i,j] Omega[j,i]",
+                "Omega diagonal: only j=i remains",
+                "W[i,i] Omega[i,i] = 0"
+              ],
+              "scope": "exact matched typed expression and premises; no general proof search"
+            },
+            "evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295"
+          },
+          "summary": "Bound proposition: proved.",
+          "next_step": "inspect the exact statement, formalization status and evidence; success does not mean the claim is true"
+        }
+      }
+    ],
+    "final": "```json\n{\n  \"proposition_id\": \"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\",\n  \"evidence_digest\": \"62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295\",\n  \"verification_status\": \"proved\",\n  \"claim_holds\": true\n}\n```"
+  },
+  "raw_messages": [
+    {
+      "role": "assistant",
+      "content": "",
+      "reasoning": "The user wants me to verify a specific proposition using the `verify_proposition` tool.\nThe proposition details are provided in the JSON object.\n\nI need to extract the following arguments for `verify_proposition`:\n1.  `proposition_id`: \"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\"\n2.  `expression_digest`: \"3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780\"\n3.  `assumptions_digest`: \"50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774\"\n4.  `schema_version`: 1 (optional, but good practice to include if available)\n\nI will call `verify_proposition` with these arguments.",
+      "tool_calls": [
+        {
+          "id": "call_ib50jg20",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "name": "verify_proposition",
+            "arguments": "{\"assumptions_digest\":\"50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774\",\"expression_digest\":\"3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780\",\"proposition_id\":\"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\",\"schema_version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "```json\n{\n  \"proposition_id\": \"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\",\n  \"evidence_digest\": \"62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295\",\n  \"verification_status\": \"proved\",\n  \"claim_holds\": true\n}\n```",
+      "reasoning": "The user wants me to return a final JSON object based on the previous tool call's output.\nI need to extract:\n1.  `proposition_id`\n2.  `evidence_digest`\n3.  `verification_status`\n4.  `claim_holds`\n\nFrom the tool response:\n`proposition_id`: \"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\"\n`evidence_digest`: \"62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295\"\n`verification_status`: \"proved\"\n`claim_holds`: true\n\nI will construct the final JSON object."
+    }
+  ],
+  "runtime_metadata": "injected transports; caller must retain actual runtime/model/version/settings",
+  "score": {
+    "evaluation_mode": "offline_transcript_replay",
+    "protocol_version": "r17-offline-verification-2",
+    "prompt_digest": "c403ccc34f211034df4f01bfac48a4a361408db8adcc8342532f7fde36437004",
+    "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+    "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+    "checker_method_version": "bounded-matrix-1",
+    "reference_evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295",
+    "formalization_fidelity": "requires substantive operator review; not automatically scored",
+    "mathematical_evidence_status": "proved",
+    "mathematical_evidence_verified": true,
+    "tool_selection_correct": true,
+    "arguments_parsed": true,
+    "request_binding_correct": true,
+    "arguments_correct": true,
+    "evidence_replayed": true,
+    "call_count": 1,
+    "duplicate_call_count": 0,
+    "completed": true,
+    "final_json_parsed": false,
+    "final_schema_valid": false,
+    "final_interpretation_correct": false,
+    "calls": [
+      {
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true
+      }
+    ],
+    "protocol_passed": false,
+    "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+    "trace_authenticity": "not authenticated; retain original runtime traces separately"
+  },
+  "failure": null,
+  "protocol_passed": false,
+  "observed_runtime": {
+    "catalog_model_ids": [
+      "qwen3-coder:30b",
+      "gemma4:e4b",
+      "granite4.2:8b",
+      "granite4.2:3b",
+      "qwen3.5:4b",
+      "qwen3.5:9b",
+      "qwen3.6:35b-a3b",
+      "glm-4.7-flash:latest",
+      "gpt-oss:20b"
+    ],
+    "model_responses": [
+      {
+        "phase": "planning",
+        "response_model": "gemma4:e4b"
+      },
+      {
+        "phase": "final",
+        "response_model": "gemma4:e4b"
+      }
+    ]
+  },
+  "prepared_case": {
+    "protocol_version": "r17-offline-verification-2",
+    "prompt": {
+      "system": "Check only the host-pinned proposition below. Call verify_proposition with the supplied exact request arguments, without an output_dir. Do not substitute a related theorem. After the tool response, return only a JSON object with proposition_id, evidence_digest, verification_status and claim_holds copied from the checked evidence. Refutation means claim_holds=false; diagnostic/inconclusive evidence does not prove a universal claim. Do not repeat identical calls.",
+      "user": "{\"proposition\":{\"assumptions\":[{\"kind\":\"diagonal\",\"symbol\":\"Omega\"},{\"kind\":\"zero_diagonal\",\"symbol\":\"W\"}],\"definitions\":{},\"domain\":\"matrix_identity_v1\",\"expression\":{\"left\":{\"arg\":{\"left\":{\"name\":\"W\",\"op\":\"symbol\"},\"op\":\"matmul\",\"right\":{\"name\":\"Omega\",\"op\":\"symbol\"}},\"op\":\"diag\"},\"op\":\"equality\",\"right\":{\"op\":\"zero_vector\"}},\"original_text\":\"For every zero-diagonal square W and diagonal Omega, is diag(W Omega) the zero vector?\",\"provenance\":{},\"quantifiers\":{\"indices\":[],\"min_n\":1,\"scope\":\"universal\"},\"schema_version\":1,\"symbols\":{\"Omega\":\"matrix\",\"W\":\"matrix\"}},\"request_arguments\":{\"assumptions_digest\":\"50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774\",\"expression_digest\":\"3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780\",\"proposition_id\":\"ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08\"}}"
+    },
+    "prompt_digest": "c403ccc34f211034df4f01bfac48a4a361408db8adcc8342532f7fde36437004",
+    "request_arguments": {
+      "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+      "expression_digest": "3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780",
+      "assumptions_digest": "50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774"
+    },
+    "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+    "checker_method_version": "bounded-matrix-1",
+    "expected_final": {
+      "claim_holds": true,
+      "evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295",
+      "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+      "verification_status": "proved"
+    },
+    "mathematical_evidence_verified": true,
+    "formalization_fidelity": "requires substantive operator review; not automatically scored"
+  },
+  "declared_runtime": {
+    "model": "gemma4:e4b",
+    "version": "Ollama 0.40.15",
+    "source": "operator_declared"
+  },
+  "settings": {
+    "temperature": 0,
+    "max_tokens": 1500,
+    "timeout_seconds": 600.0,
+    "base_url": "http://127.0.0.1:11434/v1",
+    "redirects": false,
+    "environment_proxies": false
+  },
+  "files": {
+    "final.http.json": "2e7673f06c69c8396a0e662b142962c1d23b2c5086a337b1c0181b96e368ad88",
+    "final.request.bin": "1635cd62439aa53f0cbfacb02dc72e427aaccdda0b3b6c47cc3dcb81d82d36a2",
+    "final.response.bin": "02cb4f6d1789a9dddf243565be3875a52d113892f16b9e5f4b50a19f954037e7",
+    "mcp-result.json": "9f6aba14b57694927328de62ff025826fe193c1b94891221911cf52da83881a9",
+    "models.http.json": "ef382d644327a7884f966463390e9df2f09647d3b2775834e37d0d9fd6d89353",
+    "models.request.bin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "models.response.bin": "bc78d480265588dd42aae4e96435ed9de0696f9fb43a942aa98a6e6d303699a4",
+    "planning.http.json": "6fa5b7015a7db308d0c39ffdeb0582acf9f2f2248b2bdb111890d27cba02dff4",
+    "planning.request.bin": "2d41f198aee8be65603127e47e2e8efb8f5401371836ebad7884e398547ceeda",
+    "planning.response.bin": "4be798c030c787f3517d4e987de34e68183fb3a88e6399b32dc0ca4b92cd712e"
+  }
+}

@@ -187,13 +187,14 @@ class TestResultsBundleProvenance(_TmpDir):
         self.assertEqual(res["data_source"], {"kind": "census_api", "synthetic": False})
         self.assertIn("Retrieved via the Census Data API", res["citation"])
         synth = self.write_json(_meta("B19013", "26", SYNTH), "synth", "B19013_extraction_metadata.json")
-        res = self.bundle([synth])
+        from census.workflows_inference import make_results_bundle
+        res = make_results_bundle(os.path.join(self.dir, "bundle_synthetic"), {"fit": self.result}, inputs=[synth])
         self.assertEqual(res["data_source"]["kind"], "synthetic")
         self.assertEqual(res["data_source"]["description"], "generated test data")
         self.assertNotIn("Retrieved via the Census Data API", res["citation"])
         # a saved run_manifest result also carries its observed source
         run = self.write_json({"success": True, "summary": "run", "data_source": {"synthetic": True}}, "run.json")
-        res = self.bundle([], results={"run": run})
+        res = make_results_bundle(os.path.join(self.dir, "bundle_run"), {"run": run})
         self.assertEqual(res["data_source"]["kind"], "synthetic")
 
     def test_mixed_sources_warn(self):

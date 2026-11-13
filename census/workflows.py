@@ -149,10 +149,9 @@ def _load_frame(path: str) -> pd.DataFrame:
     """
     if not os.path.isfile(path):
         raise FileNotFoundError(f"No such file: {path}")
-    if path.lower().endswith(".parquet"):
-        df = pd.read_parquet(path)
-    else:
-        df = pd.read_csv(path, dtype={"GEOID": str, "geoid": str}, low_memory=False)
+    from census.analysis import _read
+
+    df = _read(path)  # retain product attrs and explicitly associated extraction metadata
     if any(str(c).endswith(("E", "M")) and "_" in str(c) and str(c)[:1].isupper() for c in df.columns):
         return df
     folder = os.path.dirname(os.path.abspath(path))
@@ -387,6 +386,11 @@ def _metadata_for_frame(df: pd.DataFrame, table_code: Optional[str], year: Optio
 
 
 def _replicates_for(table_code: str, year: int, df: pd.DataFrame, geoids: List[str]) -> pd.DataFrame:
+    from census.analysis import _acs_product
+    from census.replicate import check_vre_product
+
+    product = _acs_product(df.attrs, df["release"] if "release" in df else ())
+    check_vre_product(product or "5-year")  # refuse ACS1 before any cache/network lookup
     geoids = [str(g) for g in geoids]
     lengths = {len(g) for g in geoids}
     level = {2: "state", 5: "county", 7: "place", 11: "tract"}.get(lengths.pop() if len(lengths) == 1 else 0)

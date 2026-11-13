@@ -7,6 +7,10 @@ parses it with census.errata.parse_note. Writes the records and a sidecar
 record count and the SHA-256 of the data file. Requests are spaced by --delay
 as a courtesy, on top of census.http's pacing and retries.
 
+If a listing or note request fails, the refresh exits unsuccessfully before
+replacing either the existing archive or its sidecar. Partial fetches never
+silently remove existing warnings.
+
 Usage: python scripts/fetch_acs_errata.py [--delay 2] [--html-cache DIR]
 --html-cache keeps the raw pages (for re-parsing without re-fetching).
 """
@@ -93,8 +97,14 @@ def main(argv=None) -> int:
     fetch = Fetcher(args.delay, args.html_cache)
     today = dt.date.today().isoformat()
     records, sources = [], []
+    failures = []
     for kind, base in LISTINGS.items():
-        items, list_id = walk_listing(fetch, kind, base)
+        try:
+            items, list_id = walk_listing(fetch, kind, base)
+        except requests.RequestException as exc:
+            print(f"  failed listing {base}: {exc}", file=sys.stderr)
+            failures.append(base)
+            continue
         sources.append({"listing": base, "list_id": list_id, "notes_listed": len(items)})
         print(f"{kind}: {len(items)} notes listed", file=sys.stderr)
         for item in items:
@@ -103,8 +113,13 @@ def main(argv=None) -> int:
             except requests.RequestException as exc:
                 print(f"  skipped {item['url']}: {exc}", file=sys.stderr)
                 sources[-1].setdefault("unfetched", []).append(item["url"])
+                failures.append(item["url"])
                 continue
             records.append(errata.parse_note(page, item["url"], kind, today, item))
+    if failures:
+        print(f"Refresh incomplete ({len(failures)} failed request(s)); archive and sidecar unchanged.",
+              file=sys.stderr)
+        return 1
     records.sort(key=lambda r: (r["kind"], r.get("date_iso") or ""), reverse=True)
     out_path = os.path.join(ROOT, errata.ERRATA_PATH)
     doc = {

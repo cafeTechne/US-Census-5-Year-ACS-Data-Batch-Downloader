@@ -102,7 +102,14 @@ def aggregation_forecast(
     replicate estimates (census.variance) captures covariance the approximation
     ignores. Not valid for ratios, percentages or medians. Returns columns
     ``k``, ``estimate``, ``se``, ``cv``, ``meets_target``.
+
+    The assumed equal correlation must lie in [-1, 1] and be feasible for
+    every requested k (rho >= -1/(k-1) for k > 1). Invalid covariance is
+    refused rather than converted into a zero-uncertainty forecast.
     """
+    correlation = float(correlation)
+    if not math.isfinite(correlation) or not -1 <= correlation <= 1:
+        raise ValueError("correlation must be finite and lie in [-1, 1]")
     est = np.asarray(estimate, dtype=float).ravel()
     se = _moe_to_se(moe, moe_confidence).ravel()
     ok = np.isfinite(est) & np.isfinite(se) & ~np.isin(est, list(CENSUS_SENTINELS))
@@ -114,6 +121,9 @@ def aggregation_forecast(
         k = int(k)
         if k < 1:
             raise ValueError("group sizes must be >= 1")
+        if k > 1 and correlation < -1.0 / (k - 1):
+            raise ValueError(f"correlation {correlation:g} is infeasible for group size {k}; "
+                             f"it must be >= {-1.0 / (k - 1):g}")
         total_se = math.sqrt(max(k * v + k * (k - 1) * correlation * v, 0.0))
         total = k * e
         cv = total_se / abs(total) * 100 if total != 0 else math.nan

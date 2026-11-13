@@ -429,9 +429,10 @@ def fit_multilevel(
                                   "references": REFERENCES}
 
     if se_col:
-        D = data[se_col].to_numpy(float) ** 2
-        if np.any(D < 0) or not np.isfinite(D).all():
+        sampling_se_values = data[se_col].to_numpy(float)
+        if np.any(sampling_se_values < 0) or not np.isfinite(sampling_se_values).all():
             raise ValueError("sampling SEs must be finite and non-negative")
+        D = sampling_se_values ** 2
         ols = np.linalg.lstsq(X, y, rcond=None)[0]
         c = max(float(np.var(y - X @ ols, ddof=X.shape[1])) - float(D.mean()), 0.1 * float(np.var(y)), 1e-12)
         vfun = _known_vfun(q, area_effect, c)

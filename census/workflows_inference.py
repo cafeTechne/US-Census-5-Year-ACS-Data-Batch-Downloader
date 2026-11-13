@@ -107,13 +107,17 @@ def _load_frames(input_path: Any) -> pd.DataFrame:
             missing = int(frame[key].isna().sum())
             if missing:
                 raise ValueError(f"{path} has {missing} row(s) with a missing {key}; fix or drop them first")
-    df = pd.concat(frames, ignore_index=True, sort=False)
+    from census.analysis import load_source
+
+    df = load_source(frames)  # validate/preserve declared product before merging cells
     df["GEOID"] = df["GEOID"].astype(str)
     grouped = df.groupby(keys, sort=False)
     conflicts = [c for c in df.columns if c not in keys and (grouped[c].nunique(dropna=True) > 1).any()]
     if conflicts:
         raise ValueError(f"input files disagree on {conflicts[:5]} for the same {'/'.join(keys)}")
-    return grouped.first().reset_index()
+    out = grouped.first().reset_index()
+    out.attrs = dict(df.attrs)
+    return out
 
 
 def build_analysis_frame(
@@ -566,8 +570,10 @@ def make_results_bundle(
     the data citation and provenance (data source, input hashes, extractions).
 
     Args:
-        output_dir: Bundle folder.
+        output_dir: Fresh or empty bundle folder; existing artifacts are preserved and refused.
         results: {name: path} of tool results saved with `python -m census tool ... --save PATH`.
+            Names must be portable filename components, not paths; case-insensitive
+            collisions within a bundle category are refused before bundle writes.
             A saved failure (success false) is refused unless allow_failed_results=True,
             which lists it under "Failed steps" in methods.md, never as a result.
         figure_paths: Figure files to copy (e.g. make_map figure_paths).
@@ -582,13 +588,13 @@ def make_results_bundle(
     warning), nothing recorded -> "unknown". It is never taken from the cache present
     at bundle time. Pre-registered analyses use run_manifest instead (status "confirmatory").
     """
-    import shutil
-
+    from census.figures import FigureOutput
     from census.manifest import STATUS_EXPLORATORY
     from census.pipeline import file_sha256
-    from census.report_tables import data_citation, results_bundle
+    from census.report_tables import _require_empty_bundle, data_citation, results_bundle
 
     try:
+        _require_empty_bundle(output_dir)
         loaded, failed, recorded = {}, [], []
         for name, path in (results or {}).items():
             with open(path, encoding="utf-8") as f:
@@ -618,7 +624,6 @@ def make_results_bundle(
                 source = _recorded_source(doc)
                 if source:
                     recorded.append({"path": rel, **source})
-        os.makedirs(os.path.join(output_dir, "figures"), exist_ok=True)
         figs = list(figure_paths or [])
         base = [os.path.basename(p) for p in figs]
         # same file name from different folders (e.g. maps/26/choropleth.pdf, maps/36/...): prefix the folder
@@ -626,8 +631,11 @@ def make_results_bundle(
                  for p, b in zip(figs, base)]
         if len(set(names)) != len(names):
             raise ValueError("figure_paths contain the same file name twice in the same folder name")
-        for path, name in zip(figs, names):
-            shutil.copyfile(path, os.path.join(output_dir, "figures", name))
+        # Let results_bundle own all writes after its empty-destination check.
+        # Each supplied path is already a rendered file, with no new caption.
+        figure_specs = {name: FigureOutput(name=os.path.basename(path), paths={"file": path},
+                                          values=pd.DataFrame(), caption="", provenance={})
+                        for path, name in zip(figs, names)}
     except (OSError, ValueError, TypeError) as exc:
         return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
     source = _bundle_source(recorded)
@@ -675,8 +683,11 @@ def make_results_bundle(
         provenance["warnings"] = warnings
     if failed:
         provenance["failed_results"] = failed
-    bundle = results_bundle(output_dir, methods="\n".join(lines), results=loaded, provenance=provenance,
-                            citation=citation)
+    try:
+        bundle = results_bundle(output_dir, figures=figure_specs, methods="\n".join(lines), results=loaded,
+                                provenance=provenance, citation=citation)
+    except (OSError, ValueError, TypeError) as exc:
+        return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}")
     return _ok(f"Results bundle with {len(loaded)} result(s), {len(figure_paths or [])} figure file(s) and "
                f"{len(input_records)} input hash(es) written; data source {source['kind']}."
                + (f" WARNING: {' '.join(warnings)}" if warnings else ""),

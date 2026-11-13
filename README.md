@@ -10,7 +10,7 @@ Multi-year panels are built from **concepts**, not raw variable codes. ACS codes
 
 | Interface | Entry point | Intended user |
 | :--- | :--- | :--- |
-| MCP server | `mcp_server.py` (57 tools; `--profile core` gives 14 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
+| MCP server | `mcp_server.py` (61 tools; `--profile core` gives 14 for local models) | Agents in Claude Code, Claude Desktop, other MCP clients |
 | Command line | `python -m census <command> --json` | Agents and scripts without MCP |
 | Python library | `census` package (`plan_extraction`, `run_batch`) | Notebooks, pipelines |
 | Desktop GUI | `acs_downloader.py` (Tkinter) | Legacy point-and-click use; maintenance mode |
@@ -40,6 +40,15 @@ python scripts/update_price_indexes.py --r-cpi-u-rs-xlsx data/price_indexes/sour
 Alternatively, set `BLS_USER_AGENT` to an identifying User-Agent that includes a contact email (BLS's requirement for automated clients) and run the script without arguments. A year the index does not cover fails with `PRICE_INDEX_UNAVAILABLE`.
 
 ## Configuration
+
+The opt-in [exact proposition evidence workflow](docs/verification.md) uses
+`CENSUS_VERIFICATION_REQUEST` to pin a locally reviewed proposition before
+starting `--profile verification`. Model tools cannot approve formalizations.
+Offline prompt preparation and transcript scoring are available through
+`python scripts/verification_eval.py --request request.json`; see the workflow
+guide for the exact transcript contract. This command contacts no model service.
+The separate `scripts/verification_live.py --run-model ...` adapter explicitly
+tests a chosen local runtime; see the guide for required settings and raw traces.
 
 | Variable | Purpose |
 | :--- | :--- |
@@ -228,7 +237,7 @@ Models and figures that keep ACS sampling error in view, validated by simulation
 
 SIMEX is available but under-covers (0.81) and is not recommended for confirmatory use. Statistics use `scipy` and `statsmodels`; figures use `matplotlib`.
 
-**Local models.** `python mcp_server.py --profile core` serves a 13-tool profile with short descriptions, `summary`/`next_step` in every result, and step-by-step recipes (`get_recipe`). Qwen3 8B on CPU completed 5 of 6 evaluation tasks ([docs/audits/local_model_eval.md](docs/audits/local_model_eval.md)); setup in [docs/local_models.md](docs/local_models.md).
+**Local models.** `python mcp_server.py --profile core` serves a 14-tool profile with short descriptions, `summary`/`next_step` in every result, and step-by-step recipes (`get_recipe`). Qwen3 8B on CPU completed 5 of 6 evaluation tasks ([docs/audits/local_model_eval.md](docs/audits/local_model_eval.md)); setup in [docs/local_models.md](docs/local_models.md).
 
 ## Geography, maps, and spatial analysis
 

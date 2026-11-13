@@ -57,7 +57,22 @@ from census.pipeline import (
 )
 
 EXIT_OK, EXIT_INPUT, EXIT_REVIEW, EXIT_FAILURE = 0, 2, 3, 4
+# Dispatch is a tool boundary, not reflection over every imported callable.
+# In particular save_json must not become a model-facing approval-file writer.
+_WORKFLOW_TOOLS = frozenset("""
+derive_estimate check_replicate_availability aggregate_geographies median_from_distribution
+batch_significance apportion_tracts replay_extraction draft_rule_override record_rule_review
+run_validation download_table cache_import build_analysis_frame fit_model small_area_estimates
+correlation_matrix minimum_detectable_difference reliability_profile trend_test make_figure
+make_table make_results_bundle create_manifest run_manifest get_boundaries make_map
+spatial_autocorrelation spatial_regression spatial_small_area_estimates custom_area_mapping
+pums_tabulate pums_regression multilevel_model difference_in_differences adjust_for_place
+place_adjust_frame make_web_map verify_proposition
+""".split())
 _INPUT_CODES = {
+    errors.PROPOSITION_MISMATCH,
+    errors.VERIFICATION_SCHEMA,
+    errors.VERIFICATION_LIMIT,
     errors.INVALID_INPUT,
     errors.INVALID_GEO_LEVEL,
     errors.INVALID_OUTPUT_FORMAT,
@@ -66,7 +81,8 @@ _INPUT_CODES = {
     errors.VINTAGE_UNAVAILABLE,
     errors.PRICE_INDEX_UNAVAILABLE,
 }
-_REVIEW_CODES = {errors.CONCORDANCE_REVIEW_REQUIRED, errors.UNVERIFIED_CONCORDANCE}
+_REVIEW_CODES = {errors.CONCORDANCE_REVIEW_REQUIRED, errors.UNVERIFIED_CONCORDANCE,
+                 errors.FORMALIZATION_REVIEW_REQUIRED}
 
 
 def _years(text: str) -> List[int]:
@@ -353,9 +369,12 @@ def cmd_validate_census(args: argparse.Namespace) -> int:
 
 def cmd_tool(args: argparse.Namespace) -> int:
     """Run any shared workflow tool by name with JSON arguments."""
-    from census import workflows_geo, workflows_inference, workflows_microdata
+    from census import workflows_geo, workflows_inference, workflows_microdata, workflows_verification
 
-    fn = (getattr(workflows_microdata, args.name, None) or getattr(workflows_geo, args.name, None)
+    if args.name not in _WORKFLOW_TOOLS:
+        return _emit(errors.error_result(errors.INVALID_INPUT, f"Unknown tool '{args.name}'."), args.json)
+    fn = (getattr(workflows_verification, args.name, None) if args.name == "verify_proposition" else None)
+    fn = (fn or getattr(workflows_microdata, args.name, None) or getattr(workflows_geo, args.name, None)
           or getattr(workflows_inference, args.name, None) or getattr(workflows, args.name, None))
     if fn is None or args.name.startswith("_") or not callable(fn):
         return _emit(errors.error_result(errors.INVALID_INPUT, f"Unknown tool '{args.name}'."), args.json)

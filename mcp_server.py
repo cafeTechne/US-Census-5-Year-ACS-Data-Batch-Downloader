@@ -62,7 +62,7 @@ from census.metadata import table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs_overlap_years
-from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference, workflows_microdata
+from census import mcp_profiles, recipes, workflows, workflows_geo, workflows_inference, workflows_microdata, workflows_verification
 
 load_dotenv()
 
@@ -1077,6 +1077,7 @@ def generate_codebook(
 # ---------------------------------------------------------------------------
 
 for _tool in (
+    workflows_verification.verify_proposition,
     workflows.derive_estimate,
     workflows.check_replicate_availability,
     workflows.aggregate_geographies,
@@ -1157,6 +1158,7 @@ adjust_for_place = workflows_microdata.adjust_for_place
 place_adjust_frame = workflows_microdata.place_adjust_frame
 make_web_map = workflows_microdata.make_web_map
 get_recipe = recipes.get_recipe
+verify_proposition = workflows_verification.verify_proposition
 
 
 def server_for_profile(profile: str) -> FastMCP:

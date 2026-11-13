@@ -1,0 +1,30 @@
+[
+  {
+    "run": "gemma4_e4b__false_diagonal_formula",
+    "finish_reason": "stop",
+    "strict_protocol_passed": false,
+    "fence_removed_field_match_diagnostic_only": true,
+    "note": "No primary parse/score was changed. This is automated content inspection, not human substantive review."
+  },
+  {
+    "run": "gemma4_e4b__zero_diagonal",
+    "finish_reason": "stop",
+    "strict_protocol_passed": false,
+    "fence_removed_field_match_diagnostic_only": true,
+    "note": "No primary parse/score was changed. This is automated content inspection, not human substantive review."
+  },
+  {
+    "run": "qwen3_5_4b__false_diagonal_formula",
+    "finish_reason": "length",
+    "strict_protocol_passed": false,
+    "fence_removed_field_match_diagnostic_only": null,
+    "note": "No primary parse/score was changed. This is automated content inspection, not human substantive review."
+  },
+  {
+    "run": "qwen3_5_4b__zero_diagonal",
+    "finish_reason": "length",
+    "strict_protocol_passed": false,
+    "fence_removed_field_match_diagnostic_only": null,
+    "note": "No primary parse/score was changed. This is automated content inspection, not human substantive review."
+  }
+]

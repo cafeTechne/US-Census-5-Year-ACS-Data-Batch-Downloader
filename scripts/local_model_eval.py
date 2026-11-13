@@ -23,6 +23,7 @@ Writes docs/audits/local_model_eval.md (or --out). Not part of CI.
 import argparse
 import asyncio
 import json
+import math
 import os
 import platform
 import re
@@ -222,10 +223,20 @@ def _tasks() -> List[Task]:
     ]
 
 
+def _chat_payload(model, messages, tools, *, final=False, json_final=False):
+    payload = {"model": model, "messages": messages, "temperature": 0, "max_tokens": 1500}
+    if final:
+        payload["tool_choice"] = "none"
+        if json_final:
+            payload["response_format"] = {"type": "json_object"}
+    else:
+        payload["tools"] = tools
+    return payload
+
+
 def _chat(base_url: str, model: str, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
           timeout: float) -> Dict[str, Any]:
-    body = json.dumps({"model": model, "messages": messages, "tools": tools,
-                       "temperature": 0, "max_tokens": 1500}).encode()
+    body = json.dumps(_chat_payload(model, messages, tools)).encode()
     req = urllib.request.Request(base_url.rstrip("/") + "/chat/completions", data=body,
                                  headers={"Content-Type": "application/json",
                                           "Authorization": "Bearer local"})
@@ -237,12 +248,55 @@ def _strip_think(text: Optional[str]) -> str:
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
 
 
+def _tool_arguments(raw: Any) -> Dict[str, Any]:
+    """Preserve argument failures as protocol failures; never substitute {}.
+
+    Ordinary research tools accept floating-point values. This is transport
+    validation, separate from the verifier's restricted exact-math schema.
+    """
+    def unique_pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError(f"duplicate tool argument key {key!r}")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError(f"nonfinite tool argument {value}")
+
+    def validate_values(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("nonfinite tool argument")
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise ValueError("tool argument keys must be strings")
+                validate_values(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                validate_values(child)
+
+    if isinstance(raw, dict):
+        # Some local runtimes already decode their argument object.
+        validate_values(raw)
+        raw = json.dumps(raw, allow_nan=False)
+    if not isinstance(raw, str):
+        raise ValueError("tool arguments must be a JSON object")
+    result = json.loads(raw, object_pairs_hook=unique_pairs, parse_constant=invalid_constant)
+    if not isinstance(result, dict):
+        raise ValueError("tool arguments must be a JSON object")
+    validate_values(result)  # JSON exponents such as 1e999 overflow to infinity.
+    return result
+
+
 async def _run_task(session: Any, tools: List[Dict[str, Any]], task: Task, args: argparse.Namespace) -> Dict[str, Any]:
     system = SYSTEM_PROMPT + (" /no_think" if args.no_think else "")
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system},
                                       {"role": "user", "content": task.prompt}]
     calls: List[Dict[str, Any]] = []
-    answer, error = "", ""
+    answer, error, error_kind = "", "", ""
+    final_received = False
     start = time.time()
     try:
         for _ in range(args.max_turns):
@@ -251,20 +305,29 @@ async def _run_task(session: Any, tools: List[Dict[str, Any]], task: Task, args:
             messages.append({"role": "assistant", "content": msg.get("content") or "",
                              **({"tool_calls": tool_calls} if tool_calls else {})})
             if not tool_calls:
+                final_received = True
                 answer = _strip_think(msg.get("content"))
                 break
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 try:
-                    targs = json.loads(tc["function"].get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    targs = {}
+                    targs = _tool_arguments(tc["function"].get("arguments"))
+                except (ValueError, TypeError, RecursionError) as exc:
+                    calls.append({"tool": name, "args": None, "argument_error": str(exc)})
+                    error_kind = "invalid_tool_arguments"
+                    raise ValueError(f"{name}: invalid tool arguments: {exc}") from exc
                 calls.append({"tool": name, "args": targs})
                 result = await session.call_tool(name, targs)
                 text = "\n".join(getattr(c, "text", "") for c in result.content)
                 messages.append({"role": "tool", "tool_call_id": tc.get("id", name), "content": text[:3000]})
     except Exception as exc:  # network/timeouts are reported, not raised
         error = f"{type(exc).__name__}: {exc}"
+        error_kind = error_kind or "runtime_error"
+    if not answer and not error:
+        if final_received:
+            error, error_kind = "Runtime returned an empty final answer", "empty_answer"
+        else:
+            error, error_kind = "No final answer before the turn limit", "turn_limit"
     elapsed = time.time() - start
     first = next((c for c in calls if c["tool"] == task.tool), None)
     tool_ok = first is not None
@@ -272,7 +335,8 @@ async def _run_task(session: Any, tools: List[Dict[str, Any]], task: Task, args:
     answer_ok = bool(answer) and _safe(task.check_answer, answer)
     return {"task": task.name, "tool_ok": tool_ok, "args_ok": args_ok, "answer_ok": answer_ok,
             "passed": tool_ok and args_ok and answer_ok, "seconds": round(elapsed, 1),
-            "calls": calls, "answer": answer, "error": error, "expected": task.expected}
+            "calls": calls, "answer": answer, "error": error, "error_kind": error_kind,
+            "expected": task.expected}
 
 
 def _safe(fn: Callable[[Any], bool], value: Any) -> bool:

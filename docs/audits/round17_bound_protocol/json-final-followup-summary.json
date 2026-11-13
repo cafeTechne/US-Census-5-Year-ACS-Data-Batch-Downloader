@@ -1,0 +1,41 @@
+{
+  "exit_code": 0,
+  "wall_seconds": 59.091,
+  "protocol_passed": true,
+  "failure": null,
+  "score": {
+    "evaluation_mode": "offline_transcript_replay",
+    "protocol_version": "r17-offline-verification-2",
+    "prompt_digest": "1afd8fa09fbf9116ddb937db040629110f6002997f8d63f0c9eccfe6f04aa38f",
+    "proposition_id": "1a919d3577d3da9a735896371b36477d81f8f0de31b22111ea0bea39ac776273",
+    "review_digest": "344ff86735a62cd1db945699b4dd8838122effa33b947bd27c235315c55c6254",
+    "checker_method_version": "bounded-matrix-1",
+    "reference_evidence_digest": "d58456edb2484f8d3dc45917bc099d93f3558309739983b0fe717514519afbc4",
+    "formalization_fidelity": "requires substantive operator review; not automatically scored",
+    "mathematical_evidence_status": "refuted",
+    "mathematical_evidence_verified": true,
+    "tool_selection_correct": true,
+    "arguments_parsed": true,
+    "request_binding_correct": true,
+    "arguments_correct": true,
+    "evidence_replayed": true,
+    "call_count": 1,
+    "duplicate_call_count": 0,
+    "completed": true,
+    "final_json_parsed": true,
+    "final_schema_valid": true,
+    "final_interpretation_correct": true,
+    "calls": [
+      {
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true
+      }
+    ],
+    "protocol_passed": true,
+    "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+    "trace_authenticity": "not authenticated; retain original runtime traces separately"
+  }
+}

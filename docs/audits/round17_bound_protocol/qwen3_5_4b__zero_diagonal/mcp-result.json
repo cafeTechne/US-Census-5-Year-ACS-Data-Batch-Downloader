@@ -1,0 +1,81 @@
+{
+  "success": true,
+  "verification": {
+    "schema_version": 1,
+    "method_version": "bounded-matrix-1",
+    "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+    "expression_digest": "3674cc462a1f0e42d10e57f4abf7ba29c826965c9daa2af651a9c650c7a2b780",
+    "assumptions_digest": "50726b2d6dc981c7158870b41c1ab7a28aa838caaa390f503f42eeb9aaf21774",
+    "proposition": {
+      "assumptions": [
+        {
+          "kind": "diagonal",
+          "symbol": "Omega"
+        },
+        {
+          "kind": "zero_diagonal",
+          "symbol": "W"
+        }
+      ],
+      "definitions": {},
+      "domain": "matrix_identity_v1",
+      "expression": {
+        "left": {
+          "arg": {
+            "left": {
+              "name": "W",
+              "op": "symbol"
+            },
+            "op": "matmul",
+            "right": {
+              "name": "Omega",
+              "op": "symbol"
+            }
+          },
+          "op": "diag"
+        },
+        "op": "equality",
+        "right": {
+          "op": "zero_vector"
+        }
+      },
+      "original_text": "For every zero-diagonal square W and diagonal Omega, is diag(W Omega) the zero vector?",
+      "provenance": {},
+      "quantifiers": {
+        "indices": [],
+        "min_n": 1,
+        "scope": "universal"
+      },
+      "schema_version": 1,
+      "symbols": {
+        "Omega": "matrix",
+        "W": "matrix"
+      }
+    },
+    "formalization_status": "approved",
+    "formalization_review": {
+      "decision": "approved",
+      "policy_version": 1,
+      "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+      "reviewer": "AUTOMATED FROZEN BENCHMARK TEMPLATE - NOT HUMAN APPROVAL"
+    },
+    "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+    "success": true,
+    "verification_status": "proved",
+    "claim_holds": true,
+    "evidence_verified": true,
+    "evidence": {
+      "kind": "checked_index_derivation",
+      "rule": "zero_diagonal",
+      "steps": [
+        "(W Omega)[i,i] = sum_j W[i,j] Omega[j,i]",
+        "Omega diagonal: only j=i remains",
+        "W[i,i] Omega[i,i] = 0"
+      ],
+      "scope": "exact matched typed expression and premises; no general proof search"
+    },
+    "evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295"
+  },
+  "summary": "Bound proposition: proved.",
+  "next_step": "inspect the exact statement, formalization status and evidence; success does not mean the claim is true"
+}

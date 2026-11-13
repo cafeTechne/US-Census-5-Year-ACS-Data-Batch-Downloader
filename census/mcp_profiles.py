@@ -28,6 +28,7 @@ DEFAULT_PROFILE = "full"
 ENV_VAR = "CENSUS_MCP_PROFILE"
 
 PROFILES: Dict[str, Optional[List[str]]] = {
+    "verification": ["verify_proposition"],
     "core": [
         "get_recipe",
         "search_tables",
@@ -305,7 +306,10 @@ def build_profile_server(base: Any, profile: str) -> Any:
 
     manager = base._tool_manager
     available = [t.name for t in manager.list_tools()]
-    instructions = CORE_INSTRUCTIONS if profile in CORE_STYLE_PROFILES else REVIEW_INSTRUCTIONS
+    instructions = ("Check only the operator-pinned proposition. Formalization review is outside tool authority. "
+                    "A refutation is successful evidence; never substitute a related theorem or infer empirical confirmation."
+                    if profile == "verification" else
+                    CORE_INSTRUCTIONS if profile in CORE_STYLE_PROFILES else REVIEW_INSTRUCTIONS)
     server = FastMCP(f"{base.name} [{profile}]", instructions=instructions)
     for name in tools_for(profile, available):
         tool = manager.get_tool(name)

@@ -22,7 +22,10 @@ class _Run(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
 
     def run_m(self, m, client=None, **kw):
-        return M.run_manifest(m, os.path.join(self.dir, "run"), client=client or TwoStateClient(),
+        number = getattr(self, "_run_number", 0)
+        self._run_number = number + 1
+        name = "run" if number == 0 else f"run-{number}"
+        return M.run_manifest(m, os.path.join(self.dir, name), client=client or TwoStateClient(),
                               use_cache=False, **kw)
 
     def probe(self):
@@ -53,7 +56,7 @@ class TestDeriveReplicatesErrors(_Run):
                and "derivations on replicates" in str(d.get("detail"))]
         self.assertTrue(dev, res["deviations"])
         self.assertIn("duplicate rows", dev[0]["detail"])
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "run", "bundle", "bundle.json")))
+        self.assertTrue(os.path.exists(os.path.join(res["output_dir"], "bundle", "bundle.json")))
 
     def test_key_error_recorded_not_raised(self):
         reps = self.replicates(self.probe())
@@ -114,7 +117,7 @@ class TestDerivedOnReplicatesCounts(_Run):
         info = res["replicates"]
         self.assertEqual(info["derived_on_replicates"], ["pct"])
         self.assertEqual(info["derived_on_replicates_rows"], {"pct": {"rows_replicate": 21, "rows": 24}})
-        with open(os.path.join(self.dir, "run", "bundle", "results", "run.json"), encoding="utf-8") as f:
+        with open(os.path.join(res["output_dir"], "bundle", "results", "run.json"), encoding="utf-8") as f:
             run = json.load(f)
         text = M.methods_section(two_state_manifest(), run)
         self.assertIn("replicate SE for 21 of 24 units; approximate SE (ACS formulas, Handbook ch. 8) elsewhere",
@@ -125,7 +128,7 @@ class TestDerivedOnReplicatesCounts(_Run):
         res = self.run_m(two_state_manifest(), replicates=self.replicates(frame))
         self.assertEqual(res["replicates"]["derived_on_replicates_rows"], {"pct": {"rows_replicate": 24,
                                                                                     "rows": 24}})
-        with open(os.path.join(self.dir, "run", "bundle", "results", "run.json"), encoding="utf-8") as f:
+        with open(os.path.join(res["output_dir"], "bundle", "results", "run.json"), encoding="utf-8") as f:
             run = json.load(f)
         self.assertIn("SE from the derivation evaluated on each replicate (all 24 units)",
                       M.methods_section(two_state_manifest(), run))

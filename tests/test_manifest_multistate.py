@@ -198,7 +198,12 @@ class TestTwoStateRun(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
 
     def run_m(self, m, client=None, **kw):
-        return run_manifest(m, os.path.join(self.dir, "run"), client=client or TwoStateClient(), use_cache=False, **kw)
+        # Independent analyses use independent destinations; reuse refusal has
+        # dedicated Round 17 regressions and must not mask these scientific checks.
+        number = getattr(self, "_run_number", 0)
+        self._run_number = number + 1
+        name = "run" if number == 0 else f"run-{number}"
+        return run_manifest(m, os.path.join(self.dir, name), client=client or TwoStateClient(), use_cache=False, **kw)
 
     def test_states_stacked_and_state_rpp(self):
         from census import rpp

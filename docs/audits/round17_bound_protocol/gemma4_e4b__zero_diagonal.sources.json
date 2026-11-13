@@ -1,0 +1,9 @@
+{
+  "census/verification.py": "b6dc94fad321578b39729eb826cc7fc716b2161ca78980824547bb9f3b954c50",
+  "census/workflows_verification.py": "885840bba5db63c27616da523c58ee9739085989bc1cf71cede7ae13eed23f1a",
+  "census/mcp_profiles.py": "64f38dd7e614d6e246c05e9ebe7e5c40787f6edb30b8eb3a1620006f5f768904",
+  "mcp_server.py": "8b0c11c399d6de8a39e2ab2decd08fb3c1e77da2745852a8a391c3555b2bde4c",
+  "scripts/verification_eval.py": "b33da2dbdd817950e4fba7b8bd58669a4c96050e81761553e5fb5e45ac6d0525",
+  "scripts/verification_live.py": "32787ef45547130a24d6dbe74e4efa8a9a9c89c62b0c533e19ed52a8ace4b1ca",
+  "scripts/local_model_eval.py": "55b2bb3d61c95f9503a74b7f00b56cc312416d53d3e89a1a27dceb076392a1d2"
+}

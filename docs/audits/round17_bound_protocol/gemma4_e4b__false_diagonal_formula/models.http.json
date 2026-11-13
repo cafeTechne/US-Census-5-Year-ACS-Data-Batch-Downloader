@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "url": "http://127.0.0.1:11434/v1/models",
+  "response_truncated": false,
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "date": "Fri, 13 Nov 2026 18:39:21 GMT",
+    "content-length": "765"
+  },
+  "response_bytes_retained": 765
+}

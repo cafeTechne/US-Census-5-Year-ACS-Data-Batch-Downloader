@@ -5,6 +5,34 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## Unreleased (Round 17)
+
+- Exact operator-pinned proposition evidence with full digests, reviewed
+  formalizations, a small typed matrix rule domain, rational witnesses,
+  evidence replay, and opt-in CLI/MCP verification. No new dependencies.
+- Preserve ACS1 analysis identity and refuse incompatible five-year replicates;
+  reject stale bundle destinations without deleting prior artifacts.
+- Correct disattenuation/aggregation input guards, validate model SE signs,
+  redact API-key errors, and preserve errata archives on incomplete refresh.
+- Run mandatory exact verification tests before tag-triggered publication,
+  rejecting missing or skipped required checks. No release has been published.
+- Preserve malformed benchmark tool arguments as protocol failures; distinguish
+  runtime failures, exhausted tool loops and empty final answers in new results.
+- Reject malformed Unicode with typed verification errors; prevent MCP schema
+  version coercion and check binding/revocation through the real stdio transport.
+- Preflight bundle artifact names to prevent path traversal, writes outside the
+  bundle, and case-insensitive filename collisions; preserve valid display labels.
+- Include nested `bundle.json` payloads in bundle hashes and reject final figure
+  filename collisions before bundle writes, including rendered/copied combinations.
+- Add offline frozen-prompt preparation and bound-evidence transcript scoring
+  for verification benchmarks, separate from proof authority and live model runs.
+- Add injected async verification-client controls for two model phases, shared
+  deadlines and replay-checked duplicate suppression; no default model connection.
+- Wire an opt-in loopback runtime adapter with verification-only MCP, exact
+  model preflight, bounded raw traces and separate declared/observed metadata.
+- Archive the Round 17 model study with raw evidence, checksums and replay
+  instructions. Preserve primary failures separately from the JSON-mode follow-up.
+
 ## 0.15.1 (patch): B01003 total from B01001 for firewall-blocked VRE files
 
 - **`fetch_vre` substitute for the total-population VRE file.** census.gov's firewall

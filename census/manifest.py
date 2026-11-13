@@ -1162,7 +1162,7 @@ def run_manifest(
     from .analysis import analysis_frame
     from .multitest import adjust_pvalues
     from .pipeline import ResearchOptions, plan_extraction, run_batch
-    from .report_tables import data_citation
+    from .report_tables import _require_empty_bundle, data_citation
 
     m = load_manifest(manifest)
     errors = validate_manifest(m, resolve=True, client=client)
@@ -1173,6 +1173,10 @@ def run_manifest(
     out = Path(output_dir)
     if errors:
         return {"success": False, "manifest_hash": h, "errors": errors}
+    try:
+        _require_empty_bundle(out / "bundle")
+    except (OSError, ValueError) as exc:
+        return {"success": False, "manifest_hash": h, "errors": [str(exc)]}
     out.mkdir(parents=True, exist_ok=True)
     (out / "manifest.json").write_text(json.dumps(m, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
                                        encoding="utf-8", newline="\n")

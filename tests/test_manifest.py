@@ -261,8 +261,10 @@ class TestRunManifest(unittest.TestCase):
         # not synthetic when the caller says so
         m = copy.deepcopy(self.m)
         m.pop("data_source", None)
-        run_manifest(m, self.dir, client=FakeClient(), use_cache=False, replicates=reps)
-        methods = self._read("methods.md")
+        other_run = os.path.join(self.dir, "nonsynthetic")
+        run_manifest(m, other_run, client=FakeClient(), use_cache=False, replicates=reps)
+        with open(os.path.join(other_run, "bundle", "methods.md"), encoding="utf-8") as f:
+            methods = f.read()
         self.assertIn("the caller-supplied replicate estimates", methods)
         self.assertNotIn("synthetic caller-supplied", methods)
 

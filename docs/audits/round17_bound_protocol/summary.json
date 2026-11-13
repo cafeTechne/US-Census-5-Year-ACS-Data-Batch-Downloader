@@ -1,0 +1,192 @@
+{
+  "scope": "One bounded integration attempt per model/case; no reliability or historical comparability claim",
+  "runtime_version": {
+    "version": "0.40.15"
+  },
+  "runs": [
+    {
+      "model": "gemma4:e4b",
+      "model_digest": "dc35e8d9c6061baa6f0fa870975ab6932e2542b579b13ea0f199fa4bb7300c9c",
+      "case": "false_diagonal_formula",
+      "exit_code": 1,
+      "wall_seconds": 59.114,
+      "protocol_passed": false,
+      "failure": null,
+      "score": {
+        "evaluation_mode": "offline_transcript_replay",
+        "protocol_version": "r17-offline-verification-2",
+        "prompt_digest": "1afd8fa09fbf9116ddb937db040629110f6002997f8d63f0c9eccfe6f04aa38f",
+        "proposition_id": "1a919d3577d3da9a735896371b36477d81f8f0de31b22111ea0bea39ac776273",
+        "review_digest": "344ff86735a62cd1db945699b4dd8838122effa33b947bd27c235315c55c6254",
+        "checker_method_version": "bounded-matrix-1",
+        "reference_evidence_digest": "d58456edb2484f8d3dc45917bc099d93f3558309739983b0fe717514519afbc4",
+        "formalization_fidelity": "requires substantive operator review; not automatically scored",
+        "mathematical_evidence_status": "refuted",
+        "mathematical_evidence_verified": true,
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true,
+        "call_count": 1,
+        "duplicate_call_count": 0,
+        "completed": true,
+        "final_json_parsed": false,
+        "final_schema_valid": false,
+        "final_interpretation_correct": false,
+        "calls": [
+          {
+            "tool_selection_correct": true,
+            "arguments_parsed": true,
+            "request_binding_correct": true,
+            "arguments_correct": true,
+            "evidence_replayed": true
+          }
+        ],
+        "protocol_passed": false,
+        "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+        "trace_authenticity": "not authenticated; retain original runtime traces separately"
+      },
+      "model_requests": 2,
+      "tool_executions": 1
+    },
+    {
+      "model": "gemma4:e4b",
+      "model_digest": "dc35e8d9c6061baa6f0fa870975ab6932e2542b579b13ea0f199fa4bb7300c9c",
+      "case": "zero_diagonal",
+      "exit_code": 1,
+      "wall_seconds": 44.81,
+      "protocol_passed": false,
+      "failure": null,
+      "score": {
+        "evaluation_mode": "offline_transcript_replay",
+        "protocol_version": "r17-offline-verification-2",
+        "prompt_digest": "c403ccc34f211034df4f01bfac48a4a361408db8adcc8342532f7fde36437004",
+        "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+        "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+        "checker_method_version": "bounded-matrix-1",
+        "reference_evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295",
+        "formalization_fidelity": "requires substantive operator review; not automatically scored",
+        "mathematical_evidence_status": "proved",
+        "mathematical_evidence_verified": true,
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true,
+        "call_count": 1,
+        "duplicate_call_count": 0,
+        "completed": true,
+        "final_json_parsed": false,
+        "final_schema_valid": false,
+        "final_interpretation_correct": false,
+        "calls": [
+          {
+            "tool_selection_correct": true,
+            "arguments_parsed": true,
+            "request_binding_correct": true,
+            "arguments_correct": true,
+            "evidence_replayed": true
+          }
+        ],
+        "protocol_passed": false,
+        "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+        "trace_authenticity": "not authenticated; retain original runtime traces separately"
+      },
+      "model_requests": 2,
+      "tool_executions": 1
+    },
+    {
+      "model": "qwen3.5:4b",
+      "model_digest": "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04",
+      "case": "false_diagonal_formula",
+      "exit_code": 1,
+      "wall_seconds": 196.731,
+      "protocol_passed": false,
+      "failure": null,
+      "score": {
+        "evaluation_mode": "offline_transcript_replay",
+        "protocol_version": "r17-offline-verification-2",
+        "prompt_digest": "1afd8fa09fbf9116ddb937db040629110f6002997f8d63f0c9eccfe6f04aa38f",
+        "proposition_id": "1a919d3577d3da9a735896371b36477d81f8f0de31b22111ea0bea39ac776273",
+        "review_digest": "344ff86735a62cd1db945699b4dd8838122effa33b947bd27c235315c55c6254",
+        "checker_method_version": "bounded-matrix-1",
+        "reference_evidence_digest": "d58456edb2484f8d3dc45917bc099d93f3558309739983b0fe717514519afbc4",
+        "formalization_fidelity": "requires substantive operator review; not automatically scored",
+        "mathematical_evidence_status": "refuted",
+        "mathematical_evidence_verified": true,
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true,
+        "call_count": 1,
+        "duplicate_call_count": 0,
+        "completed": false,
+        "final_json_parsed": false,
+        "final_schema_valid": false,
+        "final_interpretation_correct": false,
+        "calls": [
+          {
+            "tool_selection_correct": true,
+            "arguments_parsed": true,
+            "request_binding_correct": true,
+            "arguments_correct": true,
+            "evidence_replayed": true
+          }
+        ],
+        "protocol_passed": false,
+        "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+        "trace_authenticity": "not authenticated; retain original runtime traces separately"
+      },
+      "model_requests": 2,
+      "tool_executions": 1
+    },
+    {
+      "model": "qwen3.5:4b",
+      "model_digest": "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04",
+      "case": "zero_diagonal",
+      "exit_code": 1,
+      "wall_seconds": 170.77,
+      "protocol_passed": false,
+      "failure": null,
+      "score": {
+        "evaluation_mode": "offline_transcript_replay",
+        "protocol_version": "r17-offline-verification-2",
+        "prompt_digest": "c403ccc34f211034df4f01bfac48a4a361408db8adcc8342532f7fde36437004",
+        "proposition_id": "ef1e163d0b28828f3799965d41c80d0db23b89cfd9b0fc33fb0d7497e13e6f08",
+        "review_digest": "b1e235a9976558ccfb1f2d2490e9d88c78a3472529ac38347282b7857a44b640",
+        "checker_method_version": "bounded-matrix-1",
+        "reference_evidence_digest": "62cb64ebc7cd70e2a8d648a695b3b5d2c465f01d4f287da5ca80dc1b51fa2295",
+        "formalization_fidelity": "requires substantive operator review; not automatically scored",
+        "mathematical_evidence_status": "proved",
+        "mathematical_evidence_verified": true,
+        "tool_selection_correct": true,
+        "arguments_parsed": true,
+        "request_binding_correct": true,
+        "arguments_correct": true,
+        "evidence_replayed": true,
+        "call_count": 1,
+        "duplicate_call_count": 0,
+        "completed": false,
+        "final_json_parsed": false,
+        "final_schema_valid": false,
+        "final_interpretation_correct": false,
+        "calls": [
+          {
+            "tool_selection_correct": true,
+            "arguments_parsed": true,
+            "request_binding_correct": true,
+            "arguments_correct": true,
+            "evidence_replayed": true
+          }
+        ],
+        "protocol_passed": false,
+        "runtime_metadata": "not collected by scorer; offline replay performs no model-service calls",
+        "trace_authenticity": "not authenticated; retain original runtime traces separately"
+      },
+      "model_requests": 2,
+      "tool_executions": 1
+    }
+  ]
+}

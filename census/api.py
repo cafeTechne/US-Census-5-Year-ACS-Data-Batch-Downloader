@@ -2,7 +2,9 @@
 """Census Bureau API client with retry, backoff, and optional local caching."""
 
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, quote_plus
 
 from dotenv import load_dotenv
 import requests
@@ -365,7 +367,15 @@ class CensusAPIClient:
             response.raise_for_status()
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
-            self.last_error = str(exc)
+            # requests exceptions commonly include the prepared URL, including
+            # the query-string key. Sanitize here before pipeline logs/results
+            # and extraction metadata receive the error.
+            message = str(exc)
+            for secret in (self.api_key, params.get("key")):
+                if secret:
+                    for value in (secret, quote(secret, safe=""), quote_plus(secret)):
+                        message = message.replace(value, "[REDACTED]")
+            self.last_error = re.sub(r"(?i)([?&]key=)[^&\s\"'<>]*", r"\1[REDACTED]", message)
             return None
         self.last_error = None
         if self.cache is not None and payload:

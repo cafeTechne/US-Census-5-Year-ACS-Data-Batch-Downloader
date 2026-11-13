@@ -20,8 +20,18 @@ METADATA_UNAVAILABLE = "METADATA_UNAVAILABLE"
 API_HTTP_ERROR = "API_HTTP_ERROR"
 NO_DATA = "NO_DATA"
 BUNDLED_DATA_INTEGRITY = "BUNDLED_DATA_INTEGRITY"
+PROPOSITION_MISMATCH = "PROPOSITION_MISMATCH"
+FORMALIZATION_REVIEW_REQUIRED = "FORMALIZATION_REVIEW_REQUIRED"
+VERIFICATION_SCHEMA = "VERIFICATION_SCHEMA"
+VERIFICATION_LIMIT = "VERIFICATION_LIMIT"
+EVIDENCE_INVALID = "EVIDENCE_INVALID"
 
 ERROR_CODES: Dict[str, str] = {
+    PROPOSITION_MISMATCH: "Evidence/request identity differs from the operator-pinned proposition.",
+    FORMALIZATION_REVIEW_REQUIRED: "A matching supervised local formalization review is required.",
+    VERIFICATION_SCHEMA: "The restricted exact-mathematics record is malformed or unsupported syntax.",
+    VERIFICATION_LIMIT: "A bounded exact-mathematics resource limit was exceeded.",
+    EVIDENCE_INVALID: "Mathematical evidence could not be replayed or imported safely.",
     INVALID_INPUT: "An argument is missing or malformed.",
     INVALID_GEO_LEVEL: "geo_level is not one of us, state, county, tract, place, zcta, msa, or a required code is missing.",
     INVALID_OUTPUT_FORMAT: "output_format is not supported.",

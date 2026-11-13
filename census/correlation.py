@@ -201,8 +201,9 @@ def correlation_matrix(
         d = np.eye(k)
         for i, vi in enumerate(variables):
             for j in range(i + 1, k):
-                denom = rel[vi] * rel[variables[j]]
-                d[i, j] = d[j, i] = r[i, j] / math.sqrt(denom) if denom > 0 else math.nan
+                rx, ry = rel[vi], rel[variables[j]]
+                valid = np.isfinite(rx) and np.isfinite(ry) and rx > 0 and ry > 0
+                d[i, j] = d[j, i] = r[i, j] / math.sqrt(rx * ry) if valid else math.nan
         disatt = _square(d, variables)
         provenance["reliability"] = rel
         notes.append("disattenuated: Spearman's correction r/sqrt(rel_x*rel_y), "

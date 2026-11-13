@@ -1,0 +1,1 @@
+{"protocol_passed": false, "report": "/home/hobo/Projects/US-Census-5-Year-ACS-Data-Batch-Downloader/literature_pdfs/benchmark_results/tool_calling/round17_bound_protocol_20261113_lb0n5pj9/qwen3_5_4b__false_diagonal_formula/run.json"}

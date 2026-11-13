@@ -288,8 +288,11 @@ class TestTwoReleaseRun(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
 
     def run_m(self, m, vre=fake_vre, **kw):
+        number = getattr(self, "_run_number", 0)
+        self._run_number = number + 1
+        name = "run" if number == 0 else f"run-{number}"
         with mock.patch("census.replicate.fetch_vre", side_effect=vre):
-            return run_manifest(m, os.path.join(self.dir, "run"), client=TwoReleaseClient(), use_cache=False, **kw)
+            return run_manifest(m, os.path.join(self.dir, name), client=TwoReleaseClient(), use_cache=False, **kw)
 
     def test_cpi_then_rpp_and_replicates(self):
         from census import rpp
@@ -405,7 +408,7 @@ class TestTwoReleaseRun(unittest.TestCase):
         self.assertTrue(any(n.startswith("DECLARED COVARIATE-ONLY REPLICATES") for n in m1.notes))
         self.assertFalse(m1.diagnostics.get("replicates_incomplete"))
         self.assertEqual(res["replicates"]["declared_covariates_only"], {"m1": ["income"]})
-        with open(os.path.join(self.dir, "run", "bundle", "methods.md"), encoding="utf-8") as f:
+        with open(os.path.join(res["output_dir"], "bundle", "methods.md"), encoding="utf-8") as f:
             self.assertIn("replicate scope `covariates_only`", f.read())
 
     def test_fixed_variables_refuse_these_areas(self):

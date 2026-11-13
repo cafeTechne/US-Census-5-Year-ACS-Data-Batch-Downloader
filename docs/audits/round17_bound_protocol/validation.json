@@ -1,0 +1,14 @@
+{
+  "full_offline_suite": {
+    "passed": 1476,
+    "skipped": 37,
+    "subtests_passed": 47,
+    "deselected": 0,
+    "seconds": 239.72
+  },
+  "required_verification_cases_from_actual_junit": 64,
+  "actual_embedded_release_gate_passed": true,
+  "actual_model_run_records_replayed_and_hash_checked": 5,
+  "original_benchmark_records_unchanged": 74,
+  "limits": "Remote CI and the full supported interpreter/Windows matrix were not executed."
+}

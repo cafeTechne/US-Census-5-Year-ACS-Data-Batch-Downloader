@@ -140,6 +140,10 @@ def _prepare(frame, outcome, treated, period, unit, treatment_period, se, design
         raise KeyError(f"SE column {se_col!r} not in frame")
     cols = [unit, period, outcome, treated] + ([se_col] if se_col else [])
     data = frame[cols].dropna().copy()
+    if se_col:
+        sampling_se_values = data[se_col].to_numpy(float)
+        if not np.isfinite(sampling_se_values).all() or np.any(sampling_se_values < 0):
+            raise ValueError("sampling SEs must be finite and non-negative")
     data[unit] = data[unit].astype(str)
     data[period] = data[period].astype(int)
     if data.duplicated([unit, period]).any():
