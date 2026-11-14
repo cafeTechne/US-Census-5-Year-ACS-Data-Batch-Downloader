@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-12
 **Last updated:** 2026-11-13
-**Status:** Complete for the agreed Round 17 scope; local validation passed; integration handoff in section 16; not released; supported-version CI pending
+**Status:** Complete and integrated into defaultBranch; Linux/Windows Python 3.10–3.12 CI passed; 0.16.0 release candidate prepared, not published; see section 17
 **Reviewed baseline:** `defaultBranch`, `faae55038e61c1239282bfd3c57ae42fd5b9396e`, `census.__version__ = "0.15.1"`
 **Inputs:** [Architecture v11](research_architecture_living_document_v11.docx), [v10 codebase gap audit](Census_Research_Engine_v10_Codebase_Gap_Audit.md), current source/tests, [Round 16](PLAN_ROUND_16.md), and local benchmark records
 
@@ -461,3 +461,37 @@ the archive's 85 checksummed payloads. Staged whitespace checks are clean for
 the implementation and archive; the supplied audit's four original Markdown
 hard-break lines are preserved unchanged and excluded from that whitespace-only
 check. Both input documents retain their original SHA-256 values.
+
+## 17. Remote integration and release preparation (2026-11-13)
+
+The user authorized push, integration, release preparation and then a Round 18
+plan, and subsequently selected direct terminal integration. The connected
+GitHub app could read CI but PR creation returned 403; the existing SSH key
+pushed the exact local commit without changing credentials or the configured
+remote. GitHub host keys were obtained over verified HTTPS and used from a
+temporary file. No contributor agreement was signed by the agent.
+
+All six Linux/Windows Python 3.10, 3.11 and 3.12 jobs passed on commit
+`6ed979ac573060fa27ea973617ee436e2edc3705` in
+[CI run 43535062102](https://github.com/cafeTechne/Census-Research-Engine/actions/runs/43535062102).
+The clean default branch was fast-forwarded and pushed to that exact tested
+commit. No force push, PR-policy override or history rewrite was used.
+
+The PR-only inference smoke command was run locally with its existing
+criteria: `scripts/inference_validation.py --fast --gate`. It passed; its
+Markdown/CSV outputs are under `/tmp/r17-release-preparation`. This is a smoke
+check with predetermined Monte Carlo tolerance, not full coverage evidence.
+The full numerical release gate is being checked separately.
+
+Version `0.16.0` is prepared consistently in the package, pipeline, citation
+and changelog, with the user-local date 2026-11-13. Focused packaging and
+verification checks passed (59 tests). Candidate sdist/wheel files built from
+a temporary source snapshot; importing the wheel outside the checkout
+confirmed version 0.16.0 and reproduced the exact false-formula refutation.
+No dependency installation or source-data regeneration was needed.
+
+These are release-preparation changes. No release tag was pushed, GitHub
+release published or Zenodo archive triggered. The candidate metadata commit
+will receive its own ordinary push CI. Round 18 planning follows successful
+integration/release-readiness checks and does not imply implementation of
+that next round.

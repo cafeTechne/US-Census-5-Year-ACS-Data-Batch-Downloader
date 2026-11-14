@@ -5,7 +5,7 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
-## Unreleased (Round 17)
+## 0.16.0 (Round 17): exact claims and bound evidence
 
 - Exact operator-pinned proposition evidence with full digests, reviewed
   formalizations, a small typed matrix rule domain, rational witnesses,
@@ -15,7 +15,7 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 - Correct disattenuation/aggregation input guards, validate model SE signs,
   redact API-key errors, and preserve errata archives on incomplete refresh.
 - Run mandatory exact verification tests before tag-triggered publication,
-  rejecting missing or skipped required checks. No release has been published.
+  rejecting missing or skipped required checks.
 - Preserve malformed benchmark tool arguments as protocol failures; distinguish
   runtime failures, exhausted tool loops and empty final answers in new results.
 - Reject malformed Unicode with typed verification errors; prevent MCP schema

@@ -12,10 +12,10 @@ authors:
   - alias: cafeTechne
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/cafeTechne/Census-Research-Engine"
-version: "0.15.1"
+version: "0.16.0"
 doi: "10.5281/zenodo.23925301"
 # doi: Zenodo concept DOI, added after the first archived release (see CHANGELOG.md "Releasing").
-date-released: "2026-11-09"
+date-released: "2026-11-13"
 keywords:
   - American Community Survey
   - US Census Bureau
