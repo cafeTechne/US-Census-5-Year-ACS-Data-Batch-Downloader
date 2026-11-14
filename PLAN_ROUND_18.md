@@ -1,7 +1,7 @@
 # Round 18: Metadata Integrity and a Reproducible Research Workflow
 
 **Date:** 2026-11-13
-**Status:** Implementation complete; final validation and CI are in progress.
+**Status:** Complete. All three implementation slices, final offline validation and all six Linux/Windows CI jobs passed.
 **Baseline:** Round 17 integrated into `defaultBranch`; release candidate 0.16.0 at `d33c7259181194c881dfc325cff1cfa5d53354d4`. Publication status and final checks are recorded below.
 
 ## 1. Outcome
@@ -11,10 +11,11 @@ reproduce one supported workflow from stored inputs, and distinguish empirical
 results from separately reviewed mathematical evidence. Deliver that through the
 existing loaders, workflows and documentation, with a small maintenance scope.
 
-The first decision is Q17-1: whether bundled metadata checksums are a runtime
-contract. It remains a policy question, not a newly confirmed mathematical bug.
-Resolve the policy explicitly, then implement and test the smallest consistent
-behavior. Do not build a new research platform or estimator suite.
+This round resolves Q17-1 by making bundled metadata checksums a runtime
+contract under the bounded defaults adopted with the implementation request.
+This is an input integrity policy, not a newly confirmed mathematical bug.
+The scope remains the existing loaders and researcher path, without a new
+research platform or estimator suite.
 
 ## 2. Preserve the completed foundation
 
@@ -230,16 +231,37 @@ format changed. Prepared plans must not be reused after changing input configura
 
 ### Validation record
 
-- Initial full offline run: **1,494 passed, 37 skipped, 47 subtests passed**.
-  Additional cache/legacy/transport controls were added afterward; final results
-  will be recorded here when complete.
+- Final-source full offline suite: **1,507 passed, 37 skipped, 47 subtests
+  passed**, Python 3.14.4, 252.55 seconds. All 30 new metadata integrity
+  cases passed. The existing reference document executes twice into fresh
+  directories and retains its independent scientific expectations and route parity.
+- `python -m census validate-crosswalks`: valid. Focused changed-module lint
+  (E4/E7/E9/F) and `git diff --check`: passed. Unrelated pre-existing lint
+  findings in the CLI/manifest were not reformatted or folded into this round.
+- Implementation CI: [43545297502](https://github.com/cafeTechne/Census-Research-Engine/actions/runs/43545297502),
+  implementation commit `16acbbc0f2fdafbba41afddf09318dc8bf7108e8`. All six
+  Linux/Windows Python 3.10–3.12 offline jobs **passed**, including crosswalk
+  validation. Live validation was intentionally skipped. Windows skips the
+  symlink-creation test because it requires optional privileges; that test passes
+  on Linux. Existing optional/version-dependent skips account for other platform
+  count differences. No workflow dispatch or release/tag publication.
 - Representative actual bundled ACS5 2023 variable read, Python 3.14.4 on this
   workstation: **28,299 variables**, first verified read **0.0757 seconds**;
   mean warm lookup over 1,000 calls **9.04 microseconds**. Informational only,
   with no timing threshold. A synthetic control asserts one gzip read for lookup,
   checksum verification and provenance together.
-- All **85** versioned Round 17 archive hashes verified. All five archived strict
+- All **74** original benchmark JSON records and both supplied architecture/audit
+  documents match their pre-Round-18 hashes. All **85** versioned Round 17 archive hashes verified. All five archived strict
   protocol scores replayed unchanged: four primary failures and one JSON-mode
   follow-up success. No model calls, approvals or external Census requests.
 - No numerical method changed, so no new estimator simulation was required.
   Round 17's numerical release evidence remains unchanged.
+
+### Handoff
+
+Implementation is committed and pushed on `phase18/metadata-integrity` at
+`16acbbc0f2fdafbba41afddf09318dc8bf7108e8`; the following documentation-only
+commit records these validation results and does not change tested source.
+All Round 18 slices are complete, with no implementation stubs left open.
+The default branch and prepared local v0.16.0 release tag remain at the Round 17
+baseline; this round does not merge or publish a release.
