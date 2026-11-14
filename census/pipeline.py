@@ -53,7 +53,7 @@ from census.concordance import (
     crosswalk_path,
 )
 from census.continuity import continuity_check
-from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result, integrity_errors
 from census.decennial import (
     BLOCK_ADVISORY,
     DECENNIAL_DATASETS,
@@ -90,7 +90,7 @@ from census.inflation import (
     provisional_advisory,
     price_index_info,
 )
-from census.metadata import load_manifest, table_universe, table_variables
+from census.metadata import archive_provenance, preflight_archives, table_universe, table_variables
 from census.panel import (
     IDENTIFIER_COLUMNS,
     build_tidy_panel,
@@ -668,6 +668,7 @@ def _decennial_plan_error(
     return None
 
 
+@integrity_errors
 def plan_extraction(
     table_code: str,
     entities: Sequence[Entity],
@@ -762,6 +763,7 @@ def plan_extraction(
     if price_error:
         return price_error
 
+    preflight_archives(dataset, years)
     if client is None:
         client = CensusAPIClient(cache=get_default_cache() if options.use_cache else None)
 
@@ -1014,6 +1016,7 @@ def plan_extraction(
             "checked_concepts": len(continuity_report),
             "passed": sum(1 for r in continuity_report.values() if r["passed"]),
         },
+        "metadata_vintages": _vintage_provenance(conc),
         "_concordance": conc,
         "_entities": list(entities),
         "_options": options,
@@ -1159,11 +1162,14 @@ def _git_commit() -> Optional[str]:
 
 
 def _vintage_provenance(conc: Concordance) -> Dict[str, Any]:
-    files = load_manifest().get("files", {})
     out: Dict[str, Any] = {}
     for year, source in conc.sources.items():
-        entry = files.get(f"{conc.dataset}/{year}/variables.json.gz", {})
-        out[str(year)] = {"source": source, "sha256": entry.get("sha256"), "url": entry.get("url")}
+        variables = archive_provenance(conc.dataset, year) if source == "archive" else {}
+        groups = archive_provenance(conc.dataset, year, "groups.json")
+        out[str(year)] = {
+            "source": source, "sha256": variables.get("sha256"), "url": variables.get("url"),
+            **variables, "groups": groups or None,
+        }
     return out
 
 
@@ -1205,6 +1211,7 @@ def _write_json(path: str, payload: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+@integrity_errors
 def run_batch(
     table_code: str,
     entities: Sequence[Entity],
@@ -1528,7 +1535,7 @@ def run_batch(
             ),
             "overrides_applied": conc.overrides_applied,
             "rules_applied": getattr(conc, "rules_applied", []),
-            "metadata_vintages": _vintage_provenance(conc),
+            "metadata_vintages": plan.get("metadata_vintages") or _vintage_provenance(conc),
         },
         # 2020 Census counts are not sample-based: no MOE confidence level (never 0 MOEs).
         "moe_confidence_level": None if is_decennial(dataset) else 0.90,
@@ -1780,7 +1787,9 @@ def _provenance_differences(original: Mapping[str, Any], replay: Mapping[str, An
     new_v = (replay.get("concordance") or {}).get("metadata_vintages") or {}
     for year in sorted(set(old_v) | set(new_v)):
         a, b = old_v.get(year) or {}, new_v.get(year) or {}
-        if a.get("sha256") != b.get("sha256") or a.get("source") != b.get("source"):
+        if (a.get("sha256") != b.get("sha256") or a.get("source") != b.get("source")
+                or ("integrity" in a and a.get("integrity") != b.get("integrity"))
+                or ("groups" in a and a.get("groups") != b.get("groups"))):
             out.append(
                 f"{year} metadata: {a.get('source')}/{a.get('sha256')} -> "
                 f"{b.get('source')}/{b.get('sha256')}"

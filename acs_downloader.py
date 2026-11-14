@@ -1080,8 +1080,6 @@ class ACSDownloaderApp:
         options: ResearchOptions,
     ) -> None:
         """Worker thread to execute batch downloads without freezing UI."""
-        load_variable_definitions()
-
         def log(message: str) -> None:
             self.msg_queue.put(("LOG", message))
 

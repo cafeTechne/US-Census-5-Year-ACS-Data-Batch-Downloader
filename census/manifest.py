@@ -140,6 +140,8 @@ silently. Anything run outside a manifest should be tagged with
 :func:`label_exploratory`.
 """
 
+from census.data_integrity import integrity_errors, BundledDataIntegrityError
+
 import copy
 import hashlib
 import json
@@ -680,6 +682,8 @@ def _check_variables(manifest: Mapping[str, Any], errors: List[str], resolve: bo
         try:
             conc = build_concordance(table, dataset, releases, client=client)
             _, unknown = conc.resolve_selection(refs)
+        except BundledDataIntegrityError:
+            raise
         except Exception as exc:  # concordance build failures are validation errors
             errors.append(f"{table}: concordance could not be built ({exc})")
             continue
@@ -711,6 +715,15 @@ def validate_manifest(manifest: Mapping[str, Any], resolve: bool = True, client:
     releases = manifest.get("releases") or []
     if not isinstance(releases, list) or not releases or not all(_is_int(r) for r in releases):
         errors.append("releases must be a non-empty list of ACS 5-year end years (integers)")
+    # Present archive corruption must win over geography probes or API fallback.
+    variables = manifest.get("variables")
+    if resolve and isinstance(releases, list) and all(_is_int(r) for r in releases) and isinstance(variables, list):
+        from .metadata import preflight_archives
+        for variable in variables:
+            if isinstance(variable, Mapping) and "ref" in variable:
+                table = _table_of(variable)
+                if table:
+                    preflight_archives(_dataset_for(table), releases)
     _check_geography(manifest.get("geography") or {}, errors)
     level = manifest.get("confidence_level", 0.90)
     if not isinstance(level, (int, float)) or not 0 < float(level) < 1:
@@ -910,6 +923,7 @@ def _fill_adjustment_defaults(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
     return filled
 
 
+@integrity_errors
 def create_manifest(
     path_or_dict: Union[str, Path, Mapping[str, Any]], path: Optional[Union[str, Path]] = None,
     client: Any = None, resolve: bool = True,
@@ -1128,6 +1142,7 @@ def _tag(result: Any, h: str, analysis_id: str, status: str = STATUS_CONFIRMATOR
     return result
 
 
+@integrity_errors
 def run_manifest(
     manifest: Union[str, Path, Mapping[str, Any]], output_dir: Union[str, Path], client: Any = None,
     replicates: Any = None, use_cache: bool = True, replicates_synthetic: Optional[bool] = None,

@@ -12,6 +12,7 @@ same results and provenance hashes (PLAN_ROUND_13 B1).
 """
 
 import contextlib
+import gzip
 import hashlib
 import io
 import json
@@ -240,6 +241,16 @@ class TestReferenceWorkflow(unittest.TestCase):
         replay = self.outputs_named("replay")[0]
         self.assertTrue(replay["verified"])
         self.assertEqual(replay["n_cells_changed"], 0)
+
+    def test_consumed_metadata_provenance(self):
+        for plan in self.outputs_named("plan"):
+            for year, info in plan["metadata_vintages"].items():
+                for name, source in (("variables", info), ("groups", info["groups"])):
+                    path = os.path.join(ROOT, "metadata", plan["dataset"], year, name + ".json.gz")
+                    with gzip.open(path, "rb") as f:
+                        expected = hashlib.sha256(f.read()).hexdigest()
+                    self.assertEqual(source["sha256"], expected)
+                    self.assertEqual(source["integrity"], "verified")
 
     def test_replicate_fixtures(self):
         """The replicate files are what the document says: regenerated from the frozen

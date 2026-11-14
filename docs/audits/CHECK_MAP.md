@@ -1,5 +1,13 @@
 # Inference check map (PLAN_ROUND_12 A2)
 
+Round 18 metadata integrity (an input identity contract, not a statistical
+coverage claim): `tests/test_metadata_integrity.py` exercises actual hashes,
+plausible tampering, unreadable/missing sources, custom manifests, recompression,
+root changes, cache repair, legacy loaders, transport/GUI errors and refusal
+before extraction output. `tests/test_reference_workflow.py` independently hashes
+consumed variable/group archives while retaining the existing scientific expected
+values, replay and library/CLI/MCP checks. See [the metadata policy](../metadata_integrity.md).
+
 Round 17 exact proposition contracts and checked matrix rules (not a
 statistical coverage claim): run `python -m pytest -q
 tests/test_proposition_verification.py tests/test_verification_contract.py

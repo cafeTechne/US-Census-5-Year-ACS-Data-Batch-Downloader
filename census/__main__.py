@@ -33,6 +33,8 @@ Examples:
     python -m census cache clear   # every response and the synthetic marker
 """
 
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+
 import argparse
 import json
 import os
@@ -394,6 +396,8 @@ def cmd_tool(args: argparse.Namespace) -> int:
             kwargs[key] = raw
     try:
         result = fn(**kwargs)
+    except BundledDataIntegrityError as exc:
+        result = integrity_error_result(exc)
     except TypeError as exc:
         result = errors.error_result(errors.INVALID_INPUT, str(exc))
     except Exception as exc:  # noqa: BLE001 - agents need a structured error, not a traceback
@@ -594,7 +598,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except BundledDataIntegrityError as exc:
+        return _emit(integrity_error_result(exc), getattr(args, "json", False))
 
 
 if __name__ == "__main__":

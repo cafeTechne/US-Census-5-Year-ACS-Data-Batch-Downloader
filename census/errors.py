@@ -44,8 +44,8 @@ ERROR_CODES: Dict[str, str] = {
     METADATA_UNAVAILABLE: "Variable metadata for a vintage could not be loaded.",
     API_HTTP_ERROR: "The Census API request failed.",
     NO_DATA: "The Census API returned no rows.",
-    BUNDLED_DATA_INTEGRITY: "A bundled price table (price index or Regional Price Parity CSV) does not match the "
-                            "checksum shipped with it; restore or regenerate it before adjusting dollars.",
+    BUNDLED_DATA_INTEGRITY: "A reference data or metadata file failed its integrity/readability check; "
+                            "repair the identified source before retrying.",
 }
 
 

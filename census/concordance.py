@@ -461,6 +461,9 @@ def build_concordance(
     boundary before statuses and issues are derived; invalid rules are reported
     as ``invalid_override`` issues and never applied.
     """
+    from census.metadata import preflight_archives
+
+    preflight_archives(dataset, years)
     conc = Concordance(table_code, dataset, years)
     universes: Dict[int, str] = {}
 

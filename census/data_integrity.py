@@ -14,6 +14,8 @@ Tables from a caller-supplied directory are not checked against anything; the
 caller gets their SHA-256 back to record in the result's provenance.
 """
 
+from functools import wraps
+
 import hashlib
 import json
 import os
@@ -50,7 +52,7 @@ def read_sidecar(path: str) -> Dict[str, Any]:
 def integrity_error_result(exc: BundledDataIntegrityError) -> Dict[str, Any]:
     """Structured failure (error_code BUNDLED_DATA_INTEGRITY, next_step) for tools and the CLI."""
     return errors.error_result(errors.BUNDLED_DATA_INTEGRITY, str(exc), summary=str(exc),
-                               next_step=INTEGRITY_NEXT_STEP)
+                               next_step=getattr(exc, "next_step", INTEGRITY_NEXT_STEP))
 
 
 def verify_bundled_bytes(path: str, raw: bytes, expected: Optional[str], sidecar: str, update_script: str) -> None:
@@ -80,3 +82,14 @@ def read_table_bytes(
         verify_bundled_bytes(path, raw, expected, sidecar, update_script)
         return raw, None
     return raw, sha256_bytes(raw)
+
+
+def integrity_errors(fn):
+    """Translate integrity failures at dict-returning application boundaries."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except BundledDataIntegrityError as exc:
+            return integrity_error_result(exc)
+    return wrapped

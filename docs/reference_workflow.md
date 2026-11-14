@@ -295,6 +295,31 @@ re-execution byte-for-byte input-identical.
 The whole workflow runs from the CLI. Where another interface lacks a step, use the CLI;
 no tool exists solely for symmetry.
 
+## 13. Metadata identity and integrity failures
+
+The plan JSON includes `metadata_vintages`. In each extraction metadata JSON, find
+`concordance.metadata_vintages`: `sha256` identifies the actual decompressed variable
+archive; `groups.sha256` identifies the table/universe archive. Bundled sources
+carry `integrity: verified`; custom `CENSUS_METADATA_DIR` sources carry
+`caller_supplied_unverified`, even with matching caller-supplied checksums.
+
+A present corrupt bundled archive stops planning/extraction with
+`BUNDLED_DATA_INTEGRITY` (CLI exit 4), without falling back to Census or creating a
+successful current-run bundle. Follow its metadata repair guidance, then restart
+or clear metadata caches. Missing archives retain their existing fallback policy.
+The [metadata policy](metadata_integrity.md) documents cache behavior and the offline
+command that replays both this healthy path and temporary corruption through its
+consuming interfaces. Never edit the bundled archive to try the failure case.
+
+## 14. Optional supervised mathematical evidence
+
+The [verification guide](verification.md) describes a separate operator-reviewed
+request, exact proof/refutation and evidence replay. Its proposition, review and
+evidence retain their own hashes. Include those artifacts as a separate appendix
+when relevant; they do not upgrade this empirical workflow's analysis status,
+validate its inputs or make a model's answer authoritative. No proof step or model
+approval is required for the stored-input workflow above.
+
 ## Status
 
 This workflow is verified by the automated acceptance test. A second researcher following

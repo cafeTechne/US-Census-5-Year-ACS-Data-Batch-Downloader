@@ -15,10 +15,12 @@ import gzip
 import hashlib
 import json
 import os
+import zlib
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from census.geo import get_resource_path
+from census.data_integrity import BundledDataIntegrityError, same_directory
 
 ARCHIVE_DIRNAME = "metadata"
 DATASET_PATHS: Dict[str, str] = {
@@ -48,13 +50,42 @@ def archive_dir() -> str:
     return os.getenv("CENSUS_METADATA_DIR") or get_resource_path(ARCHIVE_DIRNAME)
 
 
-@lru_cache(maxsize=1)
-def load_manifest() -> Dict[str, Any]:
-    path = os.path.join(archive_dir(), "manifest.json")
+class MetadataIntegrityError(BundledDataIntegrityError):
+    """Present metadata cannot safely be consumed; never substitute API data."""
+
+    next_step = (
+        "restore the metadata archive and its manifest from a trusted checkout or reinstall; "
+        "for custom metadata, repair the caller-supplied JSON/gzip files. Then call "
+        "census.metadata.clear_cache() or restart before retrying"
+    )
+
+
+def _root() -> str:
+    return os.path.normcase(os.path.realpath(archive_dir()))
+
+
+@lru_cache(maxsize=8)
+def _manifest_at(root: str) -> Dict[str, Any]:
+    path = os.path.join(root, "manifest.json")
     if not os.path.exists(path):
         return {"files": {}, "vintages": {}}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("files", {}), dict)
+            or not isinstance(payload.get("vintages", {}), dict)
+        ):
+            raise ValueError("expected a manifest object with files and vintages mappings")
+        return payload
+    except (OSError, ValueError) as exc:
+        raise MetadataIntegrityError(f"Metadata manifest {path} is unreadable or malformed: {exc}") from exc
+
+
+def load_manifest() -> Dict[str, Any]:
+    """Manifest for the resolved active root, cached until clear_cache/restart."""
+    return _manifest_at(_root())
 
 
 def archived_vintages(dataset: str) -> List[int]:
@@ -79,25 +110,64 @@ def available_vintages(dataset: str, client: Any = None, refresh: bool = False) 
 
 
 def _archive_path(dataset: str, year: int, name: str) -> str:
-    return os.path.join(archive_dir(), *dataset.split("/"), str(year), f"{name}.gz")
+    return os.path.join(_root(), *dataset.split("/"), str(year), f"{name}.gz")
 
 
 @lru_cache(maxsize=128)
-def _read_archive(dataset: str, year: int, name: str) -> Optional[bytes]:
-    path = _archive_path(dataset, year, name)
+def _archive_at(root: str, dataset: str, year: int, name: str) -> Optional[tuple]:
+    path = os.path.join(root, *dataset.split("/"), str(year), f"{name}.gz")
     if not os.path.exists(path):
         return None
-    with gzip.open(path, "rb") as f:
-        return f.read()
+    bundled = same_directory(root, get_resource_path(ARCHIVE_DIRNAME))
+    try:
+        with gzip.open(path, "rb") as f:
+            raw = f.read()
+    except (OSError, EOFError, zlib.error) as exc:
+        raise MetadataIntegrityError(f"Metadata archive {path} cannot be decompressed: {exc}") from exc
+    actual = hashlib.sha256(raw).hexdigest()
+    entry = _manifest_at(root).get("files", {}).get(f"{dataset}/{year}/{name}.gz", {})
+    expected = entry.get("sha256") if isinstance(entry, dict) else None
+    if bundled and (not expected or actual != expected):
+        raise MetadataIntegrityError(
+            f"Bundled metadata {path} failed verification against {root}/manifest.json: "
+            f"expected SHA-256 {expected or '(none recorded)'}, actual {actual}."
+        )
+    try:
+        payload = json.loads(raw)
+        field, kind = ("variables", dict) if name == "variables.json" else ("groups", list)
+        if not isinstance(payload, dict) or not isinstance(payload.get(field), kind):
+            raise ValueError(f"expected an object with a {field} {kind.__name__}")
+    except (ValueError, UnicodeError) as exc:
+        raise MetadataIntegrityError(
+            f"Metadata archive {path} contains malformed JSON metadata: {exc}"
+        ) from exc
+    provenance = {
+        "sha256": actual,
+        "expected_sha256": expected,
+        "integrity": "verified" if bundled else "caller_supplied_unverified",
+        "url": entry.get("url") if isinstance(entry, dict) else None,
+    }
+    return raw, payload, provenance
+
+
+def _read_archive(dataset: str, year: int, name: str) -> Optional[bytes]:
+    record = _archive_at(_root(), dataset, int(year), name)
+    return record[0] if record is not None else None
+
+
+def archive_provenance(dataset: str, year: int, name: str = "variables.json") -> Dict[str, Any]:
+    """Actual decompressed-byte digest and integrity status of an archived source."""
+    record = _archive_at(_root(), dataset, int(year), name)
+    return dict(record[2]) if record is not None else {}
 
 
 def verify_archive_file(dataset: str, year: int, name: str = "variables.json") -> bool:
-    """True if an archived file matches the SHA-256 recorded in the manifest."""
-    raw = _read_archive(dataset, year, name)
-    entry = load_manifest().get("files", {}).get(f"{dataset}/{year}/{name}.gz")
-    if raw is None or not entry:
+    """Whether the archive matches its manifest (custom matches are not official verification)."""
+    try:
+        record = _archive_at(_root(), dataset, int(year), name)
+    except MetadataIntegrityError:
         return False
-    return hashlib.sha256(raw).hexdigest() == entry.get("sha256")
+    return bool(record and record[2]["expected_sha256"] == record[2]["sha256"])
 
 
 def _normalize_variables(payload: Dict[str, Any]) -> Dict[str, VariableMeta]:
@@ -115,16 +185,16 @@ def _normalize_variables(payload: Dict[str, Any]) -> Dict[str, VariableMeta]:
     return out
 
 
-_API_MEMO: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+_API_MEMO: Dict[tuple, Dict[str, Any]] = {}
 
 
 def _load_json(
     dataset: str, year: int, name: str, client: Any = None
 ) -> Tuple[Optional[Dict[str, Any]], str]:
-    raw = _read_archive(dataset, year, name)
-    if raw is not None:
-        return json.loads(raw), SOURCE_ARCHIVE
-    key = (dataset, int(year), name)
+    record = _archive_at(_root(), dataset, int(year), name)
+    if record is not None:
+        return record[1], SOURCE_ARCHIVE
+    key = (_root(), getattr(client, "base_url", None), dataset, int(year), name)
     if key in _API_MEMO:
         return _API_MEMO[key], SOURCE_API
     if client is not None and dataset in DATASET_PATHS:
@@ -137,16 +207,18 @@ def _load_json(
 
 
 @lru_cache(maxsize=64)
-def _archived_variables(dataset: str, year: int) -> Optional[Dict[str, VariableMeta]]:
-    raw = _read_archive(dataset, year, "variables.json")
-    return _normalize_variables(json.loads(raw)) if raw is not None else None
+def _archived_variables_at(
+    root: str, dataset: str, year: int, digest: str
+) -> Optional[Dict[str, VariableMeta]]:
+    record = _archive_at(root, dataset, year, "variables.json")
+    return _normalize_variables(record[1]) if record is not None else None
 
 
-def vintage_variables(
-    dataset: str, year: int, client: Any = None
-) -> Tuple[Dict[str, VariableMeta], str]:
+def vintage_variables(dataset: str, year: int, client: Any = None) -> Tuple[Dict[str, VariableMeta], str]:
     """All variables for one vintage and the source they came from."""
-    archived = _archived_variables(dataset, int(year))
+    root = _root()
+    record = _archive_at(root, dataset, int(year), "variables.json")
+    archived = _archived_variables_at(root, dataset, int(year), record[2]["sha256"]) if record else None
     if archived is not None:
         return archived, SOURCE_ARCHIVE
     payload, source = _load_json(dataset, int(year), "variables.json", client)
@@ -167,9 +239,7 @@ def table_variables(
     return selected, source
 
 
-def vintage_groups(
-    dataset: str, year: int, client: Any = None
-) -> Tuple[Dict[str, Dict[str, str]], str]:
+def vintage_groups(dataset: str, year: int, client: Any = None) -> Tuple[Dict[str, Dict[str, str]], str]:
     """Table code -> {description, universe} for one vintage."""
     payload, source = _load_json(dataset, int(year), "groups.json", client)
     out: Dict[str, Dict[str, str]] = {}
@@ -243,3 +313,51 @@ def describe_variable(
         "metadata_source": source,
         **({"uncertainty": UNCERTAINTY_LABEL} if is_decennial(dataset) else {}),
     }
+
+
+def clear_cache() -> None:
+    """Forget metadata snapshots after repair/configuration changes; no hot reload is promised."""
+    _manifest_at.cache_clear()
+    _archive_at.cache_clear()
+    _archived_variables_at.cache_clear()
+    _API_MEMO.clear()
+    from census import tables
+
+    tables.clear_cache()
+
+
+# Preserve existing explicit cache-reset hooks while making a reset coherent.
+load_manifest.cache_clear = clear_cache
+_read_archive.cache_clear = clear_cache
+
+
+def preflight_archives(dataset: str, years) -> None:
+    """Check present variable/group archives before any metadata API fallback."""
+    for year in years:
+        for name in ("variables.json", "groups.json"):
+            _archive_at(_root(), dataset, int(year), name)
+
+
+def read_archived_path(path: str) -> Optional[Dict[str, Any]]:
+    """Use the shared integrity seam for legacy loaders addressing archive files."""
+    # Match the addressed archive location before resolving a linked payload file.
+    # A symlink inside a bundled archive must still satisfy that archive's checksum.
+    resolved = os.path.normcase(os.path.abspath(path))
+    roots = (archive_dir(), get_resource_path(ARCHIVE_DIRNAME))
+    for root in roots:
+        try:
+            parts = os.path.relpath(resolved, os.path.normcase(os.path.abspath(root))).split(os.sep)
+        except ValueError:  # different drives on Windows
+            continue
+        if (
+            len(parts) < 3
+            or parts[0] == os.pardir
+            or not parts[-2].isdigit()
+            or parts[-1] not in ("variables.json.gz", "groups.json.gz")
+        ):
+            continue
+        record = _archive_at(
+            os.path.normcase(os.path.realpath(root)), "/".join(parts[:-2]), int(parts[-2]), parts[-1][:-3]
+        )
+        return record[1] if record else None
+    return None

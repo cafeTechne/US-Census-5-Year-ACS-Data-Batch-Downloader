@@ -727,6 +727,8 @@ def create_manifest(manifest_path: str) -> Dict[str, Any]:
         res = _create(manifest_path)
     except (FileNotFoundError, OSError, ValueError) as exc:
         return _fail(errors.INVALID_INPUT, str(exc))
+    if res.get("error_code") == errors.BUNDLED_DATA_INTEGRITY:
+        return res
     if res.get("errors"):
         return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
                      "fix the listed problems and call create_manifest again")
@@ -762,6 +764,8 @@ def run_manifest(manifest_path: str, output_dir: Optional[str] = None,
         res = _run(manifest_path, folder, replicates=reps, replicates_synthetic=replicates_synthetic)
     except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
         return _fail(errors.INVALID_INPUT, f"{type(exc).__name__}: {exc}" if isinstance(exc, KeyError) else str(exc))
+    if res.get("error_code") == errors.BUNDLED_DATA_INTEGRITY:
+        return res
     if res.get("errors"):
         return _fail(errors.INVALID_INPUT, "Manifest invalid: " + "; ".join(map(str, res["errors"])),
                      "fix the manifest with create_manifest")

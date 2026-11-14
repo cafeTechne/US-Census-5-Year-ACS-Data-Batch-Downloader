@@ -5,6 +5,17 @@ each tagged release (`v<version>`) is archived on Zenodo with its own DOI (see
 [Releasing](#releasing)). Plans and acceptance criteria for each round are in
 `PLAN_ROUND_<n>.md`.
 
+## Unreleased (Round 18): metadata integrity
+
+- Verify bundled variable/group archives before use or API fallback, including
+  legacy lookups; return metadata-specific integrity failures across interfaces.
+- Record consumed JSON hashes, custom-source status and group metadata identity;
+  isolate caches by resolved archive root and preserve explicit cache resets.
+- Stop manifest execution on corrupt metadata before current-run output, preserve
+  typed workflow failures, and extend the stored-input reference workflow checks.
+- Keep archived research data and Round 17 model evidence unchanged. No estimator,
+  dependency, archive format or release version changes.
+
 ## 0.16.0 (Round 17): exact claims and bound evidence
 
 - Exact operator-pinned proposition evidence with full digests, reviewed

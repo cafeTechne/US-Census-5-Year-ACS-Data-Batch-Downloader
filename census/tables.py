@@ -11,10 +11,14 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from census.metadata import archive_dir, latest_vintage
+from census.metadata import archive_dir, latest_vintage, read_archived_path
+from census.metadata import clear_cache as clear_metadata_cache
 
 
 def _read_json(path: str) -> Dict[str, Any]:
+    archived = read_archived_path(path)
+    if archived is not None:
+        return archived
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as f:  # type: ignore[operator]
         return json.load(f)
@@ -29,6 +33,16 @@ def default_metadata_file(name: str, dataset: str = "acs5", year: Optional[int] 
     return os.path.join(archive_dir(), *dataset.split("/"), str(year), f"{name}.gz")
 
 VARIABLE_DEFINITIONS: Dict[str, str] = {}
+_SOURCE_PATHS: Dict[str, str] = {}
+
+
+def clear_cache() -> None:
+    """Clear legacy lookup snapshots along with census.metadata.clear_cache()."""
+    VARIABLE_DEFINITIONS.clear()
+    VARIABLE_METADATA.clear()
+    TABLE_UNIVERSES.clear()
+    _SOURCE_PATHS.clear()
+
 
 
 def load_tables_from_local(path: str) -> Dict[str, str]:
@@ -48,10 +62,14 @@ def load_variable_definitions(
 ) -> Dict[str, str]:
     """Load and cache variable definitions from variables.json."""
     global VARIABLE_DEFINITIONS
-    if VARIABLE_DEFINITIONS and not force_reload:
-        return VARIABLE_DEFINITIONS
-
+    if force_reload:
+        clear_metadata_cache()
     target_path = filepath or default_metadata_file("variables.json")
+    source_path = os.path.normcase(os.path.realpath(target_path))
+    if VARIABLE_DEFINITIONS and _SOURCE_PATHS.get("VARIABLE_DEFINITIONS") == source_path:
+        return VARIABLE_DEFINITIONS
+    VARIABLE_DEFINITIONS = {}
+    _SOURCE_PATHS["VARIABLE_DEFINITIONS"] = source_path
     if os.path.exists(target_path):
         data = _read_json(target_path)
         VARIABLE_DEFINITIONS = {
@@ -139,9 +157,14 @@ def load_variable_metadata(
 ) -> Dict[str, Dict[str, str]]:
     """Load full variable metadata (label, concept, group, predicateType)."""
     global VARIABLE_METADATA
-    if VARIABLE_METADATA and not force_reload:
-        return VARIABLE_METADATA
+    if force_reload:
+        clear_metadata_cache()
     target_path = filepath or default_metadata_file("variables.json")
+    source_path = os.path.normcase(os.path.realpath(target_path))
+    if VARIABLE_METADATA and _SOURCE_PATHS.get("VARIABLE_METADATA") == source_path:
+        return VARIABLE_METADATA
+    VARIABLE_METADATA = {}
+    _SOURCE_PATHS["VARIABLE_METADATA"] = source_path
     if os.path.exists(target_path):
         data = _read_json(target_path)
         VARIABLE_METADATA = {
@@ -161,9 +184,14 @@ def load_table_universes(
 ) -> Dict[str, str]:
     """Map table code -> readable universe, from groups.json."""
     global TABLE_UNIVERSES
-    if TABLE_UNIVERSES and not force_reload:
-        return TABLE_UNIVERSES
+    if force_reload:
+        clear_metadata_cache()
     target_path = filepath or default_metadata_file("groups.json")
+    source_path = os.path.normcase(os.path.realpath(target_path))
+    if TABLE_UNIVERSES and _SOURCE_PATHS.get("TABLE_UNIVERSES") == source_path:
+        return TABLE_UNIVERSES
+    TABLE_UNIVERSES = {}
+    _SOURCE_PATHS["TABLE_UNIVERSES"] = source_path
     if os.path.exists(target_path):
         data = _read_json(target_path)
         result: Dict[str, str] = {}

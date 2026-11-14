@@ -7,6 +7,8 @@ failure, ``error_code`` (census.errors). The MCP server registers these
 functions directly as tools, so their docstrings are the tool descriptions.
 """
 
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+
 import functools
 import math
 import os
@@ -67,7 +69,10 @@ def _guided(summary: Callable[[Dict[str, Any]], str], next_step: Union[str, Call
     def decorate(fn: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-            out = fn(*args, **kwargs)
+            try:
+                out = fn(*args, **kwargs)
+            except BundledDataIntegrityError as exc:
+                out = integrity_error_result(exc)
             if not isinstance(out, dict):
                 return out
             if out.get("success") is False and (out.get("error") or out.get("error_code") or out.get("message")):

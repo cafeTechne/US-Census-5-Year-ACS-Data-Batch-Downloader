@@ -8,7 +8,7 @@ and independently review concordance overrides (docs/agent_protocol.md).
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -56,9 +56,9 @@ from census import calculate_cv as _calculate_cv
 from census import describe_variable as _describe_variable
 from census import generate_codebook as _generate_codebook
 from census.concordance import BLOCKING_KINDS
-from census.data_integrity import BundledDataIntegrityError, integrity_error_result
+from census.data_integrity import BundledDataIntegrityError, integrity_error_result, integrity_errors
 from census.decennial import DISCLOSURE_AVOIDANCE_ADVISORY, is_decennial, uncertainty_record
-from census.metadata import table_universe
+from census.metadata import preflight_archives, table_universe
 from census.panel import IDENTIFIER_COLUMNS, describe_columns
 from census.review import draft_override, record_override
 from census.stats import acs_overlap_years
@@ -197,6 +197,7 @@ def list_states() -> List[Dict[str, str]]:
 
 
 @mcp.tool()
+@integrity_errors
 def list_vintages(dataset: str = "acs5", refresh: bool = False) -> Dict[str, Any]:
     """List ACS 5-year release years available for a dataset.
 
@@ -349,9 +350,10 @@ def list_zctas(
 
 
 @mcp.tool()
+@integrity_errors
 def search_tables(
     query: str, limit: int = 25, year: Optional[int] = None, dataset: Optional[str] = None
-) -> List[Dict[str, str]]:
+) -> Union[List[Dict[str, str]], Dict[str, Any]]:
     """Search ACS 5-year tables (detailed, data profile, subject, comparison profile)
     by code or keyword.
 
@@ -376,6 +378,7 @@ def search_tables(
 
 
 @mcp.tool()
+@integrity_errors
 def list_variables(
     table_code: str, year: Optional[int] = None, limit: int = 50, dataset: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -406,6 +409,7 @@ def list_variables(
 
 
 @mcp.tool()
+@integrity_errors
 def describe_variable(code: str, year: Optional[int] = None, dataset: Optional[str] = None) -> Dict[str, Any]:
     """Label, concept, table, and universe for one variable code in one release.
 
@@ -427,6 +431,7 @@ def describe_variable(code: str, year: Optional[int] = None, dataset: Optional[s
 
 
 @mcp.tool()
+@integrity_errors
 def fetch_table_data(
     year: int,
     state_code: Optional[str],
@@ -467,6 +472,7 @@ def fetch_table_data(
         use_cache: Read/write the local SQLite query cache.
         max_rows: Maximum rows returned in 'data' (default 500).
     """
+    preflight_archives(dataset or infer_dataset(table_code), [year])
     client = _client(use_cache)
     try:
         raw_data = client.fetch(
@@ -763,6 +769,7 @@ def batch_download(
 
 
 @mcp.tool()
+@integrity_errors
 def check_variable_concordance(
     table_code: str,
     start_year: int,
@@ -1004,6 +1011,7 @@ def adjust_inflation(
 
 
 @mcp.tool()
+@integrity_errors
 def generate_codebook(
     table_code: str,
     year: Optional[int] = None,
